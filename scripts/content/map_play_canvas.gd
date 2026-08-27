@@ -128,6 +128,18 @@ func _direction_between(from: Vector2i, to: Vector2i) -> int:
 		return 4
 	return player_facing
 
+func _direction_vector(direction: int) -> Vector2:
+	match direction:
+		1:
+			return Vector2.DOWN
+		2:
+			return Vector2.UP
+		3:
+			return Vector2.LEFT
+		4:
+			return Vector2.RIGHT
+	return Vector2.ZERO
+
 func set_world_entities(values: Array, local_character_id: int) -> void:
 	world_entities = []
 	if content == null:
@@ -244,7 +256,7 @@ func _request_move(direction: int) -> void:
 	movement_stair_behavior = int(result.get("stair_behavior", 0))
 	pending_warp = result.get("warp", {}) if movement_stair else {}
 	movement_start = Vector2(player_position)
-	movement_target = Vector2(pending_position)
+	movement_target = movement_start + _direction_vector(direction) if pending_map_id != map_id else Vector2(pending_position)
 	movement_jump = bool(result.get("jump", false))
 	movement_elapsed = 0.0
 	movement_duration = 0.24 if movement_stair else 0.32 if movement_jump else NORMAL_STEP_DURATION

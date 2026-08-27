@@ -209,6 +209,41 @@ func _init() -> void:
 		quit(1)
 		return
 	world_view.free()
+	var connection_step: Dictionary = {}
+	var pallet_width: int = int(content.map_data("pallet-town").get("width", 0))
+	var pallet_height: int = int(content.map_data("pallet-town").get("height", 0))
+	for y in range(pallet_height):
+		for edge in [{"x": 0, "y": y, "direction": 3}, {"x": pallet_width - 1, "y": y, "direction": 4}]:
+			var movement: Dictionary = content.movement_result("pallet-town", int(edge.x), int(edge.y), int(edge.direction), 3, pallet_result.get("objects", []))
+			if bool(movement.get("ok", false)) and str(movement.get("map_id", "pallet-town")) != "pallet-town":
+				connection_step = {"x": edge.x, "y": edge.y, "direction": edge.direction}
+				break
+		if not connection_step.is_empty():
+			break
+	if connection_step.is_empty():
+		for x in range(pallet_width):
+			for edge in [{"x": x, "y": 0, "direction": 2}, {"x": x, "y": pallet_height - 1, "direction": 1}]:
+				var movement: Dictionary = content.movement_result("pallet-town", int(edge.x), int(edge.y), int(edge.direction), 3, pallet_result.get("objects", []))
+				if bool(movement.get("ok", false)) and str(movement.get("map_id", "pallet-town")) != "pallet-town":
+					connection_step = {"x": edge.x, "y": edge.y, "direction": edge.direction}
+					break
+			if not connection_step.is_empty():
+				break
+	if connection_step.is_empty():
+		push_error("Pallet Town did not expose a traversable map connection")
+		quit(1)
+		return
+	var transition_view: MonWorldMapPlayCanvas = MonWorldMapPlayCanvas.new()
+	transition_view.set_content(content)
+	transition_view.set_map(prepared_result.get("background_texture") as Texture2D, pallet_width, pallet_height, pallet_result.get("objects", []), "pallet-town", prepared_result.get("foreground_texture") as Texture2D)
+	transition_view.set_player_state(int(connection_step.x), int(connection_step.y), 3)
+	transition_view._request_move(int(connection_step.direction))
+	var connection_delta: Vector2 = transition_view.movement_target - transition_view.movement_start
+	if not transition_view.movement_active or not is_equal_approx(absf(connection_delta.x) + absf(connection_delta.y), 1.0):
+		push_error("map connection movement interpolated across unrelated map coordinates")
+		quit(1)
+		return
+	transition_view.free()
 	var warp_result: Dictionary = content.warp_at("pallet-town", 6, 7)
 	if not bool(warp_result.get("ok", false)) or str(warp_result.get("map_id", "")).is_empty():
 		push_error("Pallet Town warp transition was not resolved")
