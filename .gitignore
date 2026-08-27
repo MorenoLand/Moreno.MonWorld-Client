@@ -8,7 +8,6 @@ out/
 export/
 *.pck
 *.zip
-*.monpack
 *.gba
 *.gb
 *.gbc

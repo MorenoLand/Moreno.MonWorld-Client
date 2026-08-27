@@ -1,15 +1,18 @@
 extends Control
 
 signal authenticated
+signal local_preview_requested
 
 var provider: MonWorldContentProvider
 var username_input: LineEdit
 var email_input: LineEdit
 var password_input: LineEdit
+var remember_input: CheckButton
 var server_input: LineEdit
 var submit_button: Button
 var mode_button: Button
-var pack_button: Button
+var rom_button: Button
+var preview_button: Button
 var status_label: Label
 var mode := "login"
 var busy := false
@@ -17,10 +20,11 @@ var busy := false
 func _ready() -> void:
 	provider = MonWorldContentProvider.new()
 	add_child(provider)
-	provider.pack_loaded.connect(_on_pack_loaded)
-	provider.pack_failed.connect(_on_pack_failed)
+	provider.content_loaded.connect(_on_content_loaded)
+	provider.content_failed.connect(_on_content_failed)
 	_build_ui()
-	_refresh_content()
+	_load_saved_credentials()
+	call_deferred("_initialize_content")
 
 func _build_ui() -> void:
 	var background := ColorRect.new()
@@ -47,24 +51,31 @@ func _build_ui() -> void:
 	title.add_theme_font_size_override("font_size", 28)
 	box.add_child(title)
 	var description := Label.new()
-	description.text = "Use an original client content pack selected from your device."
+	description.text = "Use a local FireRed Rev1 or LeafGreen Rev1 ROM."
 	description.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	box.add_child(description)
 	server_input = LineEdit.new()
 	server_input.placeholder_text = "Server URL"
 	server_input.text = GameState.api.base_url
+	server_input.text_submitted.connect(_on_text_submitted)
 	box.add_child(server_input)
 	username_input = LineEdit.new()
 	username_input.placeholder_text = "Username"
+	username_input.text_submitted.connect(_on_text_submitted)
 	box.add_child(username_input)
 	email_input = LineEdit.new()
 	email_input.placeholder_text = "Email (registration only)"
 	email_input.visible = false
 	box.add_child(email_input)
 	password_input = LineEdit.new()
-	password_input.placeholder_text = "Password (12+ characters)"
+	password_input.placeholder_text = "Password (8+ characters)"
 	password_input.secret = true
+	password_input.text_submitted.connect(_on_text_submitted)
 	box.add_child(password_input)
+	remember_input = CheckButton.new()
+	remember_input.text = "Remember me"
+	remember_input.tooltip_text = "Remember this username and password on this device."
+	box.add_child(remember_input)
 	submit_button = Button.new()
 	submit_button.pressed.connect(_submit)
 	box.add_child(submit_button)
@@ -72,17 +83,30 @@ func _build_ui() -> void:
 	mode_button.flat = true
 	mode_button.pressed.connect(_toggle_mode)
 	box.add_child(mode_button)
-	var pack_row := HBoxContainer.new()
-	pack_button = Button.new()
-	pack_button.text = "Choose local .monpack"
-	pack_button.pressed.connect(_choose_pack)
-	pack_row.add_child(pack_button)
-	box.add_child(pack_row)
+	var rom_row := HBoxContainer.new()
+	rom_button = Button.new()
+	rom_button.text = "Choose local Kanto ROM"
+	rom_button.pressed.connect(_choose_rom)
+	rom_row.add_child(rom_button)
+	box.add_child(rom_row)
+	preview_button = Button.new()
+	preview_button.text = "Test ROM locally"
+	preview_button.disabled = true
+	preview_button.pressed.connect(_test_rom_locally)
+	box.add_child(preview_button)
 	status_label = Label.new()
 	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	status_label.custom_minimum_size = Vector2(0, 44)
 	box.add_child(status_label)
 	_update_mode_ui()
+
+func _load_saved_credentials() -> void:
+	var saved: Dictionary = MonWorldAuthStore.load_saved()
+	if saved.is_empty():
+		return
+	username_input.text = str(saved.get("username", ""))
+	password_input.text = str(saved.get("password", ""))
+	remember_input.button_pressed = true
 
 func _update_mode_ui() -> void:
 	var registration := mode == "register"
@@ -103,44 +127,82 @@ func _refresh_content() -> void:
 		_set_status("Could not read server content metadata: %s" % result.error, true)
 		return
 	var manifest: Dictionary = result.data if result.data is Dictionary else {}
-	_set_status("Server content: %s. Select a matching local pack when required." % str(manifest.get("content_id", "unknown")))
+	_set_status("Server content: %s. Select a matching local ROM when required." % str(manifest.get("content_id", "unknown")))
 
-func _choose_pack() -> void:
+func _initialize_content() -> void:
+	await _refresh_content()
+	if GameState.content == null and not provider.restore_saved_rom():
+		provider.choose(self)
+
+func _choose_rom() -> void:
 	provider.choose(self)
 
-func _on_pack_loaded(pack: MonWorldContentPack) -> void:
-	var result := GameState.use_content_pack(pack)
+func _on_content_loaded(content: MonWorldContent) -> void:
+	var result := GameState.use_content(content)
 	if result.ok:
-		pack_button.text = "Pack: %s" % pack.content_id()
-		_set_status("Local pack loaded for this client session.")
+		rom_button.text = "ROM: %s" % content.content_id()
+		preview_button.disabled = false
+		_set_status("Local ROM loaded for this client session.")
 	else:
 		_set_status(str(result.error), true)
 
-func _on_pack_failed(message: String) -> void:
+func _on_content_failed(message: String) -> void:
 	_set_status(message, true)
+
+func _test_rom_locally() -> void:
+	if GameState.content == null:
+		_set_status("Select a verified Kanto ROM first.", true)
+		provider.choose(self)
+		return
+	local_preview_requested.emit()
+
+func _on_text_submitted(_text: String) -> void:
+	_submit()
 
 func _submit() -> void:
 	if busy:
 		return
+	var username: String = username_input.text.strip_edges()
+	var password: String = password_input.text
+	if username.is_empty() or password.is_empty():
+		_set_status("Username and password are required.", true)
+		return
+	if GameState.content == null:
+		_set_status("Select a verified Kanto ROM before signing in.", true)
+		provider.choose(self)
+		return
+	if mode == "register":
+		if username.length() < 3 or username.length() > 32:
+			_set_status("Username must be between 3 and 32 characters.", true)
+			return
+		if password.length() < 8:
+			_set_status("Password must be at least 8 characters.", true)
+			return
 	busy = true
-	_set_status("Connecting…")
+	_set_status("Checking server…")
 	GameState.configure_server(server_input.text)
 	var content_result: Dictionary = await GameState.refresh_content()
 	if not content_result.ok:
 		_set_status(str(content_result.error), true)
 		busy = false
 		return
+	_set_status("Authenticating…")
 	var result: Dictionary
 	if mode == "register":
-		result = await GameState.register(username_input.text.strip_edges(), email_input.text.strip_edges(), password_input.text)
+		result = await GameState.register(username, email_input.text.strip_edges(), password)
 		if result.ok:
-			result = await GameState.login(username_input.text.strip_edges(), password_input.text)
+			result = await GameState.login(username, password)
 	else:
-		result = await GameState.login(username_input.text.strip_edges(), password_input.text)
+		result = await GameState.login(username, password)
 	if not result.ok:
 		_set_status(str(result.error), true)
 		busy = false
 		return
+	if remember_input.button_pressed:
+		MonWorldAuthStore.save(username, password)
+	else:
+		MonWorldAuthStore.clear()
+	_set_status("Opening game connection…")
 	var game_result: Dictionary = await GameState.connect_game()
 	if not game_result.ok:
 		_set_status(str(game_result.error), true)

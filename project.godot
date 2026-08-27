@@ -28,7 +28,7 @@ window/stretch/mode="canvas_items"
 
 [monworld]
 
-server_url="http://127.0.0.1:8443"
+server_url="http://127.0.0.1:8081"
 
 [rendering]
 

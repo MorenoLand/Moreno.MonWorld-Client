@@ -12,6 +12,7 @@ var snapshot: Dictionary = {}
 var entities: Dictionary = {}
 var selected_character_id := 0
 var map_rect := Rect2()
+var map_texture: Texture2D
 
 func _ready() -> void:
 	set_process_unhandled_input(true)
@@ -100,25 +101,23 @@ func _layout_ui() -> void:
 	queue_redraw()
 
 func _draw() -> void:
-	var width := int(snapshot.get("width", 32))
-	var height := int(snapshot.get("height", 20))
-	var tile_size := min(map_rect.size.x / max(width, 1), map_rect.size.y / max(height, 1))
-	var board_size := Vector2(tile_size * width, tile_size * height)
-	var board := Rect2(map_rect.position, board_size)
+	var width: int = int(snapshot.get("width", 32))
+	var height: int = int(snapshot.get("height", 20))
+	var board: Rect2 = map_rect
 	draw_rect(board, Color("1b2933"), true)
-	for x in range(width + 1):
-		var start := board.position + Vector2(x * tile_size, 0)
-		draw_line(start, start + Vector2(0, board_size.y), Color("304653"), 1.0)
-	for y in range(height + 1):
-		var start := board.position + Vector2(0, y * tile_size)
-		draw_line(start, start + Vector2(board_size.x, 0), Color("304653"), 1.0)
+	if map_texture != null:
+		var texture_size: Vector2 = map_texture.get_size()
+		var scale: float = minf(map_rect.size.x / maxf(texture_size.x, 1.0), map_rect.size.y / maxf(texture_size.y, 1.0))
+		var draw_size: Vector2 = texture_size * scale
+		board = Rect2(map_rect.position + (map_rect.size - draw_size) * 0.5, draw_size)
+		draw_texture_rect(map_texture, board, false)
 	for key in entities:
 		var entity: Dictionary = entities[key]
 		if str(entity.get("map_id", "")) != str(snapshot.get("map_id", "")):
 			continue
-		var position := board.position + Vector2((int(entity.get("x", 0)) + 0.5) * tile_size, (int(entity.get("y", 0)) + 0.5) * tile_size)
-		var color := Color("8fc4ff") if int(entity.get("character_id", 0)) == selected_character_id else Color("f4b86a")
-		draw_circle(position, max(5.0, tile_size * 0.32), color)
+		var position: Vector2 = board.position + Vector2((int(entity.get("x", 0)) + 0.5) * board.size.x / float(maxi(width, 1)), (int(entity.get("y", 0)) + 0.5) * board.size.y / float(maxi(height, 1)))
+		var color: Color = Color("8fc4ff") if int(entity.get("character_id", 0)) == selected_character_id else Color("f4b86a")
+		draw_circle(position, maxf(5.0, minf(board.size.x / float(maxi(width, 1)), board.size.y / float(maxi(height, 1))) * 0.32), color)
 
 func _on_characters_changed(value: Array) -> void:
 	if character_box == null:
@@ -161,7 +160,18 @@ func _on_world_snapshot(value: Dictionary) -> void:
 			entities[str(player.get("user_id", 0))] = player
 	title_label.text = "Map: %s" % str(snapshot.get("map_id", "unknown"))
 	status_label.text = "Authoritative movement active. Arrow keys or WASD move one tile."
+	_load_map_texture(str(snapshot.get("map_id", "")))
 	queue_redraw()
+
+func _load_map_texture(map_id: String) -> void:
+	map_texture = null
+	if GameState.content == null or map_id.is_empty():
+		return
+	var result: Dictionary = GameState.content.render_map(map_id)
+	if not bool(result.get("ok", false)):
+		status_label.text = "Map renderer: %s" % str(result.get("error", "map rendering failed"))
+		return
+	map_texture = result.get("texture") as Texture2D
 
 func _on_entity_update(value: Dictionary) -> void:
 	var player: Variant = value.get("player")

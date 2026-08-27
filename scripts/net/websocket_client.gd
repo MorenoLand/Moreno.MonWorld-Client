@@ -1,6 +1,8 @@
 class_name MonWorldWebSocket
 extends Node
 
+const CONNECT_TIMEOUT_MSEC: int = 10000
+
 signal frame_received(message_type: int, value: Variant)
 signal authentication_finished(result: Dictionary)
 signal connection_changed(connected: bool)
@@ -11,9 +13,11 @@ var authenticating := false
 var authenticated := false
 var connecting := false
 var _url := ""
+var _connect_deadline_msec: int = 0
 
 func connect_and_auth(url: String, ticket: String, content_id: String) -> Dictionary:
 	close()
+	set_process(true)
 	peer = WebSocketPeer.new()
 	_url = url
 	_pending_ticket = ticket
@@ -22,16 +26,23 @@ func connect_and_auth(url: String, ticket: String, content_id: String) -> Dictio
 	authenticating = true
 	authenticated = false
 	connecting = true
+	_connect_deadline_msec = Time.get_ticks_msec() + CONNECT_TIMEOUT_MSEC
 	var error := peer.connect_to_url(url)
 	if error != OK:
 		connecting = false
 		authenticating = false
+		_connect_deadline_msec = 0
 		return {"ok": false, "error": "WebSocket connection could not start: %s" % error}
 	var result: Variant = await authentication_finished
 	return result if result is Dictionary else {"ok": false, "error": "WebSocket authentication ended unexpectedly"}
 
 func _process(_delta: float) -> void:
 	if not connecting and not authenticated:
+		return
+	if authenticating and _connect_deadline_msec > 0 and Time.get_ticks_msec() >= _connect_deadline_msec:
+		connecting = false
+		peer.close()
+		_finish_authentication({"ok": false, "error": "WebSocket connection timed out. Check the server URL and port."})
 		return
 	peer.poll()
 	var state := peer.get_ready_state()
@@ -81,9 +92,11 @@ func close() -> void:
 	connecting = false
 	authenticating = false
 	authenticated = false
+	_connect_deadline_msec = 0
 
 func _finish_authentication(result: Dictionary) -> void:
 	if not authenticating:
 		return
 	authenticating = false
+	_connect_deadline_msec = 0
 	authentication_finished.emit(result)

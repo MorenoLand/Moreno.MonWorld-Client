@@ -2,7 +2,7 @@
 
 ## Foundation
 
-- Stabilize Web, Linux, Windows, and macOS startup and content-pack selection.
+- Stabilize Web, Linux, Windows, and macOS startup and direct-ROM selection.
 - Expand the original content schema for tiles, collision, entities, and map transitions without bundling third-party data.
 - Complete end-to-end account, character, movement, and chat smoke coverage.
 
@@ -13,5 +13,5 @@
 
 ## Content tooling
 
-- Extend the external importer with validated, user-run extraction stages.
-- Keep all generated packs, ROMs, and extracted data outside Git repositories.
+- Extend the local ROM reader with validated, user-run extraction stages.
+- Keep all generated content, ROMs, and extracted data outside Git repositories.

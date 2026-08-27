@@ -9,7 +9,7 @@ signal connection_error(message: String)
 
 var api: MonWorldAPI
 var socket: MonWorldWebSocket
-var content_pack: MonWorldContentPack
+var content: MonWorldContent
 var server_manifest: Dictionary = {}
 var access_token := ""
 var refresh_token := ""
@@ -26,8 +26,7 @@ func _ready() -> void:
 	socket.frame_received.connect(_on_frame)
 	socket.connection_changed.connect(_on_connection_changed)
 	socket.authentication_finished.connect(_on_authentication_finished)
-	api.configure(str(ProjectSettings.get_setting("monworld/server_url", "http://127.0.0.1:8443")))
-	content_pack = MonWorldContentPack.development()
+	api.configure(str(ProjectSettings.get_setting("monworld/server_url", "http://127.0.0.1:8081")))
 
 func configure_server(url: String) -> void:
 	api.configure(url)
@@ -36,15 +35,12 @@ func refresh_content() -> Dictionary:
 	var result := await api.get_content()
 	if result.ok:
 		server_manifest = result.data
-		if content_pack == null or content_pack.content_id() == "development-empty":
-			if str(server_manifest.get("content_id", "")) == "development-empty":
-				content_pack = MonWorldContentPack.development()
 	return result
 
-func use_content_pack(pack: MonWorldContentPack) -> Dictionary:
-	if not server_manifest.is_empty() and pack.content_id() != str(server_manifest.get("content_id", "")):
-		return {"ok": false, "error": "content pack does not match the server content_id"}
-	content_pack = pack
+func use_content(value: MonWorldContent) -> Dictionary:
+	if not server_manifest.is_empty() and value.content_id() != str(server_manifest.get("content_id", "")):
+		return {"ok": false, "error": "local ROM does not match the server content_id"}
+	content = value
 	return {"ok": true}
 
 func login(username: String, password: String) -> Dictionary:
@@ -69,8 +65,8 @@ func connect_game() -> Dictionary:
 		return session
 	var ticket := str(session.data.get("ticket", ""))
 	var content_id := str(session.data.get("content_id", ""))
-	if ticket.is_empty() or content_pack == null or content_pack.content_id() != content_id:
-		return {"ok": false, "error": "a matching local content pack is required"}
+	if ticket.is_empty() or content == null or content.content_id() != content_id:
+		return {"ok": false, "error": "a matching local ROM is required"}
 	var websocket_url := str(session.data.get("websocket_url", ""))
 	if websocket_url.is_empty():
 		websocket_url = _websocket_url()
