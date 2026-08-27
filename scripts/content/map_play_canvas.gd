@@ -24,6 +24,7 @@ var movement_start: Vector2 = Vector2.ZERO
 var movement_target: Vector2 = Vector2.ZERO
 var movement_jump: bool = false
 var movement_stair: bool = false
+var movement_stair_behavior: int = 0
 var movement_elapsed: float = 0.0
 var movement_duration: float = 0.14
 var pending_map_id: String = ""
@@ -34,6 +35,8 @@ var warp_cooldown: float = 0.0
 var has_spawn: bool = false
 var input_enabled: bool = false
 var player_facing: int = 1
+var held_direction: int = 0
+var movement_repeat_elapsed: float = 0.0
 
 func _ready() -> void:
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
@@ -98,31 +101,40 @@ func _set_spawn() -> void:
 	has_spawn = true
 	movement_active = false
 	movement_stair = false
+	movement_stair_behavior = 0
 	pending_warp = {}
 	warp_cooldown = 0.0
 
 func _input(event: InputEvent) -> void:
 	if not input_enabled or not visible:
 		return
-	if not event is InputEventKey or not event.pressed or event.echo:
+	if not event is InputEventKey:
 		return
-	if (event as InputEventKey).keycode == KEY_ESCAPE:
+	var key_event: InputEventKey = event as InputEventKey
+	if key_event.keycode == KEY_ESCAPE and key_event.pressed and not key_event.echo:
 		get_viewport().set_input_as_handled()
 		back_requested.emit()
 		return
-	if (event as InputEventKey).keycode == KEY_F:
+	if key_event.keycode == KEY_F and key_event.pressed and not key_event.echo:
 		get_viewport().set_input_as_handled()
 		var interaction: Dictionary = content.interaction_at(map_id, player_position.x, player_position.y, player_facing, player_elevation, objects)
 		if bool(interaction.get("ok", false)):
 			interaction_requested.emit(str(interaction.get("text", "")))
 		return
-	if movement_active:
-		return
-	var direction: int = _key_direction(event as InputEventKey)
+	var direction: int = _key_direction(key_event)
 	if direction == 0:
 		return
+	if not key_event.pressed:
+		if held_direction == direction:
+			held_direction = 0
+		return
+	if key_event.echo:
+		return
+	held_direction = direction
 	get_viewport().set_input_as_handled()
-	_request_move(direction)
+	if not movement_active:
+		movement_repeat_elapsed = 0.0
+		_request_move(direction)
 
 func _key_direction(event: InputEventKey) -> int:
 	match event.keycode:
@@ -149,7 +161,8 @@ func _request_move(direction: int) -> void:
 	pending_position = Vector2i(int(result.get("x", player_position.x)), int(result.get("y", player_position.y)))
 	pending_elevation = int(result.get("elevation", player_elevation))
 	movement_stair = bool(result.get("stair", false))
-	pending_warp = content.warp_at(map_id, pending_position.x, pending_position.y, pending_elevation) if movement_stair else {}
+	movement_stair_behavior = int(result.get("stair_behavior", 0))
+	pending_warp = result.get("warp", {}) if movement_stair else {}
 	movement_start = Vector2(player_position)
 	movement_target = Vector2(pending_position)
 	movement_jump = bool(result.get("jump", false))
@@ -162,6 +175,13 @@ func _process(delta: float) -> void:
 	if warp_cooldown > 0.0:
 		warp_cooldown = maxf(warp_cooldown - delta, 0.0)
 	if not movement_active:
+		if held_direction != 0:
+			movement_repeat_elapsed += delta
+			if movement_repeat_elapsed >= 0.08:
+				movement_repeat_elapsed = 0.0
+				_request_move(held_direction)
+		else:
+			movement_repeat_elapsed = 0.0
 		return
 	movement_elapsed += delta
 	_update_player_texture()
@@ -174,6 +194,7 @@ func _process(delta: float) -> void:
 	var completed_warp: Dictionary = pending_warp
 	movement_active = false
 	movement_stair = false
+	movement_stair_behavior = 0
 	pending_warp = {}
 	player_position = completed_position
 	player_elevation = completed_elevation
@@ -245,6 +266,8 @@ func _draw() -> void:
 	if player_texture != null:
 		var player_size: Vector2 = Vector2(player_texture.get_width(), player_texture.get_height())
 		var player_anchor: Vector2 = (world_player + Vector2(0.5, 1.0)) * TILE_PIXELS
+		if movement_active and movement_stair:
+			player_anchor += _stair_offset(clampf(movement_elapsed / movement_duration, 0.0, 1.0), movement_stair_behavior)
 		drawables.append({"texture": player_texture, "width": player_size.x, "height": player_size.y, "world_anchor": player_anchor, "sort_y": world_player.y + 1.0, "sort_order": 1})
 	drawables.sort_custom(_sort_drawables)
 	for drawable_value in drawables:
@@ -266,3 +289,10 @@ func _sort_drawables(left: Dictionary, right: Dictionary) -> bool:
 	if not is_equal_approx(left_y, right_y):
 		return left_y < right_y
 	return int(left.get("sort_order", 0)) < int(right.get("sort_order", 0))
+
+func _stair_offset(progress: float, behavior: int) -> Vector2:
+	var frame: float = progress * 12.0
+	var horizontal_sign: float = 1.0 if behavior == 0x6C or behavior == 0x6E else -1.0
+	var horizontal: float = horizontal_sign * frame * 0.5
+	var vertical: float = -frame * 0.3125 if behavior == 0x6C or behavior == 0x6D else maxf(frame - 6.0, 0.0) * 0.09375
+	return Vector2(horizontal, vertical)

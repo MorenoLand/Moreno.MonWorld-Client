@@ -436,6 +436,12 @@ func movement_result(map_id: String, x: int, y: int, direction: int, elevation: 
 	var height: int = int(map_value.get("height", 0))
 	if destination.x < 0 or destination.y < 0 or destination.x >= width or destination.y >= height:
 		return _movement_through_connection(map_id, x, y, direction, elevation)
+	var source_cell: Dictionary = map_cell(map_id, x, y)
+	var source_behavior: int = int(source_cell.get("behavior", 0))
+	if _is_directional_stair_warp_behavior(source_behavior, direction):
+		var stair_warp: Dictionary = warp_at(map_id, x, y, elevation)
+		if bool(stair_warp.get("ok", false)):
+			return {"ok": true, "map_id": map_id, "x": x, "y": y, "from_x": x, "from_y": y, "jump": false, "stair": true, "stair_behavior": source_behavior, "warp": stair_warp, "elevation": elevation}
 	if not can_walk(map_id, x, y, destination.x, destination.y, elevation, occupied):
 		return {"ok": false, "error": "blocked"}
 	var destination_cell: Dictionary = map_cell(map_id, destination.x, destination.y)
@@ -444,7 +450,7 @@ func movement_result(map_id: String, x: int, y: int, direction: int, elevation: 
 		if landing.x < 0 or landing.y < 0 or landing.x >= width or landing.y >= height or not can_walk(map_id, destination.x, destination.y, landing.x, landing.y, elevation, occupied):
 			return {"ok": false, "error": "jump landing is blocked"}
 		return {"ok": true, "map_id": map_id, "x": landing.x, "y": landing.y, "from_x": x, "from_y": y, "intermediate_x": destination.x, "intermediate_y": destination.y, "jump": true, "elevation": int(_map_cell_from_cache(_get_or_build_map_cache(map_id), landing.x, landing.y).get("elevation", elevation))}
-	return {"ok": true, "map_id": map_id, "x": destination.x, "y": destination.y, "from_x": x, "from_y": y, "jump": false, "stair": _is_stair_warp_behavior(int(destination_cell.get("behavior", 0))), "stair_behavior": int(destination_cell.get("behavior", 0)), "elevation": int(destination_cell.get("elevation", elevation))}
+	return {"ok": true, "map_id": map_id, "x": destination.x, "y": destination.y, "from_x": x, "from_y": y, "jump": false, "stair": false, "elevation": int(destination_cell.get("elevation", elevation))}
 
 func interaction_at(map_id: String, x: int, y: int, direction: int, elevation: int = 3, visible_objects: Array = []) -> Dictionary:
 	var vector: Vector2i = _direction_vector(direction)
@@ -611,6 +617,13 @@ func _is_stair_warp_behavior(behavior: int) -> bool:
 	var format: Dictionary = source_profile.get("format", {})
 	var stair_behaviors: Array = format.get("stair_warp_behaviors", [0x6C, 0x6D, 0x6E, 0x6F])
 	return stair_behaviors.has(behavior)
+
+func _is_directional_stair_warp_behavior(behavior: int, direction: int) -> bool:
+	if direction == CONNECTION_WEST:
+		return behavior == 0x6D or behavior == 0x6F
+	if direction == CONNECTION_EAST:
+		return behavior == 0x6C or behavior == 0x6E
+	return false
 
 func _direction_from_delta(dx: int, dy: int) -> int:
 	if dx == 0 and dy == 1:
@@ -925,8 +938,12 @@ func _draw_metatile_layers(background_image: Image, foreground_image: Image, des
 	var base: int = metatile_index * tiles_per_metatile
 	if metatile_index < 0 or base + tiles_per_metatile > metatiles.size():
 		return
+	var attributes: PackedInt32Array = tileset.get("attributes", PackedInt32Array())
+	var layer_type: int = 0
+	if metatile_index < attributes.size():
+		layer_type = (int(attributes[metatile_index]) & _format_int("map_grid_layer_type_mask", MAPGRID_LAYER_TYPE_MASK)) >> _format_int("map_grid_layer_type_shift", MAPGRID_LAYER_TYPE_SHIFT)
 	_draw_metatile_layer(background_image, destination_x, destination_y, metatiles, base, 0, primary, secondary, [])
-	_draw_metatile_layer(foreground_image, destination_x, destination_y, metatiles, base, 4, primary, secondary, [])
+	_draw_metatile_layer(background_image if layer_type == 1 else foreground_image, destination_x, destination_y, metatiles, base, 4, primary, secondary, [])
 		2:
 			_draw_metatile_layer(image, destination_x, destination_y, metatiles, base, 0, primary, secondary, animated_tiles, primary_override)
 			_draw_metatile_layer(image, destination_x, destination_y, metatiles, base, 4, primary, secondary, animated_tiles, primary_override)

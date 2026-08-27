@@ -143,6 +143,7 @@ func _init() -> void:
 	var blocked_cell_found: bool = false
 	var walkable_step_found: bool = false
 	var jump_behavior_found: bool = false
+	var stair_transition_found: bool = false
 	for map_id in ["pallet-town", "route-1", "viridian-city", "rom-map-3-20", "viridian-forest"]:
 		var map_value: Dictionary = content.map_data(map_id)
 		for y in range(int(map_value.get("height", 0))):
@@ -152,19 +153,22 @@ func _init() -> void:
 					blocked_cell_found = true
 				if int(cell.get("behavior", 0)) >= 0x38 and int(cell.get("behavior", 0)) <= 0x3B:
 					jump_behavior_found = true
-				if blocked_cell_found and jump_behavior_found and walkable_step_found:
+				if blocked_cell_found and jump_behavior_found and walkable_step_found and stair_transition_found:
 					break
 				for direction in [1, 2, 3, 4]:
 					var movement: Dictionary = content.movement_result(map_id, x, y, direction)
+					if bool(movement.get("ok", false)) and bool(movement.get("stair", false)):
+						stair_transition_found = true
 					if bool(movement.get("ok", false)) and not bool(movement.get("jump", false)):
 						walkable_step_found = true
+					if blocked_cell_found and jump_behavior_found and walkable_step_found and stair_transition_found:
 						break
-			if blocked_cell_found and jump_behavior_found and walkable_step_found:
+			if blocked_cell_found and jump_behavior_found and walkable_step_found and stair_transition_found:
 				break
-		if blocked_cell_found and jump_behavior_found and walkable_step_found:
+		if blocked_cell_found and jump_behavior_found and walkable_step_found and stair_transition_found:
 			break
-	if not blocked_cell_found or not walkable_step_found or not jump_behavior_found:
-		push_error("ROM movement data did not expose collision, movement, and ledge behavior")
+	if not blocked_cell_found or not walkable_step_found or not jump_behavior_found or not stair_transition_found:
+		push_error("ROM movement data did not expose collision, movement, ledge, and stair behavior")
 		quit(1)
 		return
 	var warp_result: Dictionary = content.warp_at("pallet-town", 6, 7)
