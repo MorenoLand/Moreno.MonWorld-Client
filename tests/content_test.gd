@@ -26,6 +26,7 @@ func _init() -> void:
 		return
 	var content: MonWorldContent = result.get("content") as MonWorldContent
 	var preview_phase: int = clampi(int(OS.get_environment("MONWORLD_PREVIEW_PHASE")), 0, 39)
+	var preview_map: String = OS.get_environment("MONWORLD_PREVIEW_MAP")
 	for expected_map in [{"id": "pallet-town", "width": 384, "height": 320}, {"id": "route-1", "width": 384, "height": 640}, {"id": "viridian-city", "width": 768, "height": 640}]:
 		var map_id: String = str(expected_map.get("id", ""))
 		var render_result: Dictionary = content.render_map(map_id, preview_phase)
@@ -49,7 +50,8 @@ func _init() -> void:
 			quit(1)
 			return
 		var preview_path: String = OS.get_environment("MONWORLD_PREVIEW_PNG")
-		if not preview_path.is_empty() and map_id == "pallet-town":
+		var should_save_preview: bool = map_id == "pallet-town" if preview_map.is_empty() else map_id == preview_map
+		if not preview_path.is_empty() and should_save_preview:
 			image.save_png(preview_path)
 		if map_id == "pallet-town" and (render_result.get("objects", []) as Array).size() != 3:
 			push_error("Pallet Town object events were not decoded")
@@ -60,6 +62,13 @@ func _init() -> void:
 				for x in image.get_width():
 					if image.get_pixel(x, y) == Color(1, 0, 1):
 						push_error("Pallet Town contains an unmapped magenta palette pixel")
+						quit(1)
+						return
+		if map_id == "viridian-city":
+			for y in range(image.get_height()):
+				for x in range(image.get_width()):
+					if image.get_pixel(x, y) == Color(0, 0, 1):
+						push_error("Viridian City contains a secondary palette placeholder-blue pixel")
 						quit(1)
 						return
 	var static_result: Dictionary = content.render_map("pallet-town", 0)

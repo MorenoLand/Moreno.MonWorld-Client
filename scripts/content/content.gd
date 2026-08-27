@@ -356,12 +356,12 @@ func _draw_tile(image: Image, destination_x: int, destination_y: int, tile_entry
 	if tile_index < 0 or tile_index >= tile_count:
 		return
 	var tile_bytes: PackedByteArray = primary_override if global_tile_index < PRIMARY_TILE_COUNT and primary_override.size() > 0 else tileset.get("tiles", PackedByteArray())
-	var palettes: Array = tileset.get("palettes", [])
 	var palette_bank: int = (tile_entry >> 12) & 0x0F
-	var palette_values: Array = palettes
-	if global_tile_index < PRIMARY_TILE_COUNT:
+	var palette_values: Array = primary.get("palettes", [])
+	if palette_bank < PRIMARY_PALETTE_COUNT:
 		palette_bank = mini(palette_bank, PRIMARY_PALETTE_COUNT - 1)
 	else:
+		palette_values = secondary.get("palettes", [])
 		palette_bank = clampi(palette_bank, PRIMARY_PALETTE_COUNT, PRIMARY_PALETTE_COUNT + SECONDARY_PALETTE_COUNT - 1)
 	var h_flip: bool = (tile_entry & 0x0400) != 0
 	var v_flip: bool = (tile_entry & 0x0800) != 0
