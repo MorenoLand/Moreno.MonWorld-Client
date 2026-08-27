@@ -12,6 +12,7 @@ var snapshot: Dictionary = {}
 var entities: Dictionary = {}
 var selected_character_id := 0
 var map_view: MonWorldMapPlayCanvas
+var dialogue_overlay: MonWorldDialogue
 var animation_tick: int = 0
 var animation_elapsed: float = 0.0
 var held_input: String = ""
@@ -34,7 +35,11 @@ func _build_ui() -> void:
 	map_view.set_content(GameState.content)
 	map_view.set_authoritative_state(true)
 	map_view.set_input_enabled(false)
+	map_view.interaction_requested.connect(_on_interaction_requested)
 	add_child(map_view)
+	dialogue_overlay = MonWorldDialogue.new()
+	dialogue_overlay.action_requested.connect(_on_dialogue_action)
+	add_child(dialogue_overlay)
 	title_label = Label.new()
 	title_label.position = Vector2(24, 18)
 	title_label.add_theme_font_size_override("font_size", 22)
@@ -200,10 +205,30 @@ func _send_chat(text: String) -> void:
 func _on_connection_error(message: String) -> void:
 	status_label.text = message
 
+func _on_interaction_requested(dialogue: Dictionary) -> void:
+	if dialogue_overlay == null or dialogue.is_empty() or dialogue_overlay.is_open():
+		return
+	var pages: Array = dialogue.get("pages", [])
+	if pages.is_empty():
+		pages = [str(dialogue.get("text", ""))]
+	dialogue_overlay.show_pages(pages)
+	map_view.set_dialogue_active(true)
+
+func _on_dialogue_action() -> void:
+	if dialogue_overlay != null and dialogue_overlay.handle_action() and not dialogue_overlay.is_open():
+		map_view.set_dialogue_active(false)
+
 func _unhandled_input(event: InputEvent) -> void:
 	if not event is InputEventKey:
 		return
 	var key_event: InputEventKey = event as InputEventKey
+	if key_event.keycode == KEY_F and key_event.pressed and not key_event.echo:
+		get_viewport().set_input_as_handled()
+		if dialogue_overlay == null or not dialogue_overlay.is_open():
+			map_view.interact()
+		return
+	if dialogue_overlay != null and dialogue_overlay.is_open():
+		return
 	var direction: String = ""
 	match key_event.keycode:
 		KEY_UP, KEY_W:

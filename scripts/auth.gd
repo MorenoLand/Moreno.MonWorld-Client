@@ -56,7 +56,8 @@ func _build_ui() -> void:
 	box.add_child(description)
 	server_input = LineEdit.new()
 	server_input.placeholder_text = "Server URL"
-	server_input.text = GameState.api.base_url
+	var settings: Dictionary = MonWorldStorage.read_json(MonWorldStorage.SETTINGS_FILE)
+	server_input.text = str(settings.get("server_url", GameState.api.base_url))
 	server_input.text_submitted.connect(_on_text_submitted)
 	box.add_child(server_input)
 	username_input = LineEdit.new()
@@ -181,6 +182,9 @@ func _submit() -> void:
 	busy = true
 	_set_status("Checking server…")
 	GameState.configure_server(server_input.text)
+	var settings: Dictionary = MonWorldStorage.read_json(MonWorldStorage.SETTINGS_FILE)
+	settings["server_url"] = server_input.text.strip_edges()
+	MonWorldStorage.write_json(MonWorldStorage.SETTINGS_FILE, settings)
 	var content_result: Dictionary = await GameState.refresh_content()
 	if not content_result.ok:
 		_set_status(str(content_result.error), true)

@@ -137,8 +137,8 @@ func _init() -> void:
 		quit(1)
 		return
 	var dialogue: Dictionary = content.interaction_at("pallet-players-house-1f", 8, 5, 2, 3, house_result.get("objects", []))
-	if not bool(dialogue.get("ok", false)) or not str(dialogue.get("text", "")).begins_with("Mom:"):
-		push_error("object interaction did not produce Mom dialogue")
+	if not bool(dialogue.get("ok", false)) or (dialogue.get("pages", []) as Array).is_empty() or str(dialogue.get("text", "")).is_empty():
+		push_error("object interaction did not produce decoded ROM dialogue")
 		quit(1)
 		return
 	var spawn: Dictionary = content.default_spawn("pallet-town")

@@ -1,31 +1,22 @@
 class_name MonWorldAuthStore
 extends RefCounted
 
-const PATH: String = "user://monworld-credentials.json"
-
 static func load_saved() -> Dictionary:
-	if not FileAccess.file_exists(PATH):
+	var credentials: Dictionary = MonWorldStorage.read_json(MonWorldStorage.SETTINGS_FILE).get("credentials", {})
+	if not credentials is Dictionary:
 		return {}
-	var file: FileAccess = FileAccess.open(PATH, FileAccess.READ)
-	if file == null:
-		return {}
-	var parsed: Variant = JSON.parse_string(file.get_as_text())
-	file.close()
-	if not parsed is Dictionary:
-		return {}
-	var username: String = str(parsed.get("username", "")).strip_edges()
-	var password: String = str(parsed.get("password", ""))
+	var username: String = str(credentials.get("username", "")).strip_edges()
+	var password: String = str(credentials.get("password", ""))
 	if username.is_empty() or password.is_empty():
 		return {}
 	return {"username": username, "password": password}
 
 static func save(username: String, password: String) -> void:
-	var file: FileAccess = FileAccess.open(PATH, FileAccess.WRITE)
-	if file == null:
-		return
-	file.store_string(JSON.stringify({"username": username, "password": password}))
-	file.close()
+	var settings: Dictionary = MonWorldStorage.read_json(MonWorldStorage.SETTINGS_FILE)
+	settings["credentials"] = {"username": username, "password": password}
+	MonWorldStorage.write_json(MonWorldStorage.SETTINGS_FILE, settings)
 
 static func clear() -> void:
-	if FileAccess.file_exists(PATH):
-		DirAccess.remove_absolute(ProjectSettings.globalize_path(PATH))
+	var settings: Dictionary = MonWorldStorage.read_json(MonWorldStorage.SETTINGS_FILE)
+	settings.erase("credentials")
+	MonWorldStorage.write_json(MonWorldStorage.SETTINGS_FILE, settings)

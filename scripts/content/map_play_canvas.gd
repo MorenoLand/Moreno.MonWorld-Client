@@ -3,7 +3,7 @@ extends Control
 
 signal location_changed(map_id: String, x: int, y: int)
 signal back_requested
-signal interaction_requested(text: String)
+signal interaction_requested(dialogue: Dictionary)
 
 const TILE_PIXELS: float = 16.0
 const CAMERA_MAX_CELLS_X: int = 30
@@ -42,6 +42,7 @@ var held_direction: int = 0
 var movement_retry_elapsed: float = 0.0
 var world_entities: Array = []
 var authoritative_state: bool = false
+var dialogue_active: bool = false
 
 func _ready() -> void:
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
@@ -63,6 +64,12 @@ func set_input_enabled(value: bool) -> void:
 	input_enabled = value
 	if value:
 		grab_focus()
+
+func set_dialogue_active(value: bool) -> void:
+	dialogue_active = value
+	if value:
+		held_direction = 0
+		movement_retry_elapsed = 0.0
 
 func set_authoritative_state(value: bool) -> void:
 	authoritative_state = value
@@ -208,10 +215,12 @@ func _input(event: InputEvent) -> void:
 		back_requested.emit()
 		return
 	if key_event.keycode == KEY_F and key_event.pressed and not key_event.echo:
+		if dialogue_active:
+			return
 		get_viewport().set_input_as_handled()
-		var interaction: Dictionary = content.interaction_at(map_id, player_position.x, player_position.y, player_facing, player_elevation, objects)
-		if bool(interaction.get("ok", false)):
-			interaction_requested.emit(str(interaction.get("text", "")))
+		interact()
+		return
+	if dialogue_active:
 		return
 	var direction: int = _key_direction(key_event)
 	if direction == 0:
@@ -227,6 +236,13 @@ func _input(event: InputEvent) -> void:
 	if not movement_active:
 		movement_retry_elapsed = 0.0
 		_request_move(direction)
+
+func interact() -> void:
+	if content == null or map_id.is_empty() or dialogue_active:
+		return
+	var interaction: Dictionary = content.interaction_at(map_id, player_position.x, player_position.y, player_facing, player_elevation, objects)
+	if bool(interaction.get("ok", false)):
+		interaction_requested.emit(interaction)
 
 func _key_direction(event: InputEventKey) -> int:
 	match event.keycode:

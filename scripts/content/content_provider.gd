@@ -8,8 +8,6 @@ const REGION_OPTIONS: Array = [
 	{"region": "Sinnoh", "title": "Platinum ROM", "enabled": false, "description": "Unavailable until Sinnoh content is implemented."},
 	{"region": "Johto", "title": "HeartGold/SoulSilver ROM", "enabled": false, "description": "Unavailable until Johto content is implemented."}
 ]
-const ROM_STATE_PATH: String = "user://monworld-roms.json"
-
 signal content_loaded(content: MonWorldContent)
 signal content_failed(message: String)
 
@@ -141,17 +139,11 @@ func _on_rom_selected(path: String) -> void:
 		content_failed.emit(str(result.get("error", "could not load content")))
 
 func restore_saved_rom() -> bool:
-	if not FileAccess.file_exists(ROM_STATE_PATH):
-		return false
-	var file: FileAccess = FileAccess.open(ROM_STATE_PATH, FileAccess.READ)
-	if file == null:
-		return false
-	var parsed: Variant = JSON.parse_string(file.get_as_text())
-	file.close()
-	if not parsed is Dictionary:
+	var roms: Dictionary = MonWorldStorage.read_json(MonWorldStorage.SETTINGS_FILE).get("roms", {})
+	if not roms is Dictionary:
 		_clear_saved_rom()
 		return false
-	var path: String = str(parsed.get("kanto", ""))
+	var path: String = str(roms.get("kanto", ""))
 	if path.is_empty():
 		_clear_saved_rom()
 		return false
@@ -164,15 +156,18 @@ func restore_saved_rom() -> bool:
 	return false
 
 func _save_rom_path(path: String) -> void:
-	var file: FileAccess = FileAccess.open(ROM_STATE_PATH, FileAccess.WRITE)
-	if file == null:
-		return
-	file.store_string(JSON.stringify({"kanto": path}))
-	file.close()
+	var settings: Dictionary = MonWorldStorage.read_json(MonWorldStorage.SETTINGS_FILE)
+	var roms: Dictionary = settings.get("roms", {})
+	roms["kanto"] = path
+	settings["roms"] = roms
+	MonWorldStorage.write_json(MonWorldStorage.SETTINGS_FILE, settings)
 
 func _clear_saved_rom() -> void:
-	if FileAccess.file_exists(ROM_STATE_PATH):
-		DirAccess.remove_absolute(ProjectSettings.globalize_path(ROM_STATE_PATH))
+	var settings: Dictionary = MonWorldStorage.read_json(MonWorldStorage.SETTINGS_FILE)
+	var roms: Dictionary = settings.get("roms", {})
+	roms.erase("kanto")
+	settings["roms"] = roms
+	MonWorldStorage.write_json(MonWorldStorage.SETTINGS_FILE, settings)
 
 func _choose_web() -> void:
 	_web_callback = JavaScriptBridge.create_callback(_on_web_file)
@@ -211,7 +206,7 @@ func _on_web_file(args: Array) -> void:
 		content_failed.emit("unsupported file; select a .gba ROM")
 		return
 	var data: PackedByteArray = Marshalls.base64_to_raw(str(args[1]))
-	var path: String = "user://monworld-session.gba"
+	var path: String = MonWorldStorage.session_rom_path()
 	var file: FileAccess = FileAccess.open(path, FileAccess.WRITE)
 	if file == null:
 		content_failed.emit("could not store the selected content locally")

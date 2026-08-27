@@ -48,6 +48,7 @@ var rom_header: Dictionary = {}
 var source_profile: Dictionary = {}
 var map_cache: Dictionary = {}
 var sprite_cache: Dictionary = {}
+var string_catalog: Dictionary = {}
 
 static func from_rom_path(path: String) -> Dictionary:
 	var file: FileAccess = FileAccess.open(path, FileAccess.READ)
@@ -78,6 +79,7 @@ static func from_rom_bytes(data: PackedByteArray) -> Dictionary:
 	content.rom_header = header
 	content.source_profile = source_profile
 	content.manifest = _manifest_for_profile(source_profile, rom_sha1)
+	content.string_catalog = MonWorldStorage.read_strings(str(content.manifest.get("content_id", "")))
 	content._hydrate_manifest()
 	return {"ok": true, "content": content}
 
@@ -418,7 +420,7 @@ func _build_map_cache(map_id: String, map_value: Dictionary) -> Dictionary:
 				metatile_index = metatile_id - primary_metatile_count
 			_draw_metatile(image, map_x * 16, map_y * 16, tileset, metatile_index, primary, secondary, animated_tiles)
 			_draw_metatile_layers(background_image, foreground_image, map_x * 16, map_y * 16, tileset, metatile_index, primary, secondary)
-	var objects: Array = _read_map_objects(header_offset)
+	var objects: Array = _read_map_objects(header_offset, map_id)
 	return {"ok": true, "base_image": image, "base_background_image": background_image, "base_foreground_image": foreground_image, "primary": primary, "secondary": secondary, "primary_tiles": primary.get("tiles", PackedByteArray()), "animated_tiles": animated_tiles, "map_cells": map_cells, "objects": objects, "warps": _read_map_warps(header_offset), "connections": _read_map_connections(header_offset), "textures": {}, "images": {}, "background_textures": {}, "foreground_textures": {}, "width": width, "height": height, "header_offset": header_offset, "layout_offset": layout_offset, "map_group": int(map_value.get("map_group", -1)), "map_index": int(map_value.get("map_index", -1))}
 
 func map_cell(map_id: String, x: int, y: int) -> Dictionary:
@@ -551,22 +553,10 @@ func interaction_at(map_id: String, x: int, y: int, direction: int, elevation: i
 		var object_elevation: int = int(object.get("elevation", elevation))
 		if object_elevation != 0 and object_elevation != elevation:
 			continue
-		return {"ok": true, "kind": "object", "text": _interaction_text(object), "object": object}
+		var pages: Array = object.get("dialogue_pages", [])
+		var text: String = str(pages[0]) if not pages.is_empty() else "Someone is standing here."
+		return {"ok": true, "kind": "object", "dialogue_id": str(object.get("dialogue_id", "")), "pages": pages, "text": text, "object": object}
 	return {"ok": false, "error": "nothing to interact with"}
-
-func _interaction_text(object: Dictionary) -> String:
-	match int(object.get("graphics_id", -1)):
-		88:
-			return "Mom: Take care, honey."
-		71:
-			return "Professor Oak: The world is full of discoveries."
-		18:
-			return "Youngster: Hey! Nice to meet you."
-		23:
-			return "A local resident smiles at you."
-		92, 95:
-			return "There is nothing to interact with right now."
-	return "Someone is standing here."
 
 func _movement_through_connection(map_id: String, x: int, y: int, direction: int, elevation: int) -> Dictionary:
 	var cached_map: Dictionary = _get_or_build_map_cache(map_id)
@@ -818,7 +808,7 @@ func _copy_rom_bytes(destination: PackedByteArray, destination_offset: int, sour
 	for index in range(length):
 		destination[destination_offset + index] = rom_data[source_offset + index]
 
-func _read_map_objects(header_offset: int) -> Array:
+func _read_map_objects(header_offset: int, map_id: String) -> Array:
 	var objects: Array = []
 	var events_offset: int = _read_rom_pointer(header_offset + 4)
 	var events_header_size: int = _format_int("map_events_header_size", MAP_EVENTS_HEADER_SIZE)
@@ -838,8 +828,131 @@ func _read_map_objects(header_offset: int) -> Array:
 		var sprite: Dictionary = render_object_sprite(graphics_id, 0)
 		if not bool(sprite.get("ok", false)):
 			continue
-		objects.append({"local_id": int(rom_data[offset]), "graphics_id": graphics_id, "resolved_graphics_id": int(sprite.get("resolved_graphics_id", graphics_id)), "x": _read_s16(offset + 4), "y": _read_s16(offset + 6), "elevation": int(rom_data[offset + 8]), "movement_type": int(rom_data[offset + 9]), "texture": sprite.get("texture"), "width": int(sprite.get("width", 0)), "height": int(sprite.get("height", 0)), "frame_count": int(sprite.get("frame_count", 1))})
+		var local_id: int = int(rom_data[offset])
+		var script_offset: int = _read_rom_pointer(offset + 0x10)
+		var dialogue: Dictionary = _read_dialogue_for_script(script_offset)
+		if not dialogue.is_empty():
+			dialogue["id"] = "%s:%d" % [map_id, local_id]
+			_register_dialogue(map_id, local_id, script_offset, dialogue)
+		objects.append({"local_id": local_id, "graphics_id": graphics_id, "resolved_graphics_id": int(sprite.get("resolved_graphics_id", graphics_id)), "x": _read_s16(offset + 4), "y": _read_s16(offset + 6), "elevation": int(rom_data[offset + 8]), "movement_type": int(rom_data[offset + 9]), "script_offset": script_offset, "dialogue_id": str(dialogue.get("id", "")), "dialogue_pages": dialogue.get("pages", []), "texture": sprite.get("texture"), "width": int(sprite.get("width", 0)), "height": int(sprite.get("height", 0)), "frame_count": int(sprite.get("frame_count", 1))})
 	return objects
+
+func _register_dialogue(map_id: String, local_id: int, script_offset: int, dialogue: Dictionary) -> void:
+	var records: Dictionary = string_catalog.get("records", {})
+	if not records is Dictionary:
+		records = {}
+	var key: String = "%s:%d" % [map_id, local_id]
+	records[key] = {"map_id": map_id, "local_id": local_id, "script_offset": script_offset, "text_offset": int(dialogue.get("text_offset", -1)), "raw": str(dialogue.get("raw", "")), "pages": dialogue.get("pages", [])}
+	string_catalog["schema_version"] = 1
+	string_catalog["content_id"] = content_id()
+	string_catalog["language"] = "en"
+	string_catalog["records"] = records
+	MonWorldStorage.write_strings(content_id(), string_catalog)
+
+func _read_dialogue_for_script(script_offset: int) -> Dictionary:
+	if script_offset < 0 or not _valid_range(script_offset, 1):
+		return {}
+	var cursor: int = script_offset
+	var limit: int = mini(rom_data.size(), script_offset + 512)
+	var text_offset: int = -1
+	while cursor < limit:
+		var opcode: int = int(rom_data[cursor])
+		if opcode == 0x0F and cursor + 6 <= limit:
+			if int(rom_data[cursor + 1]) == 0:
+				var loadword_offset: int = _read_rom_pointer(cursor + 2)
+				if loadword_offset >= 0:
+					text_offset = loadword_offset
+			cursor += 6
+			continue
+		if opcode == 0x67 and cursor + 5 <= limit:
+			var message_offset: int = _read_rom_pointer(cursor + 1)
+			if message_offset >= 0:
+				text_offset = message_offset
+			cursor += 5
+			continue
+		cursor += 1
+	if text_offset < 0:
+		return {}
+	return _decode_rom_text(text_offset)
+
+func _decode_rom_text(text_offset: int) -> Dictionary:
+	if not _valid_range(text_offset, 1):
+		return {}
+	var cursor: int = text_offset
+	var raw: PackedByteArray = PackedByteArray()
+	var pages: Array = []
+	var current: String = ""
+	while cursor < rom_data.size() and raw.size() < 4096:
+		var value: int = int(rom_data[cursor])
+		raw.append(value)
+		cursor += 1
+		match value:
+			0xFF:
+				break
+			0xFE:
+				current += "\n"
+			0xFB, 0xFA:
+				pages.append(current)
+				current = ""
+			0xFD:
+				if cursor >= rom_data.size():
+					break
+				var placeholder: int = int(rom_data[cursor])
+				raw.append(placeholder)
+				cursor += 1
+				current += _placeholder_name(placeholder)
+			0xF7:
+				current += "{DYNAMIC}"
+			0xF8, 0xF9:
+				if cursor < rom_data.size():
+					raw.append(rom_data[cursor])
+					cursor += 1
+				current += "{CONTROL}"
+			0xFC:
+				current += "{CONTROL}"
+			_:
+				current += _decode_rom_character(value)
+	if not current.is_empty() or pages.is_empty():
+		pages.append(current)
+	while not pages.is_empty() and str(pages[pages.size() - 1]).is_empty():
+		pages.pop_back()
+	if pages.is_empty():
+		return {}
+	return {"text_offset": text_offset, "raw": raw.hex_encode(), "pages": pages}
+
+func _decode_rom_character(value: int) -> String:
+	if value == 0x00:
+		return " "
+	if value >= 0xA1 and value <= 0xAA:
+		return char(48 + value - 0xA1)
+	if value >= 0xBB and value <= 0xD4:
+		return char(65 + value - 0xBB)
+	if value >= 0xD5 and value <= 0xEE:
+		return char(97 + value - 0xD5)
+	match value:
+		0xAB:
+			return "!"
+		0xAC:
+			return "?"
+		0xAD:
+			return "."
+		0xAE:
+			return "-"
+		0xB0:
+			return "…"
+		0xB8:
+			return ","
+		0xBA:
+			return "/"
+	return "{0x%02X}" % value
+
+func _placeholder_name(value: int) -> String:
+	match value:
+		1:
+			return "{PLAYER}"
+		6:
+			return "{RIVAL}"
+	return "{VAR_%02X}" % value
 
 func _read_map_warps(header_offset: int) -> Array:
 	var warps: Array = []

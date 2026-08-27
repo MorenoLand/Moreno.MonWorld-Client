@@ -13,8 +13,7 @@ var map_selector: OptionButton
 var play_button: Button
 var preview_button: Button
 var back_button: Button
-var dialogue_panel: PanelContainer
-var dialogue_label: Label
+var dialogue_overlay: MonWorldDialogue
 var preview_shell: Control
 var animation_tick: int = 0
 var animation_elapsed: float = 0.0
@@ -190,35 +189,31 @@ func _on_back_pressed() -> void:
 	exit_requested.emit()
 
 func _build_dialogue_overlay() -> void:
-	dialogue_panel = PanelContainer.new()
-	dialogue_panel.visible = false
-	dialogue_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	dialogue_panel.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	dialogue_panel.offset_left = 48.0
-	dialogue_panel.offset_top = -150.0
-	dialogue_panel.offset_right = -48.0
-	dialogue_panel.offset_bottom = -48.0
-	dialogue_label = Label.new()
-	dialogue_label.text = ""
-	dialogue_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	dialogue_label.add_theme_font_size_override("font_size", 22)
-	dialogue_label.custom_minimum_size = Vector2(0, 72)
-	dialogue_panel.add_child(dialogue_label)
-	play_view.add_child(dialogue_panel)
+	dialogue_overlay = MonWorldDialogue.new()
+	dialogue_overlay.action_requested.connect(_on_dialogue_action)
+	play_view.add_child(dialogue_overlay)
 
-func _on_interaction_requested(text: String) -> void:
-	if dialogue_label == null or dialogue_panel == null:
+func _on_interaction_requested(dialogue: Dictionary) -> void:
+	if dialogue_overlay == null or dialogue.is_empty() or dialogue_overlay.is_open():
 		return
-	dialogue_label.text = text
-	dialogue_panel.visible = not text.is_empty()
+	var pages: Array = dialogue.get("pages", [])
+	if pages.is_empty():
+		pages = [str(dialogue.get("text", ""))]
+	dialogue_overlay.show_pages(pages, true)
+	play_view.set_dialogue_active(true)
+
+func _on_dialogue_action() -> void:
+	if dialogue_overlay != null and dialogue_overlay.handle_action() and not dialogue_overlay.is_open():
+		play_view.set_dialogue_active(false)
 
 func _set_playing(value: bool) -> void:
 	playing = value
 	preview_shell.visible = not value
 	play_view.visible = value
 	play_view.set_input_enabled(value)
-	if dialogue_panel != null:
-		dialogue_panel.visible = false
+	if dialogue_overlay != null:
+		dialogue_overlay.close_dialogue()
+	play_view.set_dialogue_active(false)
 
 func _on_play_location_changed(map_id: String, _x: int, _y: int) -> void:
 	selected_map_id = map_id
