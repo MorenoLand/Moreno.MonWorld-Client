@@ -12,6 +12,8 @@ var play_view: MonWorldMapPlayCanvas
 var map_selector: OptionButton
 var play_button: Button
 var preview_button: Button
+var back_button: Button
+var preview_chrome: Array = []
 var animation_tick: int = 0
 var animation_elapsed: float = 0.0
 var playing: bool = false
@@ -120,10 +122,12 @@ func _build_ui() -> void:
 	var footer: HBoxContainer = HBoxContainer.new()
 	footer.alignment = BoxContainer.ALIGNMENT_END
 	var back_button: Button = Button.new()
+	self.back_button = back_button
 	back_button.text = "Back to login"
-	back_button.pressed.connect(func() -> void: exit_requested.emit())
+	back_button.pressed.connect(_on_back_pressed)
 	footer.add_child(back_button)
 	box.add_child(footer)
+	preview_chrome = [title, subtitle, metadata, map_controls, map_title, map_details, map_status]
 
 func _metadata_text() -> String:
 	if content == null:
@@ -156,18 +160,29 @@ func _on_map_selected(item_index: int) -> void:
 func _on_play_pressed() -> void:
 	if content == null or selected_map_id.is_empty():
 		return
-	playing = true
-	map_view.visible = false
-	play_view.visible = true
-	play_view.set_input_enabled(true)
+	_set_playing(true)
 	_render_selected_map()
 
 func _on_preview_pressed() -> void:
-	playing = false
-	play_view.set_input_enabled(false)
-	play_view.visible = false
-	map_view.visible = true
+	_set_playing(false)
 	_render_selected_map()
+
+func _on_back_pressed() -> void:
+	if playing:
+		_on_preview_pressed()
+		return
+	exit_requested.emit()
+
+func _set_playing(value: bool) -> void:
+	playing = value
+	for chrome_value in preview_chrome:
+		if chrome_value is Control:
+			(chrome_value as Control).visible = not value
+	map_view.visible = not value
+	play_view.visible = value
+	play_view.set_input_enabled(value)
+	if back_button != null:
+		back_button.text = "Back to map selection" if value else "Back to login"
 
 func _on_play_location_changed(map_id: String, _x: int, _y: int) -> void:
 	selected_map_id = map_id

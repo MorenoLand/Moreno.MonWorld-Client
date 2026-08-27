@@ -24,9 +24,11 @@ var pending_elevation: int = 3
 var warp_cooldown: float = 0.0
 var has_spawn: bool = false
 var input_enabled: bool = false
+var player_facing: int = 1
 
 func _ready() -> void:
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	clip_contents = true
 	focus_mode = Control.FOCUS_ALL
 	queue_redraw()
 
@@ -80,6 +82,7 @@ func _set_spawn() -> void:
 		return
 	player_position = Vector2i(int(spawn.get("x", 0)), int(spawn.get("y", 0)))
 	player_elevation = int(spawn.get("elevation", 3))
+	player_facing = 1
 	has_spawn = true
 	movement_active = false
 	warp_cooldown = 0.0
@@ -110,6 +113,9 @@ func _key_direction(event: InputEventKey) -> int:
 func _request_move(direction: int) -> void:
 	if content == null or map_id.is_empty() or not has_spawn:
 		return
+	player_facing = direction
+	_update_player_texture()
+	queue_redraw()
 	var result: Dictionary = content.movement_result(map_id, player_position.x, player_position.y, direction, player_elevation, objects)
 	if not bool(result.get("ok", false)):
 		return
@@ -130,6 +136,7 @@ func _process(delta: float) -> void:
 	if not movement_active:
 		return
 	movement_elapsed += delta
+	_update_player_texture()
 	if movement_elapsed < movement_duration:
 		queue_redraw()
 		return
@@ -165,21 +172,25 @@ func _load_map(next_map_id: String, reset_spawn: bool = false) -> void:
 func _update_player_texture() -> void:
 	if content == null:
 		return
-	var sprite: Dictionary = content.render_object_sprite(19, animation_tick / 4)
+	var frame_step: int = 0
+	if movement_active and movement_duration > 0.0:
+		frame_step = int(floorf(clampf(movement_elapsed / movement_duration, 0.0, 0.999) * 4.0))
+	var sprite: Dictionary = content.render_facing_object_sprite(19, player_facing, movement_active, frame_step)
 	player_texture = sprite.get("texture") as Texture2D
 
 func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO, size), Color("080B10"), true)
 	if map_texture == null or map_pixel_size.x <= 0.0 or map_pixel_size.y <= 0.0 or not has_spawn:
 		return
-	var tile_scale: float = minf(2.0, minf(size.x / (32.0 * 16.0), size.y / (18.0 * 16.0)))
-	tile_scale = maxf(tile_scale, 1.0)
+	var available_size: Vector2 = size - Vector2(24.0, 24.0)
+	var tile_scale: float = minf(available_size.x / map_pixel_size.x, available_size.y / map_pixel_size.y)
+	tile_scale = maxf(tile_scale, 0.01)
 	var world_player: Vector2 = movement_start.lerp(movement_target, clampf(movement_elapsed / movement_duration, 0.0, 1.0)) if movement_active else Vector2(player_position)
 	if movement_active and movement_jump:
 		world_player.y -= sin(clampf(movement_elapsed / movement_duration, 0.0, 1.0) * PI) * 0.75
 	var player_anchor: Vector2 = (world_player + Vector2(0.5, 1.0)) * 16.0
 	var destination_size: Vector2 = map_pixel_size * tile_scale
-	var destination_position: Vector2 = size * 0.5 - player_anchor * tile_scale
+	var destination_position: Vector2 = (size - destination_size) * 0.5
 	draw_texture_rect(map_texture, Rect2(destination_position, destination_size), false)
 	for object_value in objects:
 		if not object_value is Dictionary:

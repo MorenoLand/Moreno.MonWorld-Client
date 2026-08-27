@@ -388,11 +388,16 @@ func can_walk(map_id: String, from_x: int, from_y: int, to_x: int, to_y: int, el
 	if direction == 0:
 		return false
 	var destination: Dictionary = _map_cell_from_cache(cached_map, to_x, to_y)
-	if not _cell_can_stand(destination) or _position_occupied(cached_map.get("objects", []) if occupied.is_empty() else occupied, to_x, to_y):
+	if not bool(destination.get("ok", false)) or bool(destination.get("undefined", false)):
+		return false
+	var destination_warp: Dictionary = _warp_record_at(cached_map, to_x, to_y, elevation)
+	if not _cell_can_stand(destination) and destination_warp.is_empty():
+		return false
+	if _position_occupied(cached_map.get("objects", []) if occupied.is_empty() else occupied, to_x, to_y):
 		return false
 	if not _elevations_compatible(elevation, int(destination.get("elevation", 0))):
 		return false
-	if _directionally_blocked(int(destination.get("behavior", 0)), direction):
+	if destination_warp.is_empty() and _directionally_blocked(int(destination.get("behavior", 0)), direction):
 		return false
 	var source: Dictionary = _map_cell_from_cache(cached_map, from_x, from_y)
 	if _directionally_blocked(int(source.get("behavior", 0)), _opposite_direction(direction)):
@@ -497,6 +502,19 @@ func warp_at(map_id: String, x: int, y: int, elevation: int = 3) -> Dictionary:
 			destination_elevation = int(spawn.get("elevation", destination_elevation))
 		return {"ok": true, "map_id": target_map_id, "x": destination_x, "y": destination_y, "elevation": destination_elevation, "warp": true}
 	return {"ok": false, "error": "no warp at position"}
+
+func _warp_record_at(cached_map: Dictionary, x: int, y: int, elevation: int = -1) -> Dictionary:
+	for warp_value in cached_map.get("warps", []):
+		if not warp_value is Dictionary:
+			continue
+		var warp: Dictionary = warp_value
+		if int(warp.get("x", -1)) != x or int(warp.get("y", -1)) != y:
+			continue
+		var warp_elevation: int = int(warp.get("elevation", 0))
+		if elevation >= 0 and warp_elevation != 0 and warp_elevation != elevation:
+			continue
+		return warp
+	return {}
 
 func _cell_can_stand(cell: Dictionary) -> bool:
 	return bool(cell.get("ok", false)) and not bool(cell.get("undefined", false)) and int(cell.get("collision", 1)) == 0
@@ -676,7 +694,27 @@ func _read_map_connections(header_offset: int) -> Array:
 		connections.append({"direction": int(rom_data[offset]), "offset": _read_s32(offset + 4), "map_group": map_group, "map_index": map_index, "map_id": _map_id_for_location(map_group, map_index)})
 	return connections
 
-func render_object_sprite(graphics_id: int, frame: int = 0) -> Dictionary:
+func render_facing_object_sprite(graphics_id: int, direction: int, moving: bool = false, frame_step: int = 0) -> Dictionary:
+	var direction_name: String = "south"
+	match direction:
+		CONNECTION_NORTH:
+			direction_name = "north"
+		CONNECTION_WEST:
+			direction_name = "west"
+		CONNECTION_EAST:
+			direction_name = "east"
+	var format: Dictionary = source_profile.get("format", {})
+	var facing_frames: Dictionary = format.get("object_facing_frames", {})
+	var direction_spec: Dictionary = facing_frames.get(direction_name, {})
+	var frame_index: int = int(direction_spec.get("idle", 0))
+	var flip_h: bool = bool(direction_spec.get("flip_h", false))
+	if moving:
+		var walk_frames: Array = direction_spec.get("walk", [])
+		if not walk_frames.is_empty():
+			frame_index = int(walk_frames[posmod(frame_step, walk_frames.size())])
+	return render_object_sprite(graphics_id, frame_index, flip_h)
+
+func render_object_sprite(graphics_id: int, frame: int = 0, flip_h: bool = false) -> Dictionary:
 	var resolved_graphics_id: int = graphics_id
 	var object_sprites: Dictionary = _object_sprite_specs()
 	if resolved_graphics_id < 0 or resolved_graphics_id >= 152 or not object_sprites.has(resolved_graphics_id):
@@ -686,7 +724,7 @@ func render_object_sprite(graphics_id: int, frame: int = 0) -> Dictionary:
 		return {"ok": false, "error": "FireRed object graphics are not available for this graphics ID"}
 	var frame_count: int = int(spec.get("frame_count", 1))
 	var frame_index: int = posmod(frame, maxi(frame_count, 1))
-	var cache_key: String = "%d:%d" % [resolved_graphics_id, frame_index]
+	var cache_key: String = "%d:%d:%d" % [resolved_graphics_id, frame_index, int(flip_h)]
 	var cached_texture: Texture2D = sprite_cache.get(cache_key) as Texture2D
 	if cached_texture != null:
 		return {"ok": true, "texture": cached_texture, "width": int(spec.get("width", 0)), "height": int(spec.get("height", 0)), "frame_count": frame_count, "resolved_graphics_id": resolved_graphics_id}
@@ -708,6 +746,8 @@ func render_object_sprite(graphics_id: int, frame: int = 0) -> Dictionary:
 			if color_index == 0:
 				color = Color(color.r, color.g, color.b, 0.0)
 			image.set_pixel(pixel_x, pixel_y, color)
+	if flip_h:
+		image.flip_x()
 	var texture: ImageTexture = ImageTexture.create_from_image(image)
 	sprite_cache[cache_key] = texture
 	return {"ok": true, "texture": texture, "width": width, "height": height, "frame_count": frame_count, "resolved_graphics_id": resolved_graphics_id}

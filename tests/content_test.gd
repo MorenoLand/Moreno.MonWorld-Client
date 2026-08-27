@@ -153,6 +153,40 @@ func _init() -> void:
 		push_error("Pallet Town warp transition was not resolved")
 		quit(1)
 		return
+	for direction in [1, 2, 3, 4]:
+		var direction_sprite: Dictionary = content.render_facing_object_sprite(19, direction, false, 0)
+		if not bool(direction_sprite.get("ok", false)) or int(direction_sprite.get("width", 0)) != 16 or int(direction_sprite.get("height", 0)) != 32:
+			push_error("player facing sprite was not decoded for direction %d" % direction)
+			quit(1)
+			return
+	var player_idle_a: Dictionary = content.render_facing_object_sprite(19, 1, false, 0)
+	var player_idle_b: Dictionary = content.render_facing_object_sprite(19, 1, false, 0)
+	if player_idle_a.get("texture") != player_idle_b.get("texture"):
+		push_error("player idle sprite was not stable between animation ticks")
+		quit(1)
+		return
+	var door_entry_found: bool = false
+	var door_position: Vector2i = Vector2i(6, 7)
+	for direction in [1, 2, 3, 4]:
+		var vector: Vector2i = Vector2i.ZERO
+		match direction:
+			1:
+				vector = Vector2i(0, 1)
+			2:
+				vector = Vector2i(0, -1)
+			3:
+				vector = Vector2i(-1, 0)
+			4:
+				vector = Vector2i(1, 0)
+		var from_position: Vector2i = door_position - vector
+		var door_movement: Dictionary = content.movement_result("pallet-town", from_position.x, from_position.y, direction)
+		if bool(door_movement.get("ok", false)) and int(door_movement.get("x", -1)) == door_position.x and int(door_movement.get("y", -1)) == door_position.y:
+			door_entry_found = true
+			break
+	if not door_entry_found:
+		push_error("Pallet Town door warp could not be entered from an adjacent tile")
+		quit(1)
+		return
 	var provider: MonWorldContentProvider = MonWorldContentProvider.new()
 	provider._save_rom_path(path)
 	if not provider.restore_saved_rom():
