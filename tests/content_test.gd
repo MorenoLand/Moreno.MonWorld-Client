@@ -25,6 +25,16 @@ func _init() -> void:
 		quit(1)
 		return
 	var content: MonWorldContent = result.get("content") as MonWorldContent
+	if (content.manifest.get("maps", []) as Array).size() < 50:
+		push_error("ROM map manifest did not expose the selectable map table")
+		quit(1)
+		return
+	for extra_map_id in ["rom-map-3-2", "rom-map-3-20", "viridian-forest", "pallet-players-house-1f", "viridian-pokemon-center-1f"]:
+		var extra_result: Dictionary = content.render_map(extra_map_id)
+		if not bool(extra_result.get("ok", false)):
+			push_error("additional map render failed for %s: %s" % [extra_map_id, str(extra_result.get("error", "unknown error"))])
+			quit(1)
+			return
 	var preview_phase: int = clampi(int(OS.get_environment("MONWORLD_PREVIEW_PHASE")), 0, 39)
 	var preview_map: String = OS.get_environment("MONWORLD_PREVIEW_MAP")
 	for expected_map in [{"id": "pallet-town", "width": 384, "height": 320}, {"id": "route-1", "width": 384, "height": 640}, {"id": "viridian-city", "width": 768, "height": 640}]:
@@ -82,6 +92,48 @@ func _init() -> void:
 				differing_pixels += 1
 	if differing_pixels == 0:
 		push_error("map animation did not change any pixels")
+		quit(1)
+		return
+	var pallet_result: Dictionary = content.render_map("pallet-town")
+	if (pallet_result.get("connections", []) as Array).size() != 2 or (pallet_result.get("warps", []) as Array).size() != 3:
+		push_error("Pallet Town connections or warps were not decoded")
+		quit(1)
+		return
+	var spawn: Dictionary = content.default_spawn("pallet-town")
+	if not bool(spawn.get("ok", false)) or not bool(content.map_cell("pallet-town", int(spawn.get("x", 0)), int(spawn.get("y", 0))).get("collision", 1) == 0):
+		push_error("Pallet Town did not produce a walkable spawn")
+		quit(1)
+		return
+	var blocked_cell_found: bool = false
+	var walkable_step_found: bool = false
+	var jump_behavior_found: bool = false
+	for map_id in ["pallet-town", "route-1", "viridian-city", "rom-map-3-20", "viridian-forest"]:
+		var map_value: Dictionary = content.map_data(map_id)
+		for y in range(int(map_value.get("height", 0))):
+			for x in range(int(map_value.get("width", 0))):
+				var cell: Dictionary = content.map_cell(map_id, x, y)
+				if int(cell.get("collision", 0)) != 0:
+					blocked_cell_found = true
+				if int(cell.get("behavior", 0)) >= 0x38 and int(cell.get("behavior", 0)) <= 0x3B:
+					jump_behavior_found = true
+				if blocked_cell_found and jump_behavior_found and walkable_step_found:
+					break
+				for direction in [1, 2, 3, 4]:
+					var movement: Dictionary = content.movement_result(map_id, x, y, direction)
+					if bool(movement.get("ok", false)) and not bool(movement.get("jump", false)):
+						walkable_step_found = true
+						break
+			if blocked_cell_found and jump_behavior_found and walkable_step_found:
+				break
+		if blocked_cell_found and jump_behavior_found and walkable_step_found:
+			break
+	if not blocked_cell_found or not walkable_step_found or not jump_behavior_found:
+		push_error("ROM movement data did not expose collision, movement, and ledge behavior")
+		quit(1)
+		return
+	var warp_result: Dictionary = content.warp_at("pallet-town", 6, 7)
+	if not bool(warp_result.get("ok", false)) or str(warp_result.get("map_id", "")).is_empty():
+		push_error("Pallet Town warp transition was not resolved")
 		quit(1)
 		return
 	var provider: MonWorldContentProvider = MonWorldContentProvider.new()

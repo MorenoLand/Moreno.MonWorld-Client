@@ -2,6 +2,10 @@
 
 Keep gameplay presentation in scenes and scripts under `scripts/`. `GameState` owns API/session state, `MonWorldContentProvider` owns local ROM selection, and `MonWorldWebSocket` owns framing and transport. Do not place credentials or content data in project settings.
 
+## Offline map tester
+
+Run the project with `tests/content_test.gd` for headless ROM validation, or open `scenes/content_preview.tscn` for the interactive tester. Select a map, use Preview to inspect its decoded ROM rendering, or use Play to walk it with keyboard movement. Play mode applies map-grid collision, elevation, directional restrictions, ledges, object occupancy, warps, and source map connections. A temporary player sprite is used until the client character-art pipeline is complete.
+
 Use synthetic server state only for local UI work. ROM reading stays in the client session and must not write ROM data into the repository. Godot Web builds are single-threaded and use Compatibility rendering; avoid .NET, native extensions, and platform-specific assumptions.
 
 ## Headless handshake

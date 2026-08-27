@@ -8,8 +8,13 @@ var map_title: Label
 var map_details: Label
 var map_status: Label
 var map_view: MonWorldMapPreviewCanvas
+var play_view: MonWorldMapPlayCanvas
+var map_selector: OptionButton
+var play_button: Button
+var preview_button: Button
 var animation_tick: int = 0
 var animation_elapsed: float = 0.0
+var playing: bool = false
 
 func _ready() -> void:
 	if content == null:
@@ -68,14 +73,24 @@ func _build_ui() -> void:
 	var map_controls: HBoxContainer = HBoxContainer.new()
 	map_controls.add_theme_constant_override("separation", 8)
 	var maps: Array = content.manifest.get("maps", []) if content != null else []
+	map_selector = OptionButton.new()
+	map_selector.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	map_selector.item_selected.connect(_on_map_selected)
 	for map_value in maps:
 		if not map_value is Dictionary:
 			continue
 		var map_dictionary: Dictionary = map_value
-		var button: Button = Button.new()
-		button.text = str(map_dictionary.get("name", map_dictionary.get("id", "Map")))
-		button.pressed.connect(_select_map.bind(str(map_dictionary.get("id", ""))))
-		map_controls.add_child(button)
+		map_selector.add_item(str(map_dictionary.get("name", map_dictionary.get("id", "Map"))))
+		map_selector.set_item_metadata(map_selector.item_count - 1, str(map_dictionary.get("id", "")))
+	map_controls.add_child(map_selector)
+	preview_button = Button.new()
+	preview_button.text = "Preview"
+	preview_button.pressed.connect(_on_preview_pressed)
+	map_controls.add_child(preview_button)
+	play_button = Button.new()
+	play_button.text = "Play selected map"
+	play_button.pressed.connect(_on_play_pressed)
+	map_controls.add_child(play_button)
 	box.add_child(map_controls)
 	map_title = Label.new()
 	map_title.add_theme_font_size_override("font_size", 23)
@@ -91,6 +106,14 @@ func _build_ui() -> void:
 	map_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	map_view.custom_minimum_size = Vector2(0, 260)
 	panel.add_child(map_view)
+	play_view = MonWorldMapPlayCanvas.new()
+	play_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	play_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	play_view.custom_minimum_size = Vector2(0, 260)
+	play_view.visible = false
+	play_view.set_content(content)
+	play_view.location_changed.connect(_on_play_location_changed)
+	panel.add_child(play_view)
 	map_status = Label.new()
 	map_status.modulate = Color("b8c7d9")
 	box.add_child(map_status)
@@ -118,6 +141,36 @@ func _select_map(map_id: String) -> void:
 	selected_map_id = map_id
 	animation_tick = 0
 	animation_elapsed = 0.0
+	if map_selector != null:
+		for item_index in range(map_selector.item_count):
+			if str(map_selector.get_item_metadata(item_index)) == map_id:
+				map_selector.select(item_index)
+				break
+	_render_selected_map()
+
+func _on_map_selected(item_index: int) -> void:
+	if map_selector == null:
+		return
+	_select_map(str(map_selector.get_item_metadata(item_index)))
+
+func _on_play_pressed() -> void:
+	if content == null or selected_map_id.is_empty():
+		return
+	playing = true
+	map_view.visible = false
+	play_view.visible = true
+	play_view.set_input_enabled(true)
+	_render_selected_map()
+
+func _on_preview_pressed() -> void:
+	playing = false
+	play_view.set_input_enabled(false)
+	play_view.visible = false
+	map_view.visible = true
+	_render_selected_map()
+
+func _on_play_location_changed(map_id: String, _x: int, _y: int) -> void:
+	selected_map_id = map_id
 	_render_selected_map()
 
 func _render_selected_map() -> void:
@@ -134,5 +187,10 @@ func _render_selected_map() -> void:
 		return
 	var texture: Texture2D = result.get("texture") as Texture2D
 	map_view.set_map(texture, int(result.get("width", 0)), int(result.get("height", 0)), result.get("objects", []))
+	if play_view != null:
+		if playing and play_view.map_id == selected_map_id:
+			play_view.set_animation_tick(animation_tick)
+		else:
+			play_view.set_map(texture, int(result.get("width", 0)), int(result.get("height", 0)), result.get("objects", []), selected_map_id)
 	map_details.text = "%d × %d map cells  •  actual 16×16 metatiles  •  %d ROM object events" % [int(result.get("width", 0)), int(result.get("height", 0)), (result.get("objects", []) as Array).size()]
-	map_status.text = "Rendered from the selected ROM in memory; map animations are running."
+	map_status.text = "Use Play selected map to walk the ROM map; collision, ledges, warps, and map connections are active." if not playing else "Playing the selected ROM map; collision, ledges, warps, and map connections are active."

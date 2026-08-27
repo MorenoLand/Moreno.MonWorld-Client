@@ -11,3 +11,5 @@ The current reader validates SHA-1 `dd5945db9b930750cb39d00c84da8571feebf417`, r
 The server publishes the expected `content_id` at `GET /api/v1/content`. The client compares that identifier before opening a game session, and the server compares it again during the one-time WebSocket ticket exchange. ROM bytes never go to the server.
 
 No ROM, extracted asset, generated map, or derived content file belongs in this repository. Optional extraction stages must keep their output outside Git and remain independent of the network protocol.
+
+The offline tester exposes the Kanto towns, routes, Viridian Forest, and selected Pallet Town and Viridian City interiors. Preview renders the selected map directly from the local ROM. Play loads that same decoded map into the interactive map scene with temporary character sprites, ROM object events, collision, ledges, warps, and map connections. The tester does not require an account or server connection.
