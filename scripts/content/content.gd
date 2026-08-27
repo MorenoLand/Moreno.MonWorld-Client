@@ -931,6 +931,12 @@ func _draw_metatile(image: Image, destination_x: int, destination_y: int, tilese
 		1:
 			_draw_metatile_layer(image, destination_x, destination_y, metatiles, base, 0, primary, secondary, animated_tiles, primary_override)
 			_draw_metatile_layer(image, destination_x, destination_y, metatiles, base, 4, primary, secondary, animated_tiles, primary_override)
+		2:
+			_draw_metatile_layer(image, destination_x, destination_y, metatiles, base, 0, primary, secondary, animated_tiles, primary_override)
+			_draw_metatile_layer(image, destination_x, destination_y, metatiles, base, 4, primary, secondary, animated_tiles, primary_override)
+		_:
+			_draw_metatile_layer(image, destination_x, destination_y, metatiles, base, 0, primary, secondary, animated_tiles, primary_override)
+			_draw_metatile_layer(image, destination_x, destination_y, metatiles, base, 4, primary, secondary, animated_tiles, primary_override)
 
 func _draw_metatile_layers(background_image: Image, foreground_image: Image, destination_x: int, destination_y: int, tileset: Dictionary, metatile_index: int, primary: Dictionary, secondary: Dictionary) -> void:
 	var metatiles: PackedInt32Array = tileset.get("metatiles", PackedInt32Array())
@@ -944,14 +950,8 @@ func _draw_metatile_layers(background_image: Image, foreground_image: Image, des
 		layer_type = (int(attributes[metatile_index]) & _format_int("map_grid_layer_type_mask", MAPGRID_LAYER_TYPE_MASK)) >> _format_int("map_grid_layer_type_shift", MAPGRID_LAYER_TYPE_SHIFT)
 	_draw_metatile_layer(background_image, destination_x, destination_y, metatiles, base, 0, primary, secondary, [])
 	_draw_metatile_layer(background_image if layer_type == 1 else foreground_image, destination_x, destination_y, metatiles, base, 4, primary, secondary, [])
-		2:
-			_draw_metatile_layer(image, destination_x, destination_y, metatiles, base, 0, primary, secondary, animated_tiles, primary_override)
-			_draw_metatile_layer(image, destination_x, destination_y, metatiles, base, 4, primary, secondary, animated_tiles, primary_override)
-		_:
-			_draw_metatile_layer(image, destination_x, destination_y, metatiles, base, 0, primary, secondary, animated_tiles, primary_override)
-			_draw_metatile_layer(image, destination_x, destination_y, metatiles, base, 4, primary, secondary, animated_tiles, primary_override)
 
-func _draw_metatile_layer(image: Image, destination_x: int, destination_y: int, metatiles: PackedInt32Array, base: int, start: int, primary: Dictionary, secondary: Dictionary, animated_tiles: Array, primary_override: PackedByteArray) -> void:
+func _draw_metatile_layer(image: Image, destination_x: int, destination_y: int, metatiles: PackedInt32Array, base: int, start: int, primary: Dictionary, secondary: Dictionary, animated_tiles: Array, primary_override: PackedByteArray = PackedByteArray()) -> void:
 	var tiles_per_metatile: int = _format_int("tiles_per_metatile", TILES_PER_METATILE)
 	for local_index in range(4):
 		var tile_index: int = start + local_index
