@@ -42,22 +42,14 @@ var wave_cache: Dictionary = {}
 var last_error: String = ""
 
 func build_song_stream(content: MonWorldContent, song_id: int) -> AudioStream:
-	last_error = ""
-	if content == null or content.rom_data.is_empty() or song_id < 0:
-		last_error = "selected ROM has no audio data"
+	var prepared: Dictionary = prepare_song(content, song_id)
+	if prepared.is_empty():
 		return null
-	var cache_key: String = _content_key(content) + ":" + str(song_id)
+	var cache_key: String = str(prepared.get("cache_key", ""))
 	var cached: Variant = stream_cache.get(cache_key)
 	if cached is AudioStream:
 		return cached as AudioStream
-	var song: Dictionary = _read_song(content.rom_data, song_id, _audio_table_hint(content), _content_key(content), _audio_anchor_ids(content))
-	if song.is_empty():
-		return null
-	var parsed: Dictionary = _parse_song(content.rom_data, song)
-	if not bool(parsed.get("ok", false)):
-		last_error = str(parsed.get("error", "ROM audio track could not be parsed"))
-		return null
-	var stream: AudioStream = _render_song(content.rom_data, song, parsed)
+	var stream: AudioStream = _render_song(prepared.get("data", PackedByteArray()) as PackedByteArray, prepared.get("song", {}) as Dictionary, prepared.get("parsed", {}) as Dictionary)
 	if stream == null:
 		last_error = "ROM audio song produced no playable frames"
 		return null
@@ -65,16 +57,38 @@ func build_song_stream(content: MonWorldContent, song_id: int) -> AudioStream:
 	return stream
 
 func inspect_song(content: MonWorldContent, song_id: int) -> Dictionary:
+	var prepared: Dictionary = prepare_song(content, song_id)
+	if prepared.is_empty():
+		return {"ok": false, "error": last_error}
+	var song: Dictionary = prepared.get("song", {}) as Dictionary
+	var parsed: Dictionary = prepared.get("parsed", {}) as Dictionary
+	return {"ok": true, "song_table_offset": int(song.get("song_table_offset", -1)), "song_id": song_id, "music_player": int(song.get("music_player", -1)), "track_count": int(song.get("track_count", 0)), "event_count": int(parsed.get("event_count", 0)), "duration": float(parsed.get("duration", 0.0)), "tempo": float(parsed.get("tempo", 150.0))}
+
+func prepare_song(content: MonWorldContent, song_id: int) -> Dictionary:
 	last_error = ""
 	if content == null or content.rom_data.is_empty() or song_id < 0:
-		return {"ok": false, "error": "selected ROM has no audio data"}
+		last_error = "selected ROM has no audio data"
+		return {}
+	var cache_key: String = _content_key(content) + ":" + str(song_id)
+	var cached: Variant = song_cache.get(cache_key)
+	if cached is Dictionary:
+		return cached as Dictionary
 	var song: Dictionary = _read_song(content.rom_data, song_id, _audio_table_hint(content), _content_key(content), _audio_anchor_ids(content))
 	if song.is_empty():
-		return {"ok": false, "error": last_error}
+		return {}
 	var parsed: Dictionary = _parse_song(content.rom_data, song)
 	if not bool(parsed.get("ok", false)):
-		return parsed
-	return {"ok": true, "song_table_offset": int(song.get("song_table_offset", -1)), "song_id": song_id, "music_player": int(song.get("music_player", -1)), "track_count": int(song.get("track_count", 0)), "event_count": int(parsed.get("event_count", 0)), "duration": float(parsed.get("duration", 0.0))}
+		last_error = str(parsed.get("error", "ROM audio track could not be parsed"))
+		return {}
+	var duration: float = clampf(float(parsed.get("duration", 0.0)) + 0.05, 0.25, MAX_RENDER_SECONDS)
+	var duration_frames: int = maxi(int(ceil(duration * SAMPLE_RATE)), 1)
+	var loop_duration: float = float(parsed.get("loop_duration", duration))
+	if loop_duration <= 0.0:
+		loop_duration = duration
+	loop_duration = clampf(loop_duration, 0.25, duration)
+	var prepared: Dictionary = {"ok": true, "cache_key": cache_key, "song": song, "parsed": parsed, "data": content.rom_data, "events": parsed.get("events", []), "duration": duration, "duration_frames": duration_frames, "loop_duration": loop_duration, "loop_frames": maxi(int(ceil(loop_duration * SAMPLE_RATE)), 1)}
+	song_cache[cache_key] = prepared
+	return prepared
 
 func _content_key(content: MonWorldContent) -> String:
 	var fingerprint: String = content.rom_sha1
@@ -177,28 +191,66 @@ func _valid_song_header(data: PackedByteArray, offset: int) -> bool:
 
 func _parse_song(data: PackedByteArray, song: Dictionary) -> Dictionary:
 	var all_events: Array = []
-	var duration: float = 0.0
+	var tempo_changes: Array = []
+	var parsed_tracks: Array = []
+	var duration_ticks: int = 0
+	var duration_extra_seconds: float = 0.0
+	var loop_duration_ticks: int = 0
+	var loop_extra_seconds: float = 0.0
 	var event_count: int = 0
 	var tracks: Array = song.get("tracks", [])
-	for track_value in tracks:
+	for track_index in range(tracks.size()):
+		var track_value: Variant = tracks[track_index]
 		var track_offset: int = int(track_value)
-		var parsed_track: Dictionary = _parse_track(data, track_offset, int(song.get("tone_offset", -1)))
+		var parsed_track: Dictionary = _parse_track(data, track_offset, int(song.get("tone_offset", -1)), 150.0)
 		if not bool(parsed_track.get("ok", false)):
 			continue
+		parsed_tracks.append(parsed_track)
+		duration_ticks = maxi(duration_ticks, int(parsed_track.get("duration_ticks", 0)))
+		duration_extra_seconds = maxf(duration_extra_seconds, float(parsed_track.get("duration_extra_seconds", 0.0)))
+		var track_loop_ticks: int = int(parsed_track.get("loop_duration_ticks", 0))
+		if track_loop_ticks > loop_duration_ticks:
+			loop_duration_ticks = track_loop_ticks
+			loop_extra_seconds = float(parsed_track.get("loop_extra_seconds", 0.0))
+		for change_value in parsed_track.get("tempo_changes", []):
+			var change: Dictionary = change_value as Dictionary
+			var change_tick: int = int(change.get("tick", 0))
+			var inserted: bool = false
+			for existing_index in range(tempo_changes.size()):
+				if change_tick < int((tempo_changes[existing_index] as Dictionary).get("tick", 0)):
+					tempo_changes.insert(existing_index, change)
+					inserted = true
+					break
+			if not inserted:
+				tempo_changes.append(change)
+	for parsed_track_value in parsed_tracks:
+		var parsed_track: Dictionary = parsed_track_value as Dictionary
 		var track_events: Array = parsed_track.get("events", [])
-		all_events.append_array(track_events)
-		event_count += track_events.size()
-		duration = maxf(duration, float(parsed_track.get("duration", 0.0)))
+		for event_value in track_events:
+			var event: Dictionary = (event_value as Dictionary).duplicate(true)
+			var start_tick: int = int(event.get("start_tick", 0))
+			var end_tick: int = start_tick + int(event.get("duration_ticks", 0))
+			var start_seconds: float = _ticks_to_seconds(start_tick, tempo_changes) + float(event.get("start_extra_seconds", 0.0))
+			var end_seconds: float = _ticks_to_seconds(end_tick, tempo_changes) + float(event.get("start_extra_seconds", 0.0))
+			event["start"] = start_seconds
+			event["duration"] = maxf(end_seconds - start_seconds, 1.0 / float(SAMPLE_RATE))
+			all_events.append(event)
+			event_count += 1
 	if all_events.is_empty():
 		return {"ok": false, "error": "ROM song contains no decodable note events"}
-	return {"ok": true, "events": all_events, "event_count": event_count, "duration": duration}
+	var duration: float = _ticks_to_seconds(duration_ticks, tempo_changes) + duration_extra_seconds
+	var loop_duration: float = 0.0
+	if loop_duration_ticks > 0:
+		loop_duration = _ticks_to_seconds(loop_duration_ticks, tempo_changes) + loop_extra_seconds
+	return {"ok": true, "events": all_events, "event_count": event_count, "duration": duration, "loop_duration": loop_duration, "tempo": float(tempo_changes[0].get("tempo", 150.0)) if not tempo_changes.is_empty() else 150.0, "tempo_changes": tempo_changes}
 
-func _parse_track(data: PackedByteArray, track_offset: int, tone_offset: int) -> Dictionary:
+func _parse_track(data: PackedByteArray, track_offset: int, tone_offset: int, initial_tempo: float = 150.0) -> Dictionary:
 	if track_offset < 0 or not _valid_range(data, track_offset, 1):
 		return {"ok": false}
 	var cursor: int = track_offset
-	var now: float = 0.0
-	var tempo: float = 150.0
+	var now_ticks: int = 0
+	var now_extra_seconds: float = 0.0
+	var tempo: float = initial_tempo
 	var running_status: int = 0
 	var key: int = 60
 	var velocity: int = 127
@@ -216,7 +268,9 @@ func _parse_track(data: PackedByteArray, track_offset: int, tone_offset: int) ->
 	var events: Array = []
 	var command_count: int = 0
 	var loop_target: int = -1
-	var loop_duration: float = 0.0
+	var loop_duration_ticks: int = 0
+	var loop_extra_seconds: float = 0.0
+	var tempo_changes: Array = []
 	while cursor >= 0 and cursor < data.size() and command_count < MAX_TRACK_COMMANDS and events.size() < MAX_TRACK_EVENTS:
 		command_count += 1
 		var command_offset: int = cursor
@@ -249,8 +303,8 @@ func _parse_track(data: PackedByteArray, track_offset: int, tone_offset: int) ->
 			key = note_key
 			if gate_ticks > 0:
 				var event_tone: Dictionary = dynamic_tone.duplicate(true)
-				events.append({"start": now, "duration": _ticks_to_seconds(gate_ticks, tempo), "key": note_key + key_shift, "velocity": velocity, "volume": volume, "pan": pan, "bend": bend, "bend_range": bend_range, "tune": tune, "tone": event_tone})
-			now += _ticks_to_seconds(gate_ticks, tempo)
+				events.append({"start_tick": now_ticks, "duration_ticks": gate_ticks, "start_extra_seconds": now_extra_seconds, "key": note_key + key_shift, "velocity": velocity, "volume": volume, "pan": pan, "bend": bend, "bend_range": bend_range, "tune": tune, "tone": event_tone})
+			now_ticks += gate_ticks
 			continue
 		match status:
 			COMMAND_FINE:
@@ -262,9 +316,10 @@ func _parse_track(data: PackedByteArray, track_offset: int, tone_offset: int) ->
 				cursor += 4
 				if target < 0:
 					break
-				if target == loop_target or (target <= command_offset and now > 0.0):
+				if target == loop_target or (target <= command_offset and now_ticks > 0):
 					loop_target = target
-					loop_duration = now
+					loop_duration_ticks = now_ticks
+					loop_extra_seconds = now_extra_seconds
 					break
 				loop_target = target
 				cursor = target
@@ -314,6 +369,7 @@ func _parse_track(data: PackedByteArray, track_offset: int, tone_offset: int) ->
 				if cursor >= data.size():
 					break
 				tempo = maxf(float(int(data[cursor]) * 2), 1.0)
+				tempo_changes.append({"tick": now_ticks, "tempo": tempo})
 				cursor += 1
 			COMMAND_KEYSH:
 				if cursor >= data.size():
@@ -358,7 +414,7 @@ func _parse_track(data: PackedByteArray, track_offset: int, tone_offset: int) ->
 				cursor = int(xcmd_result.get("cursor", cursor))
 				dynamic_tone = xcmd_result.get("tone", dynamic_tone)
 				if float(xcmd_result.get("wait_seconds", 0.0)) > 0.0:
-					now += float(xcmd_result.get("wait_seconds", 0.0))
+					now_extra_seconds += float(xcmd_result.get("wait_seconds", 0.0))
 			COMMAND_EOT:
 				if cursor < data.size() and int(data[cursor]) < 0x80:
 					key = int(data[cursor])
@@ -366,10 +422,7 @@ func _parse_track(data: PackedByteArray, track_offset: int, tone_offset: int) ->
 			_:
 				if status >= 0x80 and status < COMMAND_TIE and cursor <= command_offset:
 					break
-	var result: Dictionary = {"ok": not events.is_empty(), "events": events, "duration": now, "loop_duration": loop_duration}
-	if loop_duration > 0.0:
-		result["loop_duration"] = loop_duration
-	return result
+	return {"ok": not events.is_empty(), "events": events, "duration_ticks": now_ticks, "duration_extra_seconds": now_extra_seconds, "loop_duration_ticks": loop_duration_ticks, "loop_extra_seconds": loop_extra_seconds, "tempo_changes": tempo_changes}
 
 func _parse_xcmd(data: PackedByteArray, cursor: int, tone: Dictionary) -> Dictionary:
 	if cursor >= data.size():
@@ -520,12 +573,39 @@ func _render_song(data: PackedByteArray, song: Dictionary, parsed: Dictionary) -
 		stream.loop_end = frame_count
 	return stream
 
-func _render_event(mix: PackedFloat32Array, frame_count: int, data: PackedByteArray, event: Dictionary) -> void:
+func render_song_frames(prepared: Dictionary, start_frame: int, frame_count: int) -> PackedVector2Array:
+	var output: PackedVector2Array = PackedVector2Array()
+	if not bool(prepared.get("ok", false)) or frame_count <= 0:
+		return output
+	var data: PackedByteArray = prepared.get("data", PackedByteArray()) as PackedByteArray
+	var events: Array = prepared.get("events", [])
+	var loop_frames: int = maxi(int(prepared.get("loop_frames", prepared.get("duration_frames", 0))), 1)
+	output.resize(frame_count)
+	var written: int = 0
+	var cursor: int = posmod(start_frame, loop_frames)
+	while written < frame_count:
+		var segment_frames: int = mini(frame_count - written, loop_frames - cursor)
+		var mix: PackedFloat32Array = PackedFloat32Array()
+		mix.resize(segment_frames * 2)
+		for event_value in events:
+			if event_value is Dictionary:
+				_render_event(mix, segment_frames, data, event_value as Dictionary, cursor)
+		for frame in range(segment_frames):
+			var left: float = clampf(float(mix[frame * 2]) * 0.62, -1.0, 1.0)
+			var right: float = clampf(float(mix[frame * 2 + 1]) * 0.62, -1.0, 1.0)
+			output[written + frame] = Vector2(left, right)
+		written += segment_frames
+		cursor = 0
+	return output
+
+func _render_event(mix: PackedFloat32Array, frame_count: int, data: PackedByteArray, event: Dictionary, base_frame: int = 0) -> void:
 	var start_frame: int = maxi(int(floor(float(event.get("start", 0.0)) * SAMPLE_RATE)), 0)
-	if start_frame >= frame_count:
-		return
 	var event_frames: int = maxi(int(ceil(float(event.get("duration", 0.0)) * SAMPLE_RATE)), 1)
-	var end_frame: int = mini(frame_count, start_frame + event_frames)
+	var end_frame: int = start_frame + event_frames
+	var mix_start: int = maxi(start_frame, base_frame)
+	var mix_end: int = mini(base_frame + frame_count, end_frame)
+	if mix_start >= mix_end:
+		return
 	var tone: Dictionary = _resolve_tone(data, event.get("tone", {}) as Dictionary, int(event.get("key", 60)))
 	if tone.is_empty():
 		return
@@ -551,14 +631,16 @@ func _render_event(mix: PackedFloat32Array, frame_count: int, data: PackedByteAr
 	if wave_rate > 0.0:
 		frequency = wave_rate * pow(2.0, (pitch_key - float(base_key)) / 12.0)
 	var phase_step: float = frequency / float(SAMPLE_RATE)
-	for frame in range(start_frame, end_frame):
+	phase = float(mix_start - start_frame) * phase_step
+	for frame in range(mix_start, mix_end):
 		var local_frame: int = frame - start_frame
 		var sample: float = _voice_sample(data, tone, type, phase, wave, noise_state)
 		if (type & 0x0F) == 4 or (type & 0x0F) == 12:
 			noise_state = int(_voice_sample_state)
 		var envelope: float = _envelope(float(local_frame) / float(maxi(event_frames, 1)), tone)
-		mix[frame * 2] += sample * envelope * left_gain
-		mix[frame * 2 + 1] += sample * envelope * right_gain
+		var mix_frame: int = frame - base_frame
+		mix[mix_frame * 2] += sample * envelope * left_gain
+		mix[mix_frame * 2 + 1] += sample * envelope * right_gain
 		phase += phase_step
 
 var _voice_sample_state: int = 0x7FFF
@@ -651,8 +733,24 @@ func _envelope(progress: float, tone: Dictionary) -> float:
 		return sustain * (1.0 - (progress - release_start) / release_time)
 	return sustain
 
-func _ticks_to_seconds(ticks: int, tempo: float) -> float:
-	return float(ticks) * 150.0 / (maxf(tempo, 1.0) * 60.0)
+func _ticks_to_seconds(ticks: int, tempo_changes: Array = []) -> float:
+	if ticks <= 0:
+		return 0.0
+	var seconds: float = 0.0
+	var current_tick: int = 0
+	var tempo: float = 150.0
+	for change_value in tempo_changes:
+		var change: Dictionary = change_value as Dictionary
+		var change_tick: int = maxi(int(change.get("tick", 0)), 0)
+		if change_tick > ticks:
+			break
+		if change_tick > current_tick:
+			seconds += float(change_tick - current_tick) * 150.0 / (maxf(tempo, 1.0) * 60.0)
+			current_tick = change_tick
+		tempo = maxf(float(change.get("tempo", tempo)), 1.0)
+	if ticks > current_tick:
+		seconds += float(ticks - current_tick) * 150.0 / (maxf(tempo, 1.0) * 60.0)
+	return seconds
 
 func _clock_value(index: int) -> int:
 	return CLOCK_TABLE[clampi(index, 0, CLOCK_TABLE.size() - 1)]
