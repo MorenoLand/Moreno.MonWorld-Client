@@ -170,7 +170,7 @@ func _load_map_texture(map_id: String) -> void:
 	if not bool(result.get("ok", false)):
 		status_label.text = "Map renderer: %s" % str(result.get("error", "map rendering failed"))
 		return
-	var background_texture: Texture2D = result.get("background_texture", result.get("texture")) as Texture2D
+	var background_texture: Texture2D = result.get("texture", result.get("background_texture")) as Texture2D
 	var foreground_texture: Texture2D = result.get("foreground_texture") as Texture2D
 	map_view.set_map(background_texture, int(result.get("width", 0)), int(result.get("height", 0)), result.get("objects", []), map_id, foreground_texture)
 	audio.play_map_music(GameState.content, map_id)

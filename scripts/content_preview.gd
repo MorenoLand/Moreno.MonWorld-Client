@@ -13,7 +13,6 @@ var hud: MonWorldHud
 var map_selector: OptionButton
 var play_button: Button
 var preview_button: Button
-var back_button: Button
 var dialogue_overlay: MonWorldDialogue
 var audio: MonWorldAudio
 var preview_shell: Control
@@ -126,6 +125,8 @@ func _build_ui() -> void:
 	play_view.interaction_requested.connect(_on_interaction_requested)
 	play_view.sound_requested.connect(_on_sound_requested)
 	add_child(play_view)
+	play_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	play_view.z_index = 100
 	audio = MonWorldAudio.new()
 	add_child(audio)
 	hud = MonWorldHud.new()
@@ -136,14 +137,6 @@ func _build_ui() -> void:
 	map_status = Label.new()
 	map_status.modulate = Color("b8c7d9")
 	box.add_child(map_status)
-	var footer: HBoxContainer = HBoxContainer.new()
-	footer.alignment = BoxContainer.ALIGNMENT_END
-	var back_button: Button = Button.new()
-	self.back_button = back_button
-	back_button.text = "Back to login"
-	back_button.pressed.connect(_on_back_pressed)
-	footer.add_child(back_button)
-	box.add_child(footer)
 
 func _metadata_text() -> String:
 	if content == null:
@@ -187,10 +180,9 @@ func _on_play_pressed() -> void:
 		map_status.text = str(prepared.get("error", "Map preparation failed"))
 		return
 	_set_playing(true)
-	play_view.set_map(prepared.get("background_texture", prepared.get("texture")) as Texture2D, int(prepared.get("width", 0)), int(prepared.get("height", 0)), prepared.get("objects", []), selected_map_id, prepared.get("foreground_texture") as Texture2D)
+	play_view.set_map(prepared.get("texture", prepared.get("background_texture")) as Texture2D, int(prepared.get("width", 0)), int(prepared.get("height", 0)), prepared.get("objects", []), selected_map_id, prepared.get("foreground_texture") as Texture2D)
 	if hud != null:
 		hud.set_state(content, selected_map_id)
-	play_view.set_animation_tick(animation_tick)
 	audio.play_map_music(content, selected_map_id)
 
 func _on_preview_pressed() -> void:

@@ -18,8 +18,6 @@ var content: MonWorldContent
 var map_id: String = ""
 var map_texture: Texture2D
 var foreground_texture: Texture2D
-var animated_background_tiles: Array = []
-var animated_foreground_tiles: Array = []
 var map_pixel_size: Vector2 = Vector2.ZERO
 var objects: Array = []
 var player_position: Vector2i = Vector2i.ZERO
@@ -60,8 +58,6 @@ func set_content(value: MonWorldContent) -> void:
 	content = value
 	player_texture = null
 	foreground_texture = null
-	animated_background_tiles = []
-	animated_foreground_tiles = []
 	if not map_id.is_empty():
 		_set_spawn()
 	_refresh_object_textures()
@@ -88,9 +84,10 @@ func set_animation_tick(value: int) -> void:
 	animation_tick = value
 	if content == null or map_id.is_empty():
 		return
-	var result: Dictionary = content.render_map_animation(map_id, animation_tick)
+	var result: Dictionary = content.render_map(map_id, animation_tick)
 	if bool(result.get("ok", false)):
-		_apply_animation_tiles(result.get("tiles", []))
+		map_texture = result.get("background_texture", result.get("texture")) as Texture2D
+		foreground_texture = result.get("foreground_texture") as Texture2D
 	_update_player_texture()
 	queue_redraw()
 
@@ -105,7 +102,8 @@ func set_map(texture: Texture2D, map_width: int, map_height: int, map_objects: A
 	if changed or not has_spawn:
 		_set_spawn()
 	_refresh_object_textures()
-	set_animation_tick(animation_tick)
+	if animation_tick > 0:
+		set_animation_tick(animation_tick)
 	_update_player_texture()
 	queue_redraw()
 
@@ -175,28 +173,13 @@ func set_world_entities(values: Array, local_character_id: int) -> void:
 	queue_redraw()
 
 func _apply_map(result: Dictionary, reset_spawn: bool) -> void:
-	map_texture = result.get("background_texture", result.get("texture")) as Texture2D
+	map_texture = result.get("texture", result.get("background_texture")) as Texture2D
 	foreground_texture = result.get("foreground_texture") as Texture2D
 	map_pixel_size = Vector2(int(result.get("width", 0)) * 16, int(result.get("height", 0)) * 16)
 	objects = result.get("objects", [])
 	_refresh_object_textures()
-	_apply_animation_tiles(result.get("animation_tiles", []))
 	if reset_spawn:
 		_set_spawn()
-
-func _apply_animation_tiles(values: Array) -> void:
-	animated_background_tiles = []
-	animated_foreground_tiles = []
-	for value in values:
-		if not value is Dictionary:
-			continue
-		var tile: Dictionary = value
-		var background: Texture2D = tile.get("background_texture") as Texture2D
-		var foreground: Texture2D = tile.get("foreground_texture") as Texture2D
-		if background != null:
-			animated_background_tiles.append({"texture": background, "x": int(tile.get("x", 0)), "y": int(tile.get("y", 0))})
-		if foreground != null:
-			animated_foreground_tiles.append({"texture": foreground, "x": int(tile.get("x", 0)), "y": int(tile.get("y", 0))})
 
 func _set_spawn() -> void:
 	if content == null or map_id.is_empty():
@@ -357,7 +340,8 @@ func _load_map(next_map_id: String, reset_spawn: bool = false) -> void:
 	if not bool(result.get("ok", false)):
 		return
 	_apply_map(result, reset_spawn)
-	set_animation_tick(animation_tick)
+	if animation_tick > 0:
+		set_animation_tick(animation_tick)
 	if not reset_spawn:
 		has_spawn = true
 	_refresh_object_textures()
@@ -400,7 +384,9 @@ func dialogue_anchor_screen(dialogue: Dictionary) -> Vector2:
 	var object_x: float = float(int(object.get("x", player_position.x)) + 0.5) * TILE_PIXELS
 	var object_y: float = float(int(object.get("y", player_position.y)) + 1.0) * TILE_PIXELS
 	var object_height: float = float(int(object.get("height", 16)))
-	return Vector2((object_x - camera_origin.x) * tile_scale, (object_y - object_height - camera_origin.y) * tile_scale)
+	var destination_size: Vector2 = camera_world_size * tile_scale
+	var destination_position: Vector2 = (size - destination_size) * 0.5
+	return destination_position + Vector2((object_x - camera_origin.x) * tile_scale, (object_y - object_height - camera_origin.y) * tile_scale)
 
 func _face_interaction_object(object_value: Variant) -> void:
 	if not object_value is Dictionary:
@@ -454,26 +440,13 @@ func _draw() -> void:
 	var camera_origin: Vector2 = camera_center - camera_world_size * 0.5
 	camera_origin.x = clampf(camera_origin.x, 0.0, maxf(map_pixel_size.x - camera_world_size.x, 0.0))
 	camera_origin.y = clampf(camera_origin.y, 0.0, maxf(map_pixel_size.y - camera_world_size.y, 0.0))
-	var destination_size: Vector2 = size
-	var destination_position: Vector2 = Vector2.ZERO
+	var destination_size: Vector2 = camera_world_size * tile_scale
+	var destination_position: Vector2 = (size - destination_size) * 0.5
 	draw_texture_rect_region(map_texture, Rect2(destination_position, destination_size), Rect2(camera_origin, camera_world_size), Color.WHITE, false, true)
-	for tile_value in animated_background_tiles:
-		var tile: Dictionary = tile_value
-		var tile_texture: Texture2D = tile.get("texture") as Texture2D
-		if tile_texture == null:
-			continue
-		var tile_world_position: Vector2 = Vector2(int(tile.get("x", 0)), int(tile.get("y", 0))) * TILE_PIXELS
-		var tile_destination: Rect2 = Rect2(destination_position + (tile_world_position - camera_origin) * tile_scale, Vector2(16.0, 16.0) * tile_scale)
-		draw_texture_rect(tile_texture, tile_destination, false)
-	if movement_active and movement_door:
-		_draw_door_animation(destination_position, camera_origin, tile_scale)
 	var drawables: Array = []
 	if foreground_texture != null:
 		for row_index in range(int(ceilf(map_pixel_size.y / TILE_PIXELS))):
 			drawables.append({"kind": "foreground", "row": row_index, "sort_y": float(row_index + 1), "sort_order": 2})
-	for tile_value in animated_foreground_tiles:
-		var tile: Dictionary = tile_value
-		drawables.append({"kind": "animated_foreground", "texture": tile.get("texture"), "x": int(tile.get("x", 0)), "y": int(tile.get("y", 0)), "sort_y": float(int(tile.get("y", 0)) + 1), "sort_order": 2})
 	for object_value in objects:
 		if not object_value is Dictionary:
 			continue
@@ -511,13 +484,6 @@ func _draw() -> void:
 				var row_destination: Rect2 = Rect2(destination_position + (visible_row_rect.position - camera_origin) * tile_scale, visible_row_rect.size * tile_scale)
 				draw_texture_rect_region(foreground_texture, row_destination, visible_row_rect, Color.WHITE, false, true)
 			continue
-		if str(drawable.get("kind", "sprite")) == "animated_foreground":
-			var animated_texture: Texture2D = drawable.get("texture") as Texture2D
-			if animated_texture != null:
-				var animated_world_position: Vector2 = Vector2(int(drawable.get("x", 0)), int(drawable.get("y", 0))) * TILE_PIXELS
-				var animated_destination: Rect2 = Rect2(destination_position + (animated_world_position - camera_origin) * tile_scale, Vector2(16.0, 16.0) * tile_scale)
-				draw_texture_rect(animated_texture, animated_destination, false)
-			continue
 		var drawable_texture: Texture2D = drawable.get("texture") as Texture2D
 		var drawable_size: Vector2 = Vector2(float(drawable.get("width", 0.0)), float(drawable.get("height", 0.0)))
 		var drawable_anchor: Vector2 = drawable.get("world_anchor", Vector2.ZERO)
@@ -530,17 +496,6 @@ func _sort_drawables(left: Dictionary, right: Dictionary) -> bool:
 	if not is_equal_approx(left_y, right_y):
 		return left_y < right_y
 	return int(left.get("sort_order", 0)) < int(right.get("sort_order", 0))
-
-func _draw_door_animation(destination_position: Vector2, camera_origin: Vector2, tile_scale: float) -> void:
-	var door_position: Vector2 = Vector2(pending_position) * TILE_PIXELS
-	var door_rect: Rect2 = Rect2(destination_position + (door_position - camera_origin) * tile_scale, Vector2(TILE_PIXELS, TILE_PIXELS) * tile_scale)
-	if door_rect.end.x < 0.0 or door_rect.end.y < 0.0 or door_rect.position.x > size.x or door_rect.position.y > size.y:
-		return
-	var door_frame: int = mini(int(floor(door_progress * DOOR_FRAME_COUNT)), DOOR_FRAME_COUNT - 1)
-	var opening_width: float = door_rect.size.x * float(door_frame) / float(DOOR_FRAME_COUNT - 1)
-	var opening_rect: Rect2 = Rect2(door_rect.position.x + (door_rect.size.x - opening_width) * 0.5, door_rect.position.y, opening_width, door_rect.size.y)
-	if opening_rect.size.x > 0.0:
-		draw_rect(opening_rect, Color(0.02, 0.02, 0.03, 0.94), true)
 
 func _stair_offset(progress: float, behavior: int) -> Vector2:
 	var frame: float = progress * 12.0

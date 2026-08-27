@@ -14,6 +14,8 @@ var authenticated := false
 var connecting := false
 var _url := ""
 var _connect_deadline_msec: int = 0
+var _last_authentication_result: Dictionary = {}
+var _manual_polling: bool = false
 
 func connect_and_auth(url: String, ticket: String, content_id: String) -> Dictionary:
 	close()
@@ -26,19 +28,34 @@ func connect_and_auth(url: String, ticket: String, content_id: String) -> Dictio
 	authenticating = true
 	authenticated = false
 	connecting = true
+	_last_authentication_result = {}
 	_connect_deadline_msec = Time.get_ticks_msec() + CONNECT_TIMEOUT_MSEC
+	_manual_polling = true
+	set_process(false)
 	var error := peer.connect_to_url(url)
 	if error != OK:
+		_manual_polling = false
+		set_process(true)
 		connecting = false
 		authenticating = false
 		_connect_deadline_msec = 0
 		return {"ok": false, "error": "WebSocket connection could not start: %s" % error}
-	var result: Variant = await authentication_finished
-	return result if result is Dictionary else {"ok": false, "error": "WebSocket authentication ended unexpectedly"}
+	while authenticating:
+		_poll_peer()
+		if authenticating:
+			await get_tree().process_frame
+	_manual_polling = false
+	set_process(true)
+	return _last_authentication_result if not _last_authentication_result.is_empty() else {"ok": false, "error": "WebSocket authentication ended unexpectedly"}
 
 func _process(_delta: float) -> void:
+	if _manual_polling:
+		return
 	if not connecting and not authenticated:
 		return
+	_poll_peer()
+
+func _poll_peer() -> void:
 	if authenticating and _connect_deadline_msec > 0 and Time.get_ticks_msec() >= _connect_deadline_msec:
 		connecting = false
 		peer.close()
@@ -99,4 +116,5 @@ func _finish_authentication(result: Dictionary) -> void:
 		return
 	authenticating = false
 	_connect_deadline_msec = 0
+	_last_authentication_result = result
 	authentication_finished.emit(result)

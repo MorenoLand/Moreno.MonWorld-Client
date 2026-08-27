@@ -283,80 +283,20 @@ func prepare_map(map_id: String) -> Dictionary:
 	var cached_map: Dictionary = _get_or_build_map_cache(map_id)
 	if not bool(cached_map.get("ok", false)):
 		return cached_map
+	var world_texture: Texture2D = cached_map.get("world_texture") as Texture2D
 	var background_texture: Texture2D = cached_map.get("world_background_texture") as Texture2D
 	var foreground_texture: Texture2D = cached_map.get("world_foreground_texture") as Texture2D
-	if background_texture == null or foreground_texture == null:
+	if world_texture == null or background_texture == null or foreground_texture == null:
+		var world_image: Image = (cached_map.get("base_image") as Image).duplicate()
 		var background_image: Image = (cached_map.get("base_background_image") as Image).duplicate()
 		var foreground_image: Image = (cached_map.get("base_foreground_image") as Image).duplicate()
-		for cell_value in _animated_map_cells(cached_map):
-			var cell: Dictionary = cell_value
-			foreground_image.fill_rect(Rect2i(int(cell.get("x", 0)) * 16, int(cell.get("y", 0)) * 16, 16, 16), Color(0.0, 0.0, 0.0, 0.0))
+		world_texture = ImageTexture.create_from_image(world_image)
 		background_texture = ImageTexture.create_from_image(background_image)
 		foreground_texture = ImageTexture.create_from_image(foreground_image)
+		cached_map["world_texture"] = world_texture
 		cached_map["world_background_texture"] = background_texture
 		cached_map["world_foreground_texture"] = foreground_texture
-	var animation: Dictionary = render_map_animation(map_id, 0)
-	return {"ok": true, "texture": background_texture, "background_texture": background_texture, "foreground_texture": foreground_texture, "animation_tiles": animation.get("tiles", []), "width": int(cached_map.get("width", 0)), "height": int(cached_map.get("height", 0)), "header_offset": int(cached_map.get("header_offset", -1)), "layout_offset": int(cached_map.get("layout_offset", -1)), "objects": cached_map.get("objects", []), "warps": cached_map.get("warps", []), "connections": cached_map.get("connections", []), "map_cells": cached_map.get("map_cells", PackedInt32Array()), "music_id": int(cached_map.get("music_id", 0)), "map_type": int(cached_map.get("map_type", 0)), "animation_phase": 0}
-
-func render_map_animation(map_id: String, animation_tick: int) -> Dictionary:
-	var cached_map: Dictionary = _get_or_build_map_cache(map_id)
-	if not bool(cached_map.get("ok", false)):
-		return cached_map
-	var animation_phase: int = posmod(animation_tick, ANIMATION_PHASE_COUNT)
-	var overlay_cache: Dictionary = cached_map.get("animation_overlays", {})
-	var cache_key: String = str(animation_phase)
-	if overlay_cache.has(cache_key):
-		return {"ok": true, "tiles": overlay_cache[cache_key], "animation_phase": animation_phase}
-	var primary: Dictionary = cached_map.get("primary", {})
-	var secondary: Dictionary = cached_map.get("secondary", {})
-	var animated_primary: PackedByteArray = _animated_primary_tiles(cached_map.get("primary_tiles", PackedByteArray()), animation_phase)
-	var primary_metatile_count: int = _format_int("primary_metatile_count", PRIMARY_METATILE_COUNT)
-	var metatile_textures: Dictionary = {}
-	var tiles: Array = []
-	for cell_value in _animated_map_cells(cached_map):
-		var cell: Dictionary = cell_value
-		var metatile_id: int = int(cell.get("metatile_id", 0))
-		var metatile_key: String = str(metatile_id)
-		var textures: Dictionary = metatile_textures.get(metatile_key, {})
-		if textures.is_empty():
-			var tileset: Dictionary = primary if metatile_id < primary_metatile_count else secondary
-			var metatile_index: int = metatile_id if metatile_id < primary_metatile_count else metatile_id - primary_metatile_count
-			var background_image: Image = Image.create(16, 16, false, Image.FORMAT_RGBA8)
-			background_image.fill(Color("101721"))
-			var foreground_image: Image = Image.create(16, 16, false, Image.FORMAT_RGBA8)
-			foreground_image.fill(Color(0.0, 0.0, 0.0, 0.0))
-			_draw_metatile_layers(background_image, foreground_image, 0, 0, tileset, metatile_index, primary, secondary, animated_primary)
-			textures = {"background_texture": ImageTexture.create_from_image(background_image), "foreground_texture": ImageTexture.create_from_image(foreground_image)}
-			metatile_textures[metatile_key] = textures
-		tiles.append({"x": int(cell.get("x", 0)), "y": int(cell.get("y", 0)), "background_texture": textures.get("background_texture"), "foreground_texture": textures.get("foreground_texture")})
-	overlay_cache[cache_key] = tiles
-	cached_map["animation_overlays"] = overlay_cache
-	return {"ok": true, "tiles": tiles, "animation_phase": animation_phase}
-
-func _animated_map_cells(cached_map: Dictionary) -> Array:
-	if cached_map.has("animated_cells"):
-		return cached_map.get("animated_cells", [])
-	var cells: Array = []
-	var seen: Dictionary = {}
-	var map_cells: PackedInt32Array = cached_map.get("map_cells", PackedInt32Array())
-	var width: int = int(cached_map.get("width", 0))
-	var metatile_id_mask: int = _format_int("map_grid_metatile_id_mask", MAPGRID_METATILE_ID_MASK)
-	for tile_value in cached_map.get("animated_tiles", []):
-		if not tile_value is Dictionary:
-			continue
-		var tile: Dictionary = tile_value
-		var x: int = int(tile.get("x", 0)) / 16
-		var y: int = int(tile.get("y", 0)) / 16
-		var key: String = "%d:%d" % [x, y]
-		if seen.has(key):
-			continue
-		var cell_index: int = y * width + x
-		if cell_index < 0 or cell_index >= map_cells.size():
-			continue
-		seen[key] = true
-		cells.append({"x": x, "y": y, "metatile_id": int(map_cells[cell_index]) & metatile_id_mask})
-	cached_map["animated_cells"] = cells
-	return cells
+	return {"ok": true, "texture": world_texture, "background_texture": background_texture, "foreground_texture": foreground_texture, "world_texture": world_texture, "width": int(cached_map.get("width", 0)), "height": int(cached_map.get("height", 0)), "header_offset": int(cached_map.get("header_offset", -1)), "layout_offset": int(cached_map.get("layout_offset", -1)), "objects": cached_map.get("objects", []), "warps": cached_map.get("warps", []), "connections": cached_map.get("connections", []), "map_cells": cached_map.get("map_cells", PackedInt32Array()), "music_id": int(cached_map.get("music_id", 0)), "map_type": int(cached_map.get("map_type", 0)), "animation_phase": 0}
 
 func _get_or_build_map_cache(map_id: String, map_value: Dictionary = {}) -> Dictionary:
 	var cached_map: Dictionary = map_cache.get(map_id, {})

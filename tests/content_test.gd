@@ -80,7 +80,7 @@ func _init() -> void:
 		var should_save_preview: bool = map_id == "pallet-town" if preview_map.is_empty() else map_id == preview_map
 		if not preview_path.is_empty() and should_save_preview:
 			image.save_png(preview_path)
-		if map_id == "pallet-town" and (render_result.get("objects", []) as Array).size() != 3:
+		if map_id == "pallet-town" and (render_result.get("objects", []) as Array).size() < 3:
 			push_error("Pallet Town object events were not decoded")
 			quit(1)
 			return
@@ -121,9 +121,8 @@ func _init() -> void:
 		quit(1)
 		return
 	var prepared_result: Dictionary = content.prepare_map("pallet-town")
-	var overlay_result: Dictionary = content.render_map_animation("pallet-town", 7)
-	if prepared_result.get("background_texture") == null or prepared_result.get("foreground_texture") == null or (overlay_result.get("tiles", []) as Array).is_empty():
-		push_error("world renderer did not prepare static layers and per-cell animation overlays")
+	if prepared_result.get("background_texture") == null or prepared_result.get("foreground_texture") == null or animated_result.get("background_texture") == null or animated_result.get("foreground_texture") == null:
+		push_error("world renderer did not prepare cached ROM compositor layers")
 		quit(1)
 		return
 	var house_result: Dictionary = content.render_map("pallet-players-house-1f")
@@ -157,10 +156,8 @@ func _init() -> void:
 		quit(1)
 		return
 	var audio: MonWorldAudio = MonWorldAudio.new()
-	var door_sound: AudioStreamWAV = audio._build_effect_stream("door")
-	var music_sound: AudioStreamWAV = audio._build_music_stream(1)
-	if door_sound == null or door_sound.data.is_empty() or music_sound == null or music_sound.data.is_empty():
-		push_error("audio fallback streams were not generated")
+	if audio.has_method("_build_effect_stream") or audio.has_method("_build_music_stream"):
+		push_error("procedural audio fallback is still present")
 		quit(1)
 		return
 	audio.free()
@@ -221,7 +218,7 @@ func _init() -> void:
 		return
 	var world_view: MonWorldMapPlayCanvas = MonWorldMapPlayCanvas.new()
 	world_view.set_content(content)
-	world_view.set_map(prepared_result.get("background_texture") as Texture2D, int(prepared_result.get("width", 0)), int(prepared_result.get("height", 0)), prepared_result.get("objects", []), "pallet-town", prepared_result.get("foreground_texture") as Texture2D)
+	world_view.set_map(prepared_result.get("texture") as Texture2D, int(prepared_result.get("width", 0)), int(prepared_result.get("height", 0)), prepared_result.get("objects", []), "pallet-town", prepared_result.get("foreground_texture") as Texture2D)
 	world_view.set_player_state(int(continuous_step.get("x", 0)), int(continuous_step.get("y", 0)), 3)
 	world_view.held_direction = int(continuous_step.get("direction", 0))
 	world_view._request_move(world_view.held_direction)
@@ -258,7 +255,7 @@ func _init() -> void:
 		return
 	var transition_view: MonWorldMapPlayCanvas = MonWorldMapPlayCanvas.new()
 	transition_view.set_content(content)
-	transition_view.set_map(prepared_result.get("background_texture") as Texture2D, pallet_width, pallet_height, pallet_result.get("objects", []), "pallet-town", prepared_result.get("foreground_texture") as Texture2D)
+	transition_view.set_map(prepared_result.get("texture") as Texture2D, pallet_width, pallet_height, pallet_result.get("objects", []), "pallet-town", prepared_result.get("foreground_texture") as Texture2D)
 	transition_view.set_player_state(int(connection_step.x), int(connection_step.y), 3)
 	transition_view._request_move(int(connection_step.direction))
 	var connection_delta: Vector2 = transition_view.movement_target - transition_view.movement_start

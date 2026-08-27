@@ -50,10 +50,6 @@ func _build_ui() -> void:
 	title.text = "Multiplayer world client"
 	title.add_theme_font_size_override("font_size", 28)
 	box.add_child(title)
-	var description := Label.new()
-	description.text = "Use a compatible local FireRed or LeafGreen ROM. Graphics patches are supported when the source map layout is preserved."
-	description.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	box.add_child(description)
 	server_input = LineEdit.new()
 	server_input.placeholder_text = "Server URL"
 	var settings: Dictionary = MonWorldStorage.read_json(MonWorldStorage.SETTINGS_FILE)
@@ -128,7 +124,7 @@ func _refresh_content() -> void:
 		_set_status("Could not read server content metadata: %s" % result.error, true)
 		return
 	var manifest: Dictionary = result.data if result.data is Dictionary else {}
-	_set_status("Server content: %s. Select a matching local ROM when required." % str(manifest.get("content_id", "unknown")))
+	_set_status("")
 
 func _initialize_content() -> void:
 	await _refresh_content()
@@ -143,7 +139,7 @@ func _on_content_loaded(content: MonWorldContent) -> void:
 	if result.ok:
 		rom_button.text = "ROM: %s" % content.content_id()
 		preview_button.disabled = false
-		_set_status("Local ROM loaded for this client session.")
+		_set_status("")
 	else:
 		_set_status(str(result.error), true)
 
