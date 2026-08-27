@@ -7,7 +7,9 @@ var selected_map_id: String = ""
 var map_title: Label
 var map_details: Label
 var map_status: Label
-var map_view: TextureRect
+var map_view: MonWorldMapPreviewCanvas
+var animation_tick: int = 0
+var animation_elapsed: float = 0.0
 
 func _ready() -> void:
 	if content == null:
@@ -22,6 +24,16 @@ func _ready() -> void:
 	var maps: Array = content.manifest.get("maps", [])
 	if not maps.is_empty() and maps[0] is Dictionary:
 		_select_map(str(maps[0].get("id", "")))
+
+func _process(delta: float) -> void:
+	if content == null or selected_map_id.is_empty():
+		return
+	animation_elapsed += delta
+	if animation_elapsed < 0.125:
+		return
+	animation_elapsed = 0.0
+	animation_tick += 1
+	_render_selected_map()
 
 func _build_ui() -> void:
 	var background: ColorRect = ColorRect.new()
@@ -74,10 +86,7 @@ func _build_ui() -> void:
 	var panel: PanelContainer = PanelContainer.new()
 	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	box.add_child(panel)
-	map_view = TextureRect.new()
-	map_view.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	map_view.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	map_view.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	map_view = MonWorldMapPreviewCanvas.new()
 	map_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	map_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	map_view.custom_minimum_size = Vector2(0, 260)
@@ -107,16 +116,23 @@ func _select_map(map_id: String) -> void:
 	if map_value.is_empty():
 		return
 	selected_map_id = map_id
-	map_title.text = str(map_value.get("name", map_id))
+	animation_tick = 0
+	animation_elapsed = 0.0
+	_render_selected_map()
+
+func _render_selected_map() -> void:
+	if content == null or selected_map_id.is_empty():
+		return
+	var map_value: Dictionary = content.map_data(selected_map_id)
+	map_title.text = str(map_value.get("name", selected_map_id))
 	map_details.text = "Loading ROM tiles..."
 	map_status.text = ""
-	map_view.texture = null
-	var result: Dictionary = content.render_map(map_id)
+	var result: Dictionary = content.render_map(selected_map_id, animation_tick)
 	if not bool(result.get("ok", false)):
 		map_details.text = "%d × %d map cells" % [int(map_value.get("width", 0)), int(map_value.get("height", 0))]
 		map_status.text = str(result.get("error", "Map rendering failed"))
 		return
 	var texture: Texture2D = result.get("texture") as Texture2D
-	map_view.texture = texture
-	map_details.text = "%d × %d map cells  •  actual 16×16 metatiles" % [int(result.get("width", 0)), int(result.get("height", 0))]
-	map_status.text = "Rendered from the selected ROM in memory."
+	map_view.set_map(texture, int(result.get("width", 0)), int(result.get("height", 0)), result.get("objects", []))
+	map_details.text = "%d × %d map cells  •  actual 16×16 metatiles  •  %d ROM object events" % [int(result.get("width", 0)), int(result.get("height", 0)), (result.get("objects", []) as Array).size()]
+	map_status.text = "Rendered from the selected ROM in memory; map animations are running."
