@@ -51,7 +51,7 @@ func _build_ui() -> void:
 	title.add_theme_font_size_override("font_size", 28)
 	box.add_child(title)
 	var description := Label.new()
-	description.text = "Use a local FireRed Rev1 or LeafGreen Rev1 ROM."
+	description.text = "Use a compatible local FireRed or LeafGreen ROM. Graphics patches are supported when the source map layout is preserved."
 	description.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	box.add_child(description)
 	server_input = LineEdit.new()

@@ -29,6 +29,13 @@ func _init() -> void:
 		push_error("ROM map manifest did not expose the selectable map table")
 		quit(1)
 		return
+	var patched_data: PackedByteArray = content.rom_data.duplicate()
+	patched_data[0x1000] = (int(patched_data[0x1000]) + 1) & 0xFF
+	var patched_result: Dictionary = MonWorldContent.from_rom_bytes(patched_data)
+	if not bool(patched_result.get("ok", false)):
+		push_error("graphics-patched compatible ROM was rejected: %s" % str(patched_result.get("error", "unknown error")))
+		quit(1)
+		return
 	for extra_map_id in ["rom-map-3-2", "rom-map-3-20", "viridian-forest", "pallet-players-house-1f", "viridian-pokemon-center-1f"]:
 		var extra_result: Dictionary = content.render_map(extra_map_id)
 		if not bool(extra_result.get("ok", false)):

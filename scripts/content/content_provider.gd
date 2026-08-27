@@ -3,7 +3,7 @@ extends Node
 
 const REGION_OPTIONS: Array = [
 	{"region": "Unova", "title": "Black/White ROM", "enabled": false, "description": "Unavailable until Unova content is implemented."},
-	{"region": "Kanto", "title": "FireRed/LeafGreen ROM", "enabled": true, "description": "Accepts a verified FireRed Rev1 or LeafGreen Rev1 ROM for the initial Pallet Town, Route 1, and Viridian City slice."},
+	{"region": "Kanto", "title": "FireRed/LeafGreen ROM", "enabled": true, "description": "Accepts a compatible FireRed or LeafGreen base ROM, including graphics patches that preserve the source map layout."},
 	{"region": "Hoenn", "title": "Emerald ROM", "enabled": false, "description": "Unavailable until Hoenn content is implemented."},
 	{"region": "Sinnoh", "title": "Platinum ROM", "enabled": false, "description": "Unavailable until Sinnoh content is implemented."},
 	{"region": "Johto", "title": "HeartGold/SoulSilver ROM", "enabled": false, "description": "Unavailable until Johto content is implemented."}
@@ -75,7 +75,7 @@ func choose(parent: Node) -> void:
 		row.add_child(info_button)
 		box.add_child(row)
 	var note: Label = Label.new()
-	note.text = "The Kanto row accepts verified FireRed Rev1 or LeafGreen Rev1 .gba ROMs. The ROM is read locally and never uploaded."
+	note.text = "The Kanto row accepts compatible FireRed or LeafGreen .gba ROMs, including graphics patches that preserve the source map layout. The ROM is read locally and never uploaded."
 	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	note.modulate = Color("b8c7d9")
 	box.add_child(note)

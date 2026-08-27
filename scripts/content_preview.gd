@@ -130,7 +130,7 @@ func _metadata_text() -> String:
 		return "No local ROM is loaded."
 	var source: Dictionary = content.manifest.get("source", {})
 	var header: Dictionary = content.rom_header
-	return "%s %s  •  %s  •  %s  •  %s\nSHA-1: %s  •  Content ID: %s" % [str(source.get("game", "Unknown")), str(source.get("revision", "")), str(header.get("title", "Unknown")), str(header.get("game_code", "Unknown")), str(header.get("maker_code", "Unknown")), content.rom_sha1, content.content_id()]
+	return "%s %s  •  %s  •  %s  •  %s\nROM fingerprint: %s  •  Content ID: %s" % [str(source.get("game", "Unknown")), str(source.get("revision", "")), str(header.get("title", "Unknown")), str(header.get("game_code", "Unknown")), str(header.get("maker_code", "Unknown")), content.rom_sha1, content.content_id()]
 
 func _select_map(map_id: String) -> void:
 	if content == null:

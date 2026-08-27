@@ -2,8 +2,6 @@ class_name MonWorldContent
 extends RefCounted
 
 const SCHEMA_VERSION: int = 1
-const FIRE_RED_REV1_SHA1: String = "dd5945db9b930750cb39d00c84da8571feebf417"
-const LEAF_GREEN_REV1_SHA1: String = "7862c67bdecbe21d1d69ce082ce34327e1c6ed5e"
 const KANTO_GBA_CONTENT_ID: String = "kanto-gba-slice-v1"
 const GBA_TITLE_OFFSET: int = 0xA0
 const GBA_TITLE_LENGTH: int = 12
@@ -11,17 +9,17 @@ const GBA_GAME_CODE_OFFSET: int = 0xAC
 const GBA_GAME_CODE_LENGTH: int = 4
 const GBA_MAKER_CODE_OFFSET: int = 0xB0
 const GBA_MAKER_CODE_LENGTH: int = 2
-	const FIRE_RED_REV1_TOWNS_MAP_POINTERS_OFFSET: int = 0x352364
-	const FIRE_RED_REV1_MAP_GROUPS_OFFSET: int = 0x352718
-	const MAP_HEADER_SIZE: int = 0x1C
-	const MAPGRID_METATILE_ID_MASK: int = 0x03FF
-	const MAPGRID_COLLISION_MASK: int = 0x0C00
-	const MAPGRID_ELEVATION_MASK: int = 0xF000
-	const MAPGRID_COLLISION_SHIFT: int = 10
-	const MAPGRID_ELEVATION_SHIFT: int = 12
-	const MAPGRID_UNDEFINED: int = 0x03FF
-	const METATILE_BEHAVIOR_MASK: int = 0x000001FF
-	const PRIMARY_METATILE_COUNT: int = 640
+const FIRE_RED_REV1_TOWNS_MAP_POINTERS_OFFSET: int = 0x352364
+const FIRE_RED_REV1_MAP_GROUPS_OFFSET: int = 0x352718
+const MAP_HEADER_SIZE: int = 0x1C
+const MAPGRID_METATILE_ID_MASK: int = 0x03FF
+const MAPGRID_COLLISION_MASK: int = 0x0C00
+const MAPGRID_ELEVATION_MASK: int = 0xF000
+const MAPGRID_COLLISION_SHIFT: int = 10
+const MAPGRID_ELEVATION_SHIFT: int = 12
+const MAPGRID_UNDEFINED: int = 0x03FF
+const METATILE_BEHAVIOR_MASK: int = 0x000001FF
+const PRIMARY_METATILE_COUNT: int = 640
 const PRIMARY_TILE_COUNT: int = 640
 const PRIMARY_PALETTE_COUNT: int = 7
 const SECONDARY_PALETTE_COUNT: int = 6
@@ -29,24 +27,24 @@ const SECONDARY_ROM_PALETTE_COUNT: int = 16
 const TILE_BYTES: int = 32
 const TILES_PER_METATILE: int = 8
 const MAPGRID_LAYER_TYPE_SHIFT: int = 29
-	const MAPGRID_LAYER_TYPE_MASK: int = 0x60000000
-	const MAP_EVENTS_HEADER_SIZE: int = 0x14
-	const MAP_OBJECT_EVENT_SIZE: int = 0x18
-	const MAP_WARP_EVENT_SIZE: int = 0x08
-	const MAP_CONNECTIONS_HEADER_SIZE: int = 0x08
-	const MAP_CONNECTION_SIZE: int = 0x0C
-	const CONNECTION_SOUTH: int = 1
-	const CONNECTION_NORTH: int = 2
-	const CONNECTION_WEST: int = 3
-	const CONNECTION_EAST: int = 4
-	const MAP_GROUP_DUNGEONS: int = 1
-	const MAP_GROUP_TOWNS_AND_ROUTES: int = 3
-	const MAP_GROUP_INDOOR_PALLET: int = 4
-	const MAP_GROUP_INDOOR_VIRIDIAN: int = 5
+const MAPGRID_LAYER_TYPE_MASK: int = 0x60000000
+const MAP_EVENTS_HEADER_SIZE: int = 0x14
+const MAP_OBJECT_EVENT_SIZE: int = 0x18
+const MAP_WARP_EVENT_SIZE: int = 0x08
+const MAP_CONNECTIONS_HEADER_SIZE: int = 0x08
+const MAP_CONNECTION_SIZE: int = 0x0C
+const CONNECTION_SOUTH: int = 1
+const CONNECTION_NORTH: int = 2
+const CONNECTION_WEST: int = 3
+const CONNECTION_EAST: int = 4
+const MAP_GROUP_DUNGEONS: int = 1
+const MAP_GROUP_TOWNS_AND_ROUTES: int = 3
+const MAP_GROUP_INDOOR_PALLET: int = 4
+const MAP_GROUP_INDOOR_VIRIDIAN: int = 5
 const FIRE_RED_GENERAL_WATER_FRAME_OFFSETS: Array[int] = [0x3A76E4, 0x3A7CE4, 0x3A82E4, 0x3A88E4, 0x3A8EE4, 0x3A94E4, 0x3A9AE4, 0x3AA0E4]
 const FIRE_RED_GENERAL_SAND_FRAME_OFFSETS: Array[int] = [0x3AA6E4, 0x3AA924, 0x3AAB64, 0x3AADA4, 0x3AAFE4, 0x3AB224, 0x3AB464, 0x3AB6A4]
 const FIRE_RED_GENERAL_FLOWER_FRAME_OFFSETS: Array[int] = [0x3A7450, 0x3A74D0, 0x3A7550, 0x3A75D0, 0x3A7650]
-	const FIRE_RED_REV1_OBJECT_SPRITES: Dictionary = {
+const FIRE_RED_REV1_OBJECT_SPRITES: Dictionary = {
 	16: {"data_offset": 0x36D998, "width": 16, "height": 16, "frame_bytes": 128, "frame_count": 9, "palette_offset": 0x36D8F8},
 	18: {"data_offset": 0x36F018, "width": 16, "height": 32, "frame_bytes": 256, "frame_count": 10, "palette_offset": 0x36D898},
 	19: {"data_offset": 0x36FA18, "width": 16, "height": 32, "frame_bytes": 256, "frame_count": 10, "palette_offset": 0x36D8D8},
@@ -59,8 +57,8 @@ const FIRE_RED_GENERAL_FLOWER_FRAME_OFFSETS: Array[int] = [0x3A7450, 0x3A74D0, 0
 	92: {"data_offset": 0x38BA98, "width": 16, "height": 16, "frame_bytes": 128, "frame_count": 1, "palette_offset": 0x36D8F8},
 	95: {"data_offset": 0x394618, "width": 16, "height": 16, "frame_bytes": 128, "frame_count": 4, "palette_offset": 0x36D8D8}
 	}
-	const FIRE_RED_TOWNS_AND_ROUTES_NAMES: Array[String] = ["PalletTown", "ViridianCity", "PewterCity", "CeruleanCity", "LavenderTown", "VermilionCity", "CeladonCity", "FuchsiaCity", "CinnabarIsland", "IndigoPlateau_Exterior", "SaffronCity", "SaffronCity_Connection", "OneIsland", "TwoIsland", "ThreeIsland", "FourIsland", "FiveIsland", "SevenIsland", "SixIsland", "Route1", "Route2", "Route3", "Route4", "Route5", "Route6", "Route7", "Route8", "Route9", "Route10", "Route11", "Route12", "Route13", "Route14", "Route15", "Route16", "Route17", "Route18", "Route19", "Route20", "Route21_North", "Route21_South", "Route22", "Route23", "Route24", "Route25"]
-	const FIRE_RED_EXTRA_TEST_MAPS: Array[Dictionary] = [{"group": MAP_GROUP_DUNGEONS, "index": 0, "id": "viridian-forest", "name": "Viridian Forest"}, {"group": MAP_GROUP_INDOOR_PALLET, "index": 0, "id": "pallet-players-house-1f", "name": "Pallet Town Players House 1F"}, {"group": MAP_GROUP_INDOOR_PALLET, "index": 1, "id": "pallet-players-house-2f", "name": "Pallet Town Players House 2F"}, {"group": MAP_GROUP_INDOOR_PALLET, "index": 2, "id": "pallet-rivals-house", "name": "Pallet Town Rivals House"}, {"group": MAP_GROUP_INDOOR_PALLET, "index": 3, "id": "pallet-oaks-lab", "name": "Pallet Town Professor Oaks Lab"}, {"group": MAP_GROUP_INDOOR_VIRIDIAN, "index": 0, "id": "viridian-house", "name": "Viridian City House"}, {"group": MAP_GROUP_INDOOR_VIRIDIAN, "index": 1, "id": "viridian-gym", "name": "Viridian City Gym"}, {"group": MAP_GROUP_INDOOR_VIRIDIAN, "index": 2, "id": "viridian-school", "name": "Viridian City School"}, {"group": MAP_GROUP_INDOOR_VIRIDIAN, "index": 3, "id": "viridian-mart", "name": "Viridian City Mart"}, {"group": MAP_GROUP_INDOOR_VIRIDIAN, "index": 4, "id": "viridian-pokemon-center-1f", "name": "Viridian City Pokemon Center 1F"}, {"group": MAP_GROUP_INDOOR_VIRIDIAN, "index": 5, "id": "viridian-pokemon-center-2f", "name": "Viridian City Pokemon Center 2F"}]
+const FIRE_RED_TOWNS_AND_ROUTES_NAMES: Array[String] = ["PalletTown", "ViridianCity", "PewterCity", "CeruleanCity", "LavenderTown", "VermilionCity", "CeladonCity", "FuchsiaCity", "CinnabarIsland", "IndigoPlateau_Exterior", "SaffronCity", "SaffronCity_Connection", "OneIsland", "TwoIsland", "ThreeIsland", "FourIsland", "FiveIsland", "SevenIsland", "SixIsland", "Route1", "Route2", "Route3", "Route4", "Route5", "Route6", "Route7", "Route8", "Route9", "Route10", "Route11", "Route12", "Route13", "Route14", "Route15", "Route16", "Route17", "Route18", "Route19", "Route20", "Route21_North", "Route21_South", "Route22", "Route23", "Route24", "Route25"]
+const FIRE_RED_EXTRA_TEST_MAPS: Array[Dictionary] = [{"group": MAP_GROUP_DUNGEONS, "index": 0, "id": "viridian-forest", "name": "Viridian Forest"}, {"group": MAP_GROUP_INDOOR_PALLET, "index": 0, "id": "pallet-players-house-1f", "name": "Pallet Town Players House 1F"}, {"group": MAP_GROUP_INDOOR_PALLET, "index": 1, "id": "pallet-players-house-2f", "name": "Pallet Town Players House 2F"}, {"group": MAP_GROUP_INDOOR_PALLET, "index": 2, "id": "pallet-rivals-house", "name": "Pallet Town Rivals House"}, {"group": MAP_GROUP_INDOOR_PALLET, "index": 3, "id": "pallet-oaks-lab", "name": "Pallet Town Professor Oaks Lab"}, {"group": MAP_GROUP_INDOOR_VIRIDIAN, "index": 0, "id": "viridian-house", "name": "Viridian City House"}, {"group": MAP_GROUP_INDOOR_VIRIDIAN, "index": 1, "id": "viridian-gym", "name": "Viridian City Gym"}, {"group": MAP_GROUP_INDOOR_VIRIDIAN, "index": 2, "id": "viridian-school", "name": "Viridian City School"}, {"group": MAP_GROUP_INDOOR_VIRIDIAN, "index": 3, "id": "viridian-mart", "name": "Viridian City Mart"}, {"group": MAP_GROUP_INDOOR_VIRIDIAN, "index": 4, "id": "viridian-pokemon-center-1f", "name": "Viridian City Pokemon Center 1F"}, {"group": MAP_GROUP_INDOOR_VIRIDIAN, "index": 5, "id": "viridian-pokemon-center-2f", "name": "Viridian City Pokemon Center 2F"}]
 
 var manifest: Dictionary = {}
 var rom_data: PackedByteArray = PackedByteArray()
@@ -79,23 +77,23 @@ static func from_rom_path(path: String) -> Dictionary:
 	return from_rom_bytes(data)
 
 static func from_rom_bytes(data: PackedByteArray) -> Dictionary:
+	var header: Dictionary = _read_gba_header(data)
+	if header.is_empty():
+		return {"ok": false, "error": "ROM is too small to contain a valid GBA header"}
+	var source_game: String = _source_game_from_header(header)
+	if source_game.is_empty():
+		return {"ok": false, "error": "unsupported GBA game code %s; expected FireRed BPRE or LeafGreen BPRF" % str(header.get("game_code", ""))}
+	if source_game == "FireRed" and not _has_fire_red_map_layout(data):
+		return {"ok": false, "error": "FireRed header found, but the expected map layout is unavailable; use a Rev1-compatible ROM or patch"}
 	var context: HashingContext = HashingContext.new()
-	var start_error: int = context.start(HashingContext.HASH_SHA1)
-	if start_error != OK:
-		return {"ok": false, "error": "could not initialize ROM hash"}
-	context.update(data)
-	var rom_sha1: String = context.finish().hex_encode()
-	var source_game: String = ""
-	if rom_sha1 == FIRE_RED_REV1_SHA1:
-		source_game = "FireRed"
-	elif rom_sha1 == LEAF_GREEN_REV1_SHA1:
-		source_game = "LeafGreen"
-	else:
-		return {"ok": false, "error": "unsupported ROM SHA-1 %s; expected verified FireRed Rev1 or LeafGreen Rev1; patched or unknown ROMs are rejected" % rom_sha1}
+	var rom_sha1: String = ""
+	if context.start(HashingContext.HASH_SHA1) == OK:
+		context.update(data)
+		rom_sha1 = context.finish().hex_encode()
 	var content: MonWorldContent = MonWorldContent.new()
 	content.rom_data = data
 	content.rom_sha1 = rom_sha1
-	content.rom_header = _read_gba_header(data)
+	content.rom_header = header
 	content.manifest = _kanto_manifest(source_game, rom_sha1)
 	content._hydrate_manifest()
 	return {"ok": true, "content": content}
@@ -104,6 +102,52 @@ static func _read_gba_header(data: PackedByteArray) -> Dictionary:
 	if data.size() < GBA_MAKER_CODE_OFFSET + GBA_MAKER_CODE_LENGTH:
 		return {}
 	return {"title": data.slice(GBA_TITLE_OFFSET, GBA_TITLE_OFFSET + GBA_TITLE_LENGTH).get_string_from_ascii().strip_edges(), "game_code": data.slice(GBA_GAME_CODE_OFFSET, GBA_GAME_CODE_OFFSET + GBA_GAME_CODE_LENGTH).get_string_from_ascii(), "maker_code": data.slice(GBA_MAKER_CODE_OFFSET, GBA_MAKER_CODE_OFFSET + GBA_MAKER_CODE_LENGTH).get_string_from_ascii()}
+
+static func _source_game_from_header(header: Dictionary) -> String:
+	if str(header.get("maker_code", "")).to_upper() != "01":
+		return ""
+	match str(header.get("game_code", "")).to_upper():
+		"BPRE":
+			return "FireRed"
+		"BPRF":
+			return "LeafGreen"
+	return ""
+
+static func _has_fire_red_map_layout(data: PackedByteArray) -> bool:
+	var group_table_offset: int = _read_gba_pointer(data, FIRE_RED_REV1_MAP_GROUPS_OFFSET)
+	if group_table_offset < 0:
+		return false
+	var towns_table_offset: int = _read_gba_pointer(data, group_table_offset + MAP_GROUP_TOWNS_AND_ROUTES * 4)
+	if towns_table_offset < 0:
+		return false
+	for map_index in [0, 1, 19]:
+		var header_offset: int = _read_gba_pointer(data, towns_table_offset + int(map_index) * 4)
+		if header_offset < 0 or not _valid_data_range(data, header_offset, MAP_HEADER_SIZE):
+			return false
+		var layout_offset: int = _read_gba_pointer(data, header_offset)
+		if layout_offset < 0 or not _valid_data_range(data, layout_offset, MAP_HEADER_SIZE):
+			return false
+		var width: int = _read_data_u32(data, layout_offset)
+		var height: int = _read_data_u32(data, layout_offset + 4)
+		if width <= 0 or height <= 0 or width > 512 or height > 512:
+			return false
+	return true
+
+static func _read_gba_pointer(data: PackedByteArray, offset: int) -> int:
+	if not _valid_data_range(data, offset, 4):
+		return -1
+	var value: int = _read_data_u32(data, offset)
+	var region: int = value & 0xFF000000
+	if region != 0x08000000 and region != 0x09000000 and region != 0x0A000000:
+		return -1
+	var file_offset: int = value & 0x01FFFFFF
+	return file_offset if _valid_data_range(data, file_offset, 1) else -1
+
+static func _read_data_u32(data: PackedByteArray, offset: int) -> int:
+	return int(data[offset]) | (int(data[offset + 1]) << 8) | (int(data[offset + 2]) << 16) | (int(data[offset + 3]) << 24)
+
+static func _valid_data_range(data: PackedByteArray, offset: int, length: int) -> bool:
+	return offset >= 0 and length >= 0 and offset <= data.size() and length <= data.size() - offset
 
 static func _kanto_manifest(source_game: String, rom_sha1: String) -> Dictionary:
 	var maps: Array = []
@@ -199,7 +243,7 @@ func render_map(map_id: String, animation_tick: int = 0) -> Dictionary:
 		return {"ok": false, "error": "unknown map"}
 	var source: Dictionary = manifest.get("source", {})
 	if str(source.get("game", "")) != "FireRed":
-		return {"ok": false, "error": "direct map rendering currently supports FireRed Rev1; LeafGreen map offsets are not verified yet"}
+		return {"ok": false, "error": "direct map rendering currently supports FireRed-compatible layouts; LeafGreen map offsets are not verified yet"}
 	var cached_map: Dictionary = _get_or_build_map_cache(map_id, map_value)
 	if not bool(cached_map.get("ok", false)):
 		return cached_map
