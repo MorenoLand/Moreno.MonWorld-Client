@@ -17,11 +17,11 @@ var ignore_next_action: bool = false
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
-	set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
-	offset_left = 28.0
+	set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
 	offset_top = -170.0
-	offset_right = -28.0
 	offset_bottom = -28.0
+	resized.connect(_layout_panel)
+	_layout_panel()
 	var margin: MarginContainer = MarginContainer.new()
 	margin.add_theme_constant_override("margin_left", 18)
 	margin.add_theme_constant_override("margin_top", 12)
@@ -45,6 +45,16 @@ func _ready() -> void:
 	arrow_row.add_child(arrow_label)
 	visible = false
 	set_process(false)
+
+func _layout_panel() -> void:
+	var viewport_width: float = size.x
+	if viewport_width <= 0.0:
+		viewport_width = get_viewport_rect().size.x
+	var panel_width: float = clampf(viewport_width * 0.70, 300.0, 780.0)
+	if viewport_width > 0.0:
+		panel_width = minf(panel_width, maxf(viewport_width - 24.0, 240.0))
+	offset_left = -panel_width * 0.5
+	offset_right = panel_width * 0.5
 
 func show_text(value: String, suppress_action: bool = false) -> void:
 	show_pages([value], suppress_action)

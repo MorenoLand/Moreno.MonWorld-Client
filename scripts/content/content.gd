@@ -855,22 +855,29 @@ func _read_dialogue_for_script(script_offset: int) -> Dictionary:
 	var cursor: int = script_offset
 	var limit: int = mini(rom_data.size(), script_offset + 512)
 	var text_offset: int = -1
+	var data_slot_zero: int = -1
 	while cursor < limit:
 		var opcode: int = int(rom_data[cursor])
 		if opcode == 0x0F and cursor + 6 <= limit:
 			if int(rom_data[cursor + 1]) == 0:
 				var loadword_offset: int = _read_rom_pointer(cursor + 2)
-				if loadword_offset >= 0:
-					text_offset = loadword_offset
+				if loadword_offset >= 0 and data_slot_zero < 0:
+					data_slot_zero = loadword_offset
 			cursor += 6
 			continue
 		if opcode == 0x67 and cursor + 5 <= limit:
 			var message_offset: int = _read_rom_pointer(cursor + 1)
 			if message_offset >= 0:
 				text_offset = message_offset
+			elif data_slot_zero >= 0:
+				text_offset = data_slot_zero
 			cursor += 5
+			if text_offset >= 0:
+				break
 			continue
 		cursor += 1
+	if text_offset < 0:
+		text_offset = data_slot_zero
 	if text_offset < 0:
 		return {}
 	return _decode_rom_text(text_offset)
@@ -930,6 +937,8 @@ func _decode_rom_character(value: int) -> String:
 	if value >= 0xD5 and value <= 0xEE:
 		return char(97 + value - 0xD5)
 	match value:
+		0x1B:
+			return "é"
 		0xAB:
 			return "!"
 		0xAC:
@@ -940,10 +949,14 @@ func _decode_rom_character(value: int) -> String:
 			return "-"
 		0xB0:
 			return "…"
+		0xB4:
+			return "'"
 		0xB8:
 			return ","
 		0xBA:
 			return "/"
+		0xF0:
+			return ":"
 	return "{0x%02X}" % value
 
 func _placeholder_name(value: int) -> String:

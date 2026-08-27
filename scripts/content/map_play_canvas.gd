@@ -8,6 +8,7 @@ signal interaction_requested(dialogue: Dictionary)
 const TILE_PIXELS: float = 16.0
 const CAMERA_MAX_CELLS_X: int = 30
 const CAMERA_MAX_CELLS_Y: int = 20
+const MAX_TILE_SCALE: float = 4.0
 const NORMAL_STEP_DURATION: float = 16.0 / 60.0
 
 var content: MonWorldContent
@@ -355,7 +356,7 @@ func _draw() -> void:
 	if map_texture == null or map_pixel_size.x <= 0.0 or map_pixel_size.y <= 0.0 or not has_spawn:
 		return
 	var maximum_camera_size: Vector2 = Vector2(minf(map_pixel_size.x, CAMERA_MAX_CELLS_X * TILE_PIXELS), minf(map_pixel_size.y, CAMERA_MAX_CELLS_Y * TILE_PIXELS))
-	var tile_scale: float = maxf(ceilf(maxf(size.x / maximum_camera_size.x, size.y / maximum_camera_size.y)), 1.0)
+	var tile_scale: float = minf(maxf(ceilf(maxf(size.x / maximum_camera_size.x, size.y / maximum_camera_size.y)), 1.0), MAX_TILE_SCALE)
 	var camera_world_size: Vector2 = size / tile_scale
 	var world_player: Vector2 = movement_start.lerp(movement_target, clampf(movement_elapsed / movement_duration, 0.0, 1.0)) if movement_active else Vector2(player_position)
 	if movement_active and movement_jump:

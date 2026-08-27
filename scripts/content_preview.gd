@@ -9,6 +9,7 @@ var map_details: Label
 var map_status: Label
 var map_view: MonWorldMapPreviewCanvas
 var play_view: MonWorldMapPlayCanvas
+var hud: MonWorldHud
 var map_selector: OptionButton
 var play_button: Button
 var preview_button: Button
@@ -123,6 +124,10 @@ func _build_ui() -> void:
 	play_view.back_requested.connect(_on_preview_pressed)
 	play_view.interaction_requested.connect(_on_interaction_requested)
 	add_child(play_view)
+	hud = MonWorldHud.new()
+	hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	hud.visible = false
+	play_view.add_child(hud)
 	_build_dialogue_overlay()
 	map_status = Label.new()
 	map_status.modulate = Color("b8c7d9")
@@ -179,6 +184,8 @@ func _on_play_pressed() -> void:
 		return
 	_set_playing(true)
 	play_view.set_map(prepared.get("background_texture", prepared.get("texture")) as Texture2D, int(prepared.get("width", 0)), int(prepared.get("height", 0)), prepared.get("objects", []), selected_map_id, prepared.get("foreground_texture") as Texture2D)
+	if hud != null:
+		hud.set_state(content, selected_map_id)
 	play_view.set_animation_tick(animation_tick)
 
 func _on_preview_pressed() -> void:
@@ -210,6 +217,8 @@ func _set_playing(value: bool) -> void:
 	playing = value
 	preview_shell.visible = not value
 	play_view.visible = value
+	if hud != null:
+		hud.visible = value
 	play_view.set_input_enabled(value)
 	if dialogue_overlay != null:
 		dialogue_overlay.close_dialogue()
@@ -217,6 +226,8 @@ func _set_playing(value: bool) -> void:
 
 func _on_play_location_changed(map_id: String, _x: int, _y: int) -> void:
 	selected_map_id = map_id
+	if playing and hud != null:
+		hud.set_state(content, map_id)
 	if not playing:
 		_render_selected_map()
 

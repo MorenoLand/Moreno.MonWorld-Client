@@ -12,6 +12,7 @@ var snapshot: Dictionary = {}
 var entities: Dictionary = {}
 var selected_character_id := 0
 var map_view: MonWorldMapPlayCanvas
+var hud: MonWorldHud
 var dialogue_overlay: MonWorldDialogue
 var animation_tick: int = 0
 var animation_elapsed: float = 0.0
@@ -37,6 +38,9 @@ func _build_ui() -> void:
 	map_view.set_input_enabled(false)
 	map_view.interaction_requested.connect(_on_interaction_requested)
 	add_child(map_view)
+	hud = MonWorldHud.new()
+	hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(hud)
 	dialogue_overlay = MonWorldDialogue.new()
 	dialogue_overlay.action_requested.connect(_on_dialogue_action)
 	add_child(dialogue_overlay)
@@ -44,9 +48,11 @@ func _build_ui() -> void:
 	title_label.position = Vector2(24, 18)
 	title_label.add_theme_font_size_override("font_size", 22)
 	add_child(title_label)
+	title_label.visible = false
 	status_label = Label.new()
 	status_label.position = Vector2(24, 47)
 	add_child(status_label)
+	status_label.visible = false
 	var side := VBoxContainer.new()
 	side.set_anchor(SIDE_LEFT, 1.0)
 	side.set_anchor(SIDE_RIGHT, 1.0)
@@ -148,6 +154,8 @@ func _on_world_snapshot(value: Dictionary) -> void:
 			entities[str(player.get("user_id", 0))] = player
 	title_label.text = "Map: %s" % str(snapshot.get("map_id", "unknown"))
 	status_label.text = "Authoritative movement active. Arrow keys or WASD move one tile."
+	if hud != null:
+		hud.set_state(GameState.content, str(snapshot.get("map_id", "")), snapshot, snapshot.get("party", []))
 	_load_map_texture(str(snapshot.get("map_id", "")))
 	_sync_map_entities()
 

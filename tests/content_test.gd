@@ -141,6 +141,10 @@ func _init() -> void:
 		push_error("object interaction did not produce decoded ROM dialogue")
 		quit(1)
 		return
+	if str(dialogue.get("text", "")).to_lower().contains("groom"):
+		push_error("player-house Mom interaction selected Daisy's grooming dialogue")
+		quit(1)
+		return
 	var spawn: Dictionary = content.default_spawn("pallet-town")
 	if not bool(spawn.get("ok", false)) or not bool(content.map_cell("pallet-town", int(spawn.get("x", 0)), int(spawn.get("y", 0))).get("collision", 1) == 0):
 		push_error("Pallet Town did not produce a walkable spawn")
