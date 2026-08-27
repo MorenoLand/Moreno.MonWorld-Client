@@ -696,7 +696,7 @@ func render_object_sprite(graphics_id: int, frame: int = 0) -> Dictionary:
 	return {"ok": true, "texture": texture, "width": width, "height": height, "frame_count": frame_count, "resolved_graphics_id": resolved_graphics_id}
 
 func _read_tileset(offset: int, tile_count: int, metatile_count: int, palette_count: int) -> Dictionary:
-	if offset < 0 or tile_count <= 0 or metatile_count <= 0 or not _valid_range(offset, 0x18):
+	if offset < 0 or metatile_count <= 0 or not _valid_range(offset, 0x18):
 		return {}
 	var tiles_offset: int = _read_rom_pointer(offset + 4)
 	var palettes_offset: int = _read_rom_pointer(offset + 8)
@@ -710,6 +710,7 @@ func _read_tileset(offset: int, tile_count: int, metatile_count: int, palette_co
 	for index in range(metatile_count * TILES_PER_METATILE):
 		metatile_words.append(_read_u16(metatiles_offset + index * 2))
 	var effective_tile_count: int = tile_count
+	var tiles: PackedByteArray = PackedByteArray()
 	if int(rom_data[offset]) != 0:
 		var compressed_tiles: PackedByteArray = _read_lz77(tiles_offset)
 		if compressed_tiles.is_empty():
