@@ -160,6 +160,18 @@ func _init() -> void:
 		push_error("procedural audio fallback is still present")
 		quit(1)
 		return
+	var rom_audio: MonWorldRomAudio = MonWorldRomAudio.new()
+	for song_id in [291, 300, 30, 241]:
+		var audio_result: Dictionary = rom_audio.inspect_song(content, int(song_id))
+		if not bool(audio_result.get("ok", false)) or int(audio_result.get("event_count", 0)) <= 0:
+			push_error("ROM audio song %d was not decoded: %s" % [song_id, str(audio_result.get("error", "no events"))])
+			quit(1)
+			return
+		var stream: AudioStreamWAV = rom_audio.build_song_stream(content, int(song_id)) as AudioStreamWAV
+		if stream == null or stream.data.is_empty() or stream.mix_rate != 22050 or not stream.stereo:
+			push_error("ROM audio song %d did not produce a stereo PCM stream" % song_id)
+			quit(1)
+			return
 	audio.free()
 	var spawn: Dictionary = content.default_spawn("pallet-town")
 	if not bool(spawn.get("ok", false)) or not bool(content.map_cell("pallet-town", int(spawn.get("x", 0)), int(spawn.get("y", 0))).get("collision", 1) == 0):

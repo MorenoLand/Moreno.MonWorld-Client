@@ -3,11 +3,13 @@ extends Node
 
 var music_player: AudioStreamPlayer
 var sfx_player: AudioStreamPlayer
+var rom_audio: MonWorldRomAudio
 var current_music_key: String = ""
 var current_content_id: String = ""
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	rom_audio = MonWorldRomAudio.new()
 	music_player = AudioStreamPlayer.new()
 	music_player.volume_db = -14.0
 	add_child(music_player)
@@ -27,7 +29,7 @@ func play_map_music(content: MonWorldContent, map_id: String) -> void:
 		return
 	current_music_key = key
 	current_content_id = content.content_id()
-	var stream: AudioStream = _load_external_music(current_content_id, music_id)
+	var stream: AudioStream = rom_audio.build_song_stream(content, music_id)
 	if stream == null:
 		music_player.stop()
 		return
@@ -42,36 +44,25 @@ func stop_music() -> void:
 func play_effect(effect: String) -> void:
 	if sfx_player == null or effect.is_empty():
 		return
-	var stream: AudioStream = _load_external_effect(current_content_id, effect)
+	var song_id: int = _effect_song_id(effect)
+	if song_id < 0 or GameState.content == null:
+		return
+	var stream: AudioStream = rom_audio.build_song_stream(GameState.content, song_id)
 	if stream == null:
 		return
 	sfx_player.stream = stream
 	sfx_player.play()
 
-func _load_external_music(content_id: String, music_id: int) -> AudioStream:
-	for extension in ["ogg", "wav", "mp3"]:
-		var path: String = MonWorldStorage.audio_path(content_id, "music-%d" % music_id, extension)
-		if not FileAccess.file_exists(path):
-			continue
-		match extension:
-			"ogg":
-				return AudioStreamOggVorbis.load_from_file(path)
-			"wav":
-				return AudioStreamWAV.load_from_file(path)
-			"mp3":
-				return AudioStreamMP3.load_from_file(path)
-	return null
-
-func _load_external_effect(content_id: String, effect: String) -> AudioStream:
-	for extension in ["wav", "ogg", "mp3"]:
-		var path: String = MonWorldStorage.audio_path(content_id, "sfx-%s" % effect, extension)
-		if not FileAccess.file_exists(path):
-			continue
-		match extension:
-			"wav":
-				return AudioStreamWAV.load_from_file(path)
-			"ogg":
-				return AudioStreamOggVorbis.load_from_file(path)
-			"mp3":
-				return AudioStreamMP3.load_from_file(path)
-	return null
+func _effect_song_id(effect: String) -> int:
+	match effect:
+		"door":
+			return 241
+		"dialogue":
+			return 30
+		"ledge":
+			return 10
+		"warp":
+			return 39
+		"step":
+			return -1
+	return -1
