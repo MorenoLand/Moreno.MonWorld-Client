@@ -11,8 +11,11 @@ var chat_input: LineEdit
 var snapshot: Dictionary = {}
 var entities: Dictionary = {}
 var selected_character_id := 0
-var map_rect := Rect2()
-var map_texture: Texture2D
+var map_view: MonWorldMapPlayCanvas
+var animation_tick: int = 0
+var animation_elapsed: float = 0.0
+var held_input: String = ""
+var held_input_elapsed: float = 0.0
 
 func _ready() -> void:
 	set_process_unhandled_input(true)
@@ -26,12 +29,12 @@ func _ready() -> void:
 	queue_redraw()
 
 func _build_ui() -> void:
-	var background := ColorRect.new()
-	background.color = Color("101721")
-	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	background.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(background)
-	move_child(background, 0)
+	map_view = MonWorldMapPlayCanvas.new()
+	map_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	map_view.set_content(GameState.content)
+	map_view.set_authoritative_state(true)
+	map_view.set_input_enabled(false)
+	add_child(map_view)
 	title_label = Label.new()
 	title_label.position = Vector2(24, 18)
 	title_label.add_theme_font_size_override("font_size", 22)
@@ -97,27 +100,7 @@ func _build_ui() -> void:
 	_layout_ui()
 
 func _layout_ui() -> void:
-	map_rect = Rect2(24, 78, max(320.0, size.x - 368.0), max(260.0, size.y - 246.0))
-	queue_redraw()
-
-func _draw() -> void:
-	var width: int = int(snapshot.get("width", 32))
-	var height: int = int(snapshot.get("height", 20))
-	var board: Rect2 = map_rect
-	draw_rect(board, Color("1b2933"), true)
-	if map_texture != null:
-		var texture_size: Vector2 = map_texture.get_size()
-		var scale: float = minf(map_rect.size.x / maxf(texture_size.x, 1.0), map_rect.size.y / maxf(texture_size.y, 1.0))
-		var draw_size: Vector2 = texture_size * scale
-		board = Rect2(map_rect.position + (map_rect.size - draw_size) * 0.5, draw_size)
-		draw_texture_rect(map_texture, board, false)
-	for key in entities:
-		var entity: Dictionary = entities[key]
-		if str(entity.get("map_id", "")) != str(snapshot.get("map_id", "")):
-			continue
-		var position: Vector2 = board.position + Vector2((int(entity.get("x", 0)) + 0.5) * board.size.x / float(maxi(width, 1)), (int(entity.get("y", 0)) + 0.5) * board.size.y / float(maxi(height, 1)))
-		var color: Color = Color("8fc4ff") if int(entity.get("character_id", 0)) == selected_character_id else Color("f4b86a")
-		draw_circle(position, maxf(5.0, minf(board.size.x / float(maxi(width, 1)), board.size.y / float(maxi(height, 1))) * 0.32), color)
+	map_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 func _on_characters_changed(value: Array) -> void:
 	if character_box == null:
@@ -161,23 +144,50 @@ func _on_world_snapshot(value: Dictionary) -> void:
 	title_label.text = "Map: %s" % str(snapshot.get("map_id", "unknown"))
 	status_label.text = "Authoritative movement active. Arrow keys or WASD move one tile."
 	_load_map_texture(str(snapshot.get("map_id", "")))
-	queue_redraw()
+	_sync_map_entities()
 
 func _load_map_texture(map_id: String) -> void:
-	map_texture = null
 	if GameState.content == null or map_id.is_empty():
 		return
-	var result: Dictionary = GameState.content.render_map(map_id)
+	var result: Dictionary = GameState.content.prepare_map(map_id)
 	if not bool(result.get("ok", false)):
 		status_label.text = "Map renderer: %s" % str(result.get("error", "map rendering failed"))
 		return
-	map_texture = result.get("texture") as Texture2D
+	var background_texture: Texture2D = result.get("background_texture", result.get("texture")) as Texture2D
+	var foreground_texture: Texture2D = result.get("foreground_texture") as Texture2D
+	map_view.set_map(background_texture, int(result.get("width", 0)), int(result.get("height", 0)), result.get("objects", []), map_id, foreground_texture)
 
 func _on_entity_update(value: Dictionary) -> void:
 	var player: Variant = value.get("player")
 	if player is Dictionary:
 		entities[str(player.get("user_id", 0))] = player
-		queue_redraw()
+		_sync_map_entities()
+
+func _sync_map_entities() -> void:
+	if map_view == null:
+		return
+	var players: Array = []
+	for key in entities:
+		var entity: Dictionary = entities[key]
+		players.append(entity)
+		if int(entity.get("character_id", 0)) == selected_character_id:
+			map_view.set_player_state(int(entity.get("x", 0)), int(entity.get("y", 0)), int(entity.get("elevation", 3)))
+	map_view.set_world_entities(players, selected_character_id)
+
+func _process(delta: float) -> void:
+	if map_view == null or snapshot.is_empty():
+		return
+	if not held_input.is_empty():
+		held_input_elapsed += delta
+		if held_input_elapsed >= MonWorldMapPlayCanvas.NORMAL_STEP_DURATION:
+			held_input_elapsed = 0.0
+			GameState.send_input(held_input)
+	animation_elapsed += delta
+	if animation_elapsed < 0.125:
+		return
+	animation_elapsed = 0.0
+	animation_tick += 1
+	map_view.set_animation_tick(animation_tick)
 
 func _on_chat(value: Dictionary) -> void:
 	chat_log.append_text("%s: %s\n" % [value.get("name", "Player"), value.get("text", "")])
@@ -191,12 +201,11 @@ func _on_connection_error(message: String) -> void:
 	status_label.text = message
 
 func _unhandled_input(event: InputEvent) -> void:
-	if not event is InputEventKey or not event.pressed or event.echo:
+	if not event is InputEventKey:
 		return
-	if get_viewport().gui_get_focus_owner() == chat_input or get_viewport().gui_get_focus_owner() == create_name_input:
-		return
-	var direction := ""
-	match event.keycode:
+	var key_event: InputEventKey = event as InputEventKey
+	var direction: String = ""
+	match key_event.keycode:
 		KEY_UP, KEY_W:
 			direction = "up"
 		KEY_DOWN, KEY_S:
@@ -205,5 +214,15 @@ func _unhandled_input(event: InputEvent) -> void:
 			direction = "left"
 		KEY_RIGHT, KEY_D:
 			direction = "right"
-	if not direction.is_empty():
-		GameState.send_input(direction)
+	if direction.is_empty():
+		return
+	if not key_event.pressed:
+		if held_input == direction:
+			held_input = ""
+			held_input_elapsed = 0.0
+		return
+	if key_event.echo or get_viewport().gui_get_focus_owner() == chat_input or get_viewport().gui_get_focus_owner() == create_name_input:
+		return
+	held_input = direction
+	held_input_elapsed = 0.0
+	GameState.send_input(direction)

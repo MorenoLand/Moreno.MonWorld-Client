@@ -15,10 +15,11 @@ var preview_button: Button
 var back_button: Button
 var dialogue_panel: PanelContainer
 var dialogue_label: Label
-var preview_chrome: Array = []
+var preview_shell: Control
 var animation_tick: int = 0
 var animation_elapsed: float = 0.0
 var playing: bool = false
+var preparing_play: bool = false
 
 func _ready() -> void:
 	if content == null:
@@ -42,22 +43,27 @@ func _process(delta: float) -> void:
 		return
 	animation_elapsed = 0.0
 	animation_tick += 1
-	_render_selected_map()
+	if playing:
+		play_view.set_animation_tick(animation_tick)
+	else:
+		_render_selected_map()
 
 func _build_ui() -> void:
+	preview_shell = Control.new()
+	preview_shell.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(preview_shell)
 	var background: ColorRect = ColorRect.new()
 	background.color = Color("101721")
 	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	background.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(background)
-	move_child(background, 0)
+	preview_shell.add_child(background)
 	var margin: MarginContainer = MarginContainer.new()
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	margin.add_theme_constant_override("margin_left", 28)
 	margin.add_theme_constant_override("margin_top", 22)
 	margin.add_theme_constant_override("margin_right", 28)
 	margin.add_theme_constant_override("margin_bottom", 22)
-	add_child(margin)
+	preview_shell.add_child(margin)
 	var box: VBoxContainer = VBoxContainer.new()
 	box.add_theme_constant_override("separation", 8)
 	margin.add_child(box)
@@ -111,15 +117,13 @@ func _build_ui() -> void:
 	map_view.custom_minimum_size = Vector2(0, 260)
 	panel.add_child(map_view)
 	play_view = MonWorldMapPlayCanvas.new()
-	play_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	play_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	play_view.custom_minimum_size = Vector2(0, 260)
+	play_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	play_view.visible = false
 	play_view.set_content(content)
 	play_view.location_changed.connect(_on_play_location_changed)
 	play_view.back_requested.connect(_on_preview_pressed)
 	play_view.interaction_requested.connect(_on_interaction_requested)
-	panel.add_child(play_view)
+	add_child(play_view)
 	_build_dialogue_overlay()
 	map_status = Label.new()
 	map_status.modulate = Color("b8c7d9")
@@ -132,7 +136,6 @@ func _build_ui() -> void:
 	back_button.pressed.connect(_on_back_pressed)
 	footer.add_child(back_button)
 	box.add_child(footer)
-	preview_chrome = [title, subtitle, metadata, map_controls, map_title, map_details, map_status]
 
 func _metadata_text() -> String:
 	if content == null:
@@ -163,19 +166,27 @@ func _on_map_selected(item_index: int) -> void:
 	_select_map(str(map_selector.get_item_metadata(item_index)))
 
 func _on_play_pressed() -> void:
-	if content == null or selected_map_id.is_empty():
+	if content == null or selected_map_id.is_empty() or preparing_play:
+		return
+	preparing_play = true
+	play_button.disabled = true
+	map_status.text = "Preparing the complete map and animation set..."
+	await get_tree().process_frame
+	var prepared: Dictionary = content.prepare_map(selected_map_id)
+	preparing_play = false
+	play_button.disabled = false
+	if not bool(prepared.get("ok", false)):
+		map_status.text = str(prepared.get("error", "Map preparation failed"))
 		return
 	_set_playing(true)
-	_render_selected_map()
+	play_view.set_map(prepared.get("background_texture", prepared.get("texture")) as Texture2D, int(prepared.get("width", 0)), int(prepared.get("height", 0)), prepared.get("objects", []), selected_map_id, prepared.get("foreground_texture") as Texture2D)
+	play_view.set_animation_tick(animation_tick)
 
 func _on_preview_pressed() -> void:
 	_set_playing(false)
 	_render_selected_map()
 
 func _on_back_pressed() -> void:
-	if playing:
-		_on_preview_pressed()
-		return
 	exit_requested.emit()
 
 func _build_dialogue_overlay() -> void:
@@ -203,20 +214,16 @@ func _on_interaction_requested(text: String) -> void:
 
 func _set_playing(value: bool) -> void:
 	playing = value
-	for chrome_value in preview_chrome:
-		if chrome_value is Control:
-			(chrome_value as Control).visible = not value
-	map_view.visible = not value
+	preview_shell.visible = not value
 	play_view.visible = value
 	play_view.set_input_enabled(value)
 	if dialogue_panel != null:
 		dialogue_panel.visible = false
-	if back_button != null:
-		back_button.text = "Back to map selection" if value else "Back to login"
 
 func _on_play_location_changed(map_id: String, _x: int, _y: int) -> void:
 	selected_map_id = map_id
-	_render_selected_map()
+	if not playing:
+		_render_selected_map()
 
 func _render_selected_map() -> void:
 	if content == null or selected_map_id.is_empty():
@@ -231,13 +238,6 @@ func _render_selected_map() -> void:
 		map_status.text = str(result.get("error", "Map rendering failed"))
 		return
 	var texture: Texture2D = result.get("texture") as Texture2D
-	var background_texture: Texture2D = result.get("background_texture", texture) as Texture2D
-	var foreground_texture: Texture2D = result.get("foreground_texture") as Texture2D
 	map_view.set_map(texture, int(result.get("width", 0)), int(result.get("height", 0)), result.get("objects", []))
-	if play_view != null:
-		if playing and play_view.map_id == selected_map_id:
-			play_view.set_animation_tick(animation_tick)
-		else:
-			play_view.set_map(background_texture, int(result.get("width", 0)), int(result.get("height", 0)), result.get("objects", []), selected_map_id, foreground_texture)
 	map_details.text = "%d × %d map cells  •  actual 16×16 metatiles  •  %d ROM object events" % [int(result.get("width", 0)), int(result.get("height", 0)), (result.get("objects", []) as Array).size()]
-	map_status.text = "Use Play selected map to walk the ROM map; collision, ledges, warps, and map connections are active." if not playing else "Playing the selected ROM map; collision, ledges, warps, and map connections are active."
+	map_status.text = "Use Play selected map to walk the ROM map; collision, ledges, warps, and map connections are active."

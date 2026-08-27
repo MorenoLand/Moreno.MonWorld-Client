@@ -8,11 +8,14 @@ signal interaction_requested(text: String)
 const TILE_PIXELS: float = 16.0
 const CAMERA_MAX_CELLS_X: int = 30
 const CAMERA_MAX_CELLS_Y: int = 20
+const NORMAL_STEP_DURATION: float = 16.0 / 60.0
 
 var content: MonWorldContent
 var map_id: String = ""
 var map_texture: Texture2D
 var foreground_texture: Texture2D
+var animated_background_tiles: Array = []
+var animated_foreground_tiles: Array = []
 var map_pixel_size: Vector2 = Vector2.ZERO
 var objects: Array = []
 var player_position: Vector2i = Vector2i.ZERO
@@ -36,7 +39,9 @@ var has_spawn: bool = false
 var input_enabled: bool = false
 var player_facing: int = 1
 var held_direction: int = 0
-var movement_repeat_elapsed: float = 0.0
+var movement_retry_elapsed: float = 0.0
+var world_entities: Array = []
+var authoritative_state: bool = false
 
 func _ready() -> void:
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
@@ -48,6 +53,8 @@ func set_content(value: MonWorldContent) -> void:
 	content = value
 	player_texture = null
 	foreground_texture = null
+	animated_background_tiles = []
+	animated_foreground_tiles = []
 	if not map_id.is_empty():
 		_set_spawn()
 	queue_redraw()
@@ -57,13 +64,17 @@ func set_input_enabled(value: bool) -> void:
 	if value:
 		grab_focus()
 
+func set_authoritative_state(value: bool) -> void:
+	authoritative_state = value
+	held_direction = 0
+
 func set_animation_tick(value: int) -> void:
 	animation_tick = value
 	if content == null or map_id.is_empty():
 		return
-	var result: Dictionary = content.render_map(map_id, animation_tick)
+	var result: Dictionary = content.render_map_animation(map_id, animation_tick)
 	if bool(result.get("ok", false)):
-		_apply_map(result, false)
+		_apply_animation_tiles(result.get("tiles", []))
 	_update_player_texture()
 	queue_redraw()
 
@@ -77,7 +88,61 @@ func set_map(texture: Texture2D, map_width: int, map_height: int, map_objects: A
 	objects = map_objects
 	if changed or not has_spawn:
 		_set_spawn()
+	set_animation_tick(animation_tick)
 	_update_player_texture()
+	queue_redraw()
+
+func set_player_state(x: int, y: int, elevation: int = 3, facing: int = 1) -> void:
+	var next_position: Vector2i = Vector2i(x, y)
+	if authoritative_state and has_spawn and next_position == pending_position and movement_active:
+		return
+	if authoritative_state and has_spawn and absi(next_position.x - player_position.x) + absi(next_position.y - player_position.y) == 1:
+		player_facing = _direction_between(player_position, next_position)
+		movement_start = Vector2(player_position)
+		movement_target = Vector2(next_position)
+		pending_map_id = map_id
+		pending_position = next_position
+		pending_elevation = elevation
+		movement_elapsed = 0.0
+		movement_duration = NORMAL_STEP_DURATION
+		movement_active = true
+	else:
+		player_position = next_position
+		player_elevation = elevation
+		player_facing = facing
+		movement_start = Vector2(player_position)
+		movement_target = movement_start
+		movement_active = false
+	has_spawn = true
+	_update_player_texture()
+	queue_redraw()
+
+func _direction_between(from: Vector2i, to: Vector2i) -> int:
+	if to.y > from.y:
+		return 1
+	if to.y < from.y:
+		return 2
+	if to.x < from.x:
+		return 3
+	if to.x > from.x:
+		return 4
+	return player_facing
+
+func set_world_entities(values: Array, local_character_id: int) -> void:
+	world_entities = []
+	if content == null:
+		return
+	for value in values:
+		if not value is Dictionary:
+			continue
+		var entity: Dictionary = value
+		if int(entity.get("character_id", 0)) == local_character_id or str(entity.get("map_id", "")) != map_id:
+			continue
+		var sprite: Dictionary = content.render_facing_object_sprite(19, 1, false, 0)
+		var texture: Texture2D = sprite.get("texture") as Texture2D
+		if texture == null:
+			continue
+		world_entities.append({"texture": texture, "width": texture.get_width(), "height": texture.get_height(), "x": int(entity.get("x", 0)), "y": int(entity.get("y", 0)), "elevation": int(entity.get("elevation", 3))})
 	queue_redraw()
 
 func _apply_map(result: Dictionary, reset_spawn: bool) -> void:
@@ -85,8 +150,23 @@ func _apply_map(result: Dictionary, reset_spawn: bool) -> void:
 	foreground_texture = result.get("foreground_texture") as Texture2D
 	map_pixel_size = Vector2(int(result.get("width", 0)) * 16, int(result.get("height", 0)) * 16)
 	objects = result.get("objects", [])
+	_apply_animation_tiles(result.get("animation_tiles", []))
 	if reset_spawn:
 		_set_spawn()
+
+func _apply_animation_tiles(values: Array) -> void:
+	animated_background_tiles = []
+	animated_foreground_tiles = []
+	for value in values:
+		if not value is Dictionary:
+			continue
+		var tile: Dictionary = value
+		var background: Texture2D = tile.get("background_texture") as Texture2D
+		var foreground: Texture2D = tile.get("foreground_texture") as Texture2D
+		if background != null:
+			animated_background_tiles.append({"texture": background, "x": int(tile.get("x", 0)), "y": int(tile.get("y", 0))})
+		if foreground != null:
+			animated_foreground_tiles.append({"texture": foreground, "x": int(tile.get("x", 0)), "y": int(tile.get("y", 0))})
 
 func _set_spawn() -> void:
 	if content == null or map_id.is_empty():
@@ -133,7 +213,7 @@ func _input(event: InputEvent) -> void:
 	held_direction = direction
 	get_viewport().set_input_as_handled()
 	if not movement_active:
-		movement_repeat_elapsed = 0.0
+		movement_retry_elapsed = 0.0
 		_request_move(direction)
 
 func _key_direction(event: InputEventKey) -> int:
@@ -167,7 +247,7 @@ func _request_move(direction: int) -> void:
 	movement_target = Vector2(pending_position)
 	movement_jump = bool(result.get("jump", false))
 	movement_elapsed = 0.0
-	movement_duration = 0.20 if movement_stair else 0.28 if movement_jump else 0.14
+	movement_duration = 0.24 if movement_stair else 0.32 if movement_jump else NORMAL_STEP_DURATION
 	movement_active = true
 	queue_redraw()
 
@@ -176,12 +256,12 @@ func _process(delta: float) -> void:
 		warp_cooldown = maxf(warp_cooldown - delta, 0.0)
 	if not movement_active:
 		if held_direction != 0:
-			movement_repeat_elapsed += delta
-			if movement_repeat_elapsed >= 0.08:
-				movement_repeat_elapsed = 0.0
+			movement_retry_elapsed += delta
+			if movement_retry_elapsed >= 0.05:
+				movement_retry_elapsed = 0.0
 				_request_move(held_direction)
 		else:
-			movement_repeat_elapsed = 0.0
+			movement_retry_elapsed = 0.0
 		return
 	movement_elapsed += delta
 	_update_player_texture()
@@ -198,6 +278,11 @@ func _process(delta: float) -> void:
 	pending_warp = {}
 	player_position = completed_position
 	player_elevation = completed_elevation
+	if authoritative_state:
+		_update_player_texture()
+		location_changed.emit(map_id, player_position.x, player_position.y)
+		queue_redraw()
+		return
 	if completed_map_id != map_id:
 		_load_map(completed_map_id)
 	else:
@@ -211,15 +296,19 @@ func _process(delta: float) -> void:
 		warp_cooldown = 0.35
 	location_changed.emit(map_id, player_position.x, player_position.y)
 	queue_redraw()
+	if held_direction != 0 and not movement_active:
+		movement_retry_elapsed = 0.0
+		_request_move(held_direction)
 
 func _load_map(next_map_id: String, reset_spawn: bool = false) -> void:
 	if content == null or next_map_id.is_empty():
 		return
 	map_id = next_map_id
-	var result: Dictionary = content.render_map(map_id, animation_tick)
+	var result: Dictionary = content.prepare_map(map_id)
 	if not bool(result.get("ok", false)):
 		return
 	_apply_map(result, reset_spawn)
+	set_animation_tick(animation_tick)
 	if not reset_spawn:
 		has_spawn = true
 	_update_player_texture()
@@ -237,10 +326,9 @@ func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO, size), Color("080B10"), true)
 	if map_texture == null or map_pixel_size.x <= 0.0 or map_pixel_size.y <= 0.0 or not has_spawn:
 		return
-	var available_size: Vector2 = size - Vector2(24.0, 24.0)
-	var camera_world_size: Vector2 = Vector2(minf(map_pixel_size.x, CAMERA_MAX_CELLS_X * TILE_PIXELS), minf(map_pixel_size.y, CAMERA_MAX_CELLS_Y * TILE_PIXELS))
-	var tile_scale: float = minf(available_size.x / camera_world_size.x, available_size.y / camera_world_size.y)
-	tile_scale = maxf(tile_scale, 0.01)
+	var maximum_camera_size: Vector2 = Vector2(minf(map_pixel_size.x, CAMERA_MAX_CELLS_X * TILE_PIXELS), minf(map_pixel_size.y, CAMERA_MAX_CELLS_Y * TILE_PIXELS))
+	var tile_scale: float = maxf(ceilf(maxf(size.x / maximum_camera_size.x, size.y / maximum_camera_size.y)), 1.0)
+	var camera_world_size: Vector2 = size / tile_scale
 	var world_player: Vector2 = movement_start.lerp(movement_target, clampf(movement_elapsed / movement_duration, 0.0, 1.0)) if movement_active else Vector2(player_position)
 	if movement_active and movement_jump:
 		world_player.y -= sin(clampf(movement_elapsed / movement_duration, 0.0, 1.0) * PI) * 0.75
@@ -248,10 +336,24 @@ func _draw() -> void:
 	var camera_origin: Vector2 = camera_center - camera_world_size * 0.5
 	camera_origin.x = clampf(camera_origin.x, 0.0, maxf(map_pixel_size.x - camera_world_size.x, 0.0))
 	camera_origin.y = clampf(camera_origin.y, 0.0, maxf(map_pixel_size.y - camera_world_size.y, 0.0))
-	var destination_size: Vector2 = camera_world_size * tile_scale
-	var destination_position: Vector2 = (size - destination_size) * 0.5
+	var destination_size: Vector2 = size
+	var destination_position: Vector2 = Vector2.ZERO
 	draw_texture_rect_region(map_texture, Rect2(destination_position, destination_size), Rect2(camera_origin, camera_world_size), Color.WHITE, false, true)
+	for tile_value in animated_background_tiles:
+		var tile: Dictionary = tile_value
+		var tile_texture: Texture2D = tile.get("texture") as Texture2D
+		if tile_texture == null:
+			continue
+		var tile_world_position: Vector2 = Vector2(int(tile.get("x", 0)), int(tile.get("y", 0))) * TILE_PIXELS
+		var tile_destination: Rect2 = Rect2(destination_position + (tile_world_position - camera_origin) * tile_scale, Vector2(16.0, 16.0) * tile_scale)
+		draw_texture_rect(tile_texture, tile_destination, false)
 	var drawables: Array = []
+	if foreground_texture != null:
+		for row_index in range(int(ceilf(map_pixel_size.y / TILE_PIXELS))):
+			drawables.append({"kind": "foreground", "row": row_index, "sort_y": float(row_index + 1), "sort_order": 2})
+	for tile_value in animated_foreground_tiles:
+		var tile: Dictionary = tile_value
+		drawables.append({"kind": "animated_foreground", "texture": tile.get("texture"), "x": int(tile.get("x", 0)), "y": int(tile.get("y", 0)), "sort_y": float(int(tile.get("y", 0)) + 1), "sort_order": 2})
 	for object_value in objects:
 		if not object_value is Dictionary:
 			continue
@@ -262,26 +364,43 @@ func _draw() -> void:
 		var sprite_size: Vector2 = Vector2(int(object.get("width", 0)), int(object.get("height", 0)))
 		if sprite_size.x <= 0.0 or sprite_size.y <= 0.0:
 			continue
-		drawables.append({"texture": texture, "width": sprite_size.x, "height": sprite_size.y, "world_anchor": Vector2((int(object.get("x", 0)) + 0.5) * TILE_PIXELS, (int(object.get("y", 0)) + 1.0) * TILE_PIXELS), "sort_y": float(int(object.get("y", 0)) + 1), "sort_order": 0})
+		drawables.append({"kind": "sprite", "texture": texture, "width": sprite_size.x, "height": sprite_size.y, "world_anchor": Vector2((int(object.get("x", 0)) + 0.5) * TILE_PIXELS, (int(object.get("y", 0)) + 1.0) * TILE_PIXELS), "sort_y": float(int(object.get("y", 0)) + 1), "sort_order": 0})
+	for entity_value in world_entities:
+		if not entity_value is Dictionary:
+			continue
+		var entity: Dictionary = entity_value
+		var entity_texture: Texture2D = entity.get("texture") as Texture2D
+		if entity_texture == null:
+			continue
+		drawables.append({"kind": "sprite", "texture": entity_texture, "width": float(entity.get("width", 0)), "height": float(entity.get("height", 0)), "world_anchor": Vector2((int(entity.get("x", 0)) + 0.5) * TILE_PIXELS, (int(entity.get("y", 0)) + 1.0) * TILE_PIXELS), "sort_y": float(int(entity.get("y", 0)) + 1), "sort_order": 0})
 	if player_texture != null:
 		var player_size: Vector2 = Vector2(player_texture.get_width(), player_texture.get_height())
 		var player_anchor: Vector2 = (world_player + Vector2(0.5, 1.0)) * TILE_PIXELS
 		if movement_active and movement_stair:
 			player_anchor += _stair_offset(clampf(movement_elapsed / movement_duration, 0.0, 1.0), movement_stair_behavior)
-		drawables.append({"texture": player_texture, "width": player_size.x, "height": player_size.y, "world_anchor": player_anchor, "sort_y": world_player.y + 1.0, "sort_order": 1})
+		drawables.append({"kind": "sprite", "texture": player_texture, "width": player_size.x, "height": player_size.y, "world_anchor": player_anchor, "sort_y": world_player.y + 1.0, "sort_order": 1})
 	drawables.sort_custom(_sort_drawables)
 	for drawable_value in drawables:
 		var drawable: Dictionary = drawable_value
+		if str(drawable.get("kind", "sprite")) == "foreground":
+			var row_world_rect: Rect2 = Rect2(0.0, float(int(drawable.get("row", 0))) * TILE_PIXELS, map_pixel_size.x, TILE_PIXELS)
+			var visible_row_rect: Rect2 = row_world_rect.intersection(Rect2(camera_origin, camera_world_size))
+			if visible_row_rect.size.x > 0.0 and visible_row_rect.size.y > 0.0:
+				var row_destination: Rect2 = Rect2(destination_position + (visible_row_rect.position - camera_origin) * tile_scale, visible_row_rect.size * tile_scale)
+				draw_texture_rect_region(foreground_texture, row_destination, visible_row_rect, Color.WHITE, false, true)
+			continue
+		if str(drawable.get("kind", "sprite")) == "animated_foreground":
+			var animated_texture: Texture2D = drawable.get("texture") as Texture2D
+			if animated_texture != null:
+				var animated_world_position: Vector2 = Vector2(int(drawable.get("x", 0)), int(drawable.get("y", 0))) * TILE_PIXELS
+				var animated_destination: Rect2 = Rect2(destination_position + (animated_world_position - camera_origin) * tile_scale, Vector2(16.0, 16.0) * tile_scale)
+				draw_texture_rect(animated_texture, animated_destination, false)
+			continue
 		var drawable_texture: Texture2D = drawable.get("texture") as Texture2D
 		var drawable_size: Vector2 = Vector2(float(drawable.get("width", 0.0)), float(drawable.get("height", 0.0)))
 		var drawable_anchor: Vector2 = drawable.get("world_anchor", Vector2.ZERO)
 		var drawable_position: Vector2 = destination_position + (drawable_anchor - camera_origin) * tile_scale - Vector2(drawable_size.x * tile_scale * 0.5, drawable_size.y * tile_scale)
 		draw_texture_rect(drawable_texture, Rect2(drawable_position, drawable_size * tile_scale), false)
-	if foreground_texture != null:
-		draw_texture_rect_region(foreground_texture, Rect2(destination_position, destination_size), Rect2(camera_origin, camera_world_size), Color.WHITE, false, true)
-	var font: Font = ThemeDB.fallback_font
-	draw_rect(Rect2(12, size.y - 42, minf(size.x - 24, 540), 30), Color(0.03, 0.04, 0.06, 0.85), true)
-	draw_string(font, Vector2(24, size.y - 21), "WASD / arrows: move   •   ROM map: %s   •   %d, %d" % [map_id, player_position.x, player_position.y], HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("d7e0eb"))
 
 func _sort_drawables(left: Dictionary, right: Dictionary) -> bool:
 	var left_y: float = float(left.get("sort_y", 0.0))

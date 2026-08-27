@@ -1,6 +1,8 @@
 class_name MonWorldContent
 extends RefCounted
 
+const ANIMATION_PHASE_COUNT: int = 40
+
 const SCHEMA_VERSION: int = 1
 const KANTO_GBA_CONTENT_ID: String = "kanto-gba-slice-v1"
 const GBA_TITLE_OFFSET: int = 0xA0
@@ -271,6 +273,85 @@ func render_map(map_id: String, animation_tick: int = 0) -> Dictionary:
 		cached_map["foreground_textures"] = foreground_texture_cache
 	map_cache[map_id] = cached_map
 	return {"ok": true, "texture": texture, "image": image, "background_texture": background_texture, "foreground_texture": foreground_texture, "width": int(cached_map.get("width", 0)), "height": int(cached_map.get("height", 0)), "header_offset": int(cached_map.get("header_offset", -1)), "layout_offset": int(cached_map.get("layout_offset", -1)), "objects": cached_map.get("objects", []), "warps": cached_map.get("warps", []), "connections": cached_map.get("connections", []), "map_cells": cached_map.get("map_cells", PackedInt32Array()), "animation_phase": animation_phase}
+
+func prepare_map(map_id: String) -> Dictionary:
+	var cached_map: Dictionary = _get_or_build_map_cache(map_id)
+	if not bool(cached_map.get("ok", false)):
+		return cached_map
+	var background_texture: Texture2D = cached_map.get("world_background_texture") as Texture2D
+	var foreground_texture: Texture2D = cached_map.get("world_foreground_texture") as Texture2D
+	if background_texture == null or foreground_texture == null:
+		var background_image: Image = (cached_map.get("base_background_image") as Image).duplicate()
+		var foreground_image: Image = (cached_map.get("base_foreground_image") as Image).duplicate()
+		for cell_value in _animated_map_cells(cached_map):
+			var cell: Dictionary = cell_value
+			foreground_image.fill_rect(Rect2i(int(cell.get("x", 0)) * 16, int(cell.get("y", 0)) * 16, 16, 16), Color(0.0, 0.0, 0.0, 0.0))
+		background_texture = ImageTexture.create_from_image(background_image)
+		foreground_texture = ImageTexture.create_from_image(foreground_image)
+		cached_map["world_background_texture"] = background_texture
+		cached_map["world_foreground_texture"] = foreground_texture
+	var animation: Dictionary = render_map_animation(map_id, 0)
+	return {"ok": true, "texture": background_texture, "background_texture": background_texture, "foreground_texture": foreground_texture, "animation_tiles": animation.get("tiles", []), "width": int(cached_map.get("width", 0)), "height": int(cached_map.get("height", 0)), "header_offset": int(cached_map.get("header_offset", -1)), "layout_offset": int(cached_map.get("layout_offset", -1)), "objects": cached_map.get("objects", []), "warps": cached_map.get("warps", []), "connections": cached_map.get("connections", []), "map_cells": cached_map.get("map_cells", PackedInt32Array()), "animation_phase": 0}
+
+func render_map_animation(map_id: String, animation_tick: int) -> Dictionary:
+	var cached_map: Dictionary = _get_or_build_map_cache(map_id)
+	if not bool(cached_map.get("ok", false)):
+		return cached_map
+	var animation_phase: int = posmod(animation_tick, ANIMATION_PHASE_COUNT)
+	var overlay_cache: Dictionary = cached_map.get("animation_overlays", {})
+	var cache_key: String = str(animation_phase)
+	if overlay_cache.has(cache_key):
+		return {"ok": true, "tiles": overlay_cache[cache_key], "animation_phase": animation_phase}
+	var primary: Dictionary = cached_map.get("primary", {})
+	var secondary: Dictionary = cached_map.get("secondary", {})
+	var animated_primary: PackedByteArray = _animated_primary_tiles(cached_map.get("primary_tiles", PackedByteArray()), animation_phase)
+	var primary_metatile_count: int = _format_int("primary_metatile_count", PRIMARY_METATILE_COUNT)
+	var metatile_textures: Dictionary = {}
+	var tiles: Array = []
+	for cell_value in _animated_map_cells(cached_map):
+		var cell: Dictionary = cell_value
+		var metatile_id: int = int(cell.get("metatile_id", 0))
+		var metatile_key: String = str(metatile_id)
+		var textures: Dictionary = metatile_textures.get(metatile_key, {})
+		if textures.is_empty():
+			var tileset: Dictionary = primary if metatile_id < primary_metatile_count else secondary
+			var metatile_index: int = metatile_id if metatile_id < primary_metatile_count else metatile_id - primary_metatile_count
+			var background_image: Image = Image.create(16, 16, false, Image.FORMAT_RGBA8)
+			background_image.fill(Color("101721"))
+			var foreground_image: Image = Image.create(16, 16, false, Image.FORMAT_RGBA8)
+			foreground_image.fill(Color(0.0, 0.0, 0.0, 0.0))
+			_draw_metatile_layers(background_image, foreground_image, 0, 0, tileset, metatile_index, primary, secondary, animated_primary)
+			textures = {"background_texture": ImageTexture.create_from_image(background_image), "foreground_texture": ImageTexture.create_from_image(foreground_image)}
+			metatile_textures[metatile_key] = textures
+		tiles.append({"x": int(cell.get("x", 0)), "y": int(cell.get("y", 0)), "background_texture": textures.get("background_texture"), "foreground_texture": textures.get("foreground_texture")})
+	overlay_cache[cache_key] = tiles
+	cached_map["animation_overlays"] = overlay_cache
+	return {"ok": true, "tiles": tiles, "animation_phase": animation_phase}
+
+func _animated_map_cells(cached_map: Dictionary) -> Array:
+	if cached_map.has("animated_cells"):
+		return cached_map.get("animated_cells", [])
+	var cells: Array = []
+	var seen: Dictionary = {}
+	var map_cells: PackedInt32Array = cached_map.get("map_cells", PackedInt32Array())
+	var width: int = int(cached_map.get("width", 0))
+	var metatile_id_mask: int = _format_int("map_grid_metatile_id_mask", MAPGRID_METATILE_ID_MASK)
+	for tile_value in cached_map.get("animated_tiles", []):
+		if not tile_value is Dictionary:
+			continue
+		var tile: Dictionary = tile_value
+		var x: int = int(tile.get("x", 0)) / 16
+		var y: int = int(tile.get("y", 0)) / 16
+		var key: String = "%d:%d" % [x, y]
+		if seen.has(key):
+			continue
+		var cell_index: int = y * width + x
+		if cell_index < 0 or cell_index >= map_cells.size():
+			continue
+		seen[key] = true
+		cells.append({"x": x, "y": y, "metatile_id": int(map_cells[cell_index]) & metatile_id_mask})
+	cached_map["animated_cells"] = cells
+	return cells
 
 func _get_or_build_map_cache(map_id: String, map_value: Dictionary = {}) -> Dictionary:
 	var cached_map: Dictionary = map_cache.get(map_id, {})
@@ -938,7 +1019,7 @@ func _draw_metatile(image: Image, destination_x: int, destination_y: int, tilese
 			_draw_metatile_layer(image, destination_x, destination_y, metatiles, base, 0, primary, secondary, animated_tiles, primary_override)
 			_draw_metatile_layer(image, destination_x, destination_y, metatiles, base, 4, primary, secondary, animated_tiles, primary_override)
 
-func _draw_metatile_layers(background_image: Image, foreground_image: Image, destination_x: int, destination_y: int, tileset: Dictionary, metatile_index: int, primary: Dictionary, secondary: Dictionary) -> void:
+func _draw_metatile_layers(background_image: Image, foreground_image: Image, destination_x: int, destination_y: int, tileset: Dictionary, metatile_index: int, primary: Dictionary, secondary: Dictionary, primary_override: PackedByteArray = PackedByteArray()) -> void:
 	var metatiles: PackedInt32Array = tileset.get("metatiles", PackedInt32Array())
 	var tiles_per_metatile: int = _format_int("tiles_per_metatile", TILES_PER_METATILE)
 	var base: int = metatile_index * tiles_per_metatile
@@ -948,8 +1029,8 @@ func _draw_metatile_layers(background_image: Image, foreground_image: Image, des
 	var layer_type: int = 0
 	if metatile_index < attributes.size():
 		layer_type = (int(attributes[metatile_index]) & _format_int("map_grid_layer_type_mask", MAPGRID_LAYER_TYPE_MASK)) >> _format_int("map_grid_layer_type_shift", MAPGRID_LAYER_TYPE_SHIFT)
-	_draw_metatile_layer(background_image, destination_x, destination_y, metatiles, base, 0, primary, secondary, [])
-	_draw_metatile_layer(background_image if layer_type == 1 else foreground_image, destination_x, destination_y, metatiles, base, 4, primary, secondary, [])
+	_draw_metatile_layer(background_image, destination_x, destination_y, metatiles, base, 0, primary, secondary, [], primary_override)
+	_draw_metatile_layer(background_image if layer_type == 1 else foreground_image, destination_x, destination_y, metatiles, base, 4, primary, secondary, [], primary_override)
 
 func _draw_metatile_layer(image: Image, destination_x: int, destination_y: int, metatiles: PackedInt32Array, base: int, start: int, primary: Dictionary, secondary: Dictionary, animated_tiles: Array, primary_override: PackedByteArray = PackedByteArray()) -> void:
 	var tiles_per_metatile: int = _format_int("tiles_per_metatile", TILES_PER_METATILE)
@@ -992,8 +1073,14 @@ func _draw_tile(image: Image, destination_x: int, destination_y: int, tile_entry
 				continue
 			var color: Color = palette_values[palette_bank * 16 + color_index]
 			image.set_pixel(destination_x + pixel_x, destination_y + pixel_y, color)
-	if animated_tiles != null and global_tile_index >= _format_int("animated_tile_start", 416) and global_tile_index < _format_int("animated_tile_end", 482):
+	if animated_tiles != null and _is_animated_tile(global_tile_index):
 		animated_tiles.append({"x": destination_x, "y": destination_y, "entry": tile_entry})
+
+func _is_animated_tile(tile_index: int) -> bool:
+	var water_start: int = _format_int("water_tile_index", 416)
+	var sand_start: int = _format_int("sand_tile_index", 464)
+	var flower_start: int = _format_int("flower_tile_index", 508)
+	return (tile_index >= water_start and tile_index < water_start + _format_int("water_tile_count", 48)) or (tile_index >= sand_start and tile_index < sand_start + _format_int("sand_tile_count", 18)) or (tile_index >= flower_start and tile_index < flower_start + _format_int("flower_tile_count", 4))
 
 func _read_s16(offset: int) -> int:
 	var value: int = _read_u16(offset)

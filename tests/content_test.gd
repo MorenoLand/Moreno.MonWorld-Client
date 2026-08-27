@@ -120,6 +120,12 @@ func _init() -> void:
 		push_error("map render did not expose separated draw layers")
 		quit(1)
 		return
+	var prepared_result: Dictionary = content.prepare_map("pallet-town")
+	var overlay_result: Dictionary = content.render_map_animation("pallet-town", 7)
+	if prepared_result.get("background_texture") == null or prepared_result.get("foreground_texture") == null or (overlay_result.get("tiles", []) as Array).is_empty():
+		push_error("world renderer did not prepare static layers and per-cell animation overlays")
+		quit(1)
+		return
 	var house_result: Dictionary = content.render_map("pallet-players-house-1f")
 	var mom_found: bool = false
 	for object_value in house_result.get("objects", []):
@@ -144,7 +150,7 @@ func _init() -> void:
 	var walkable_step_found: bool = false
 	var jump_behavior_found: bool = false
 	var stair_transition_found: bool = false
-	for map_id in ["pallet-town", "route-1", "viridian-city", "rom-map-3-20", "viridian-forest"]:
+	for map_id in ["pallet-town", "route-1", "viridian-city", "rom-map-3-20", "viridian-forest", "pallet-players-house-1f", "pallet-players-house-2f"]:
 		var map_value: Dictionary = content.map_data(map_id)
 		for y in range(int(map_value.get("height", 0))):
 			for x in range(int(map_value.get("width", 0))):
@@ -171,6 +177,38 @@ func _init() -> void:
 		push_error("ROM movement data did not expose collision, movement, ledge, and stair behavior")
 		quit(1)
 		return
+	var continuous_step: Dictionary = {}
+	for y in range(int(content.map_data("pallet-town").get("height", 0))):
+		for x in range(int(content.map_data("pallet-town").get("width", 0))):
+			for direction in [1, 2, 3, 4]:
+				var first_step: Dictionary = content.movement_result("pallet-town", x, y, direction, 3, pallet_result.get("objects", []))
+				if not bool(first_step.get("ok", false)) or bool(first_step.get("jump", false)) or bool(first_step.get("stair", false)) or str(first_step.get("map_id", "")) != "pallet-town":
+					continue
+				var second_step: Dictionary = content.movement_result("pallet-town", int(first_step.get("x", 0)), int(first_step.get("y", 0)), direction, int(first_step.get("elevation", 3)), pallet_result.get("objects", []))
+				if bool(second_step.get("ok", false)) and not bool(second_step.get("jump", false)) and not bool(second_step.get("stair", false)) and str(second_step.get("map_id", "")) == "pallet-town":
+					continuous_step = {"x": x, "y": y, "direction": direction, "first": first_step}
+					break
+			if not continuous_step.is_empty():
+				break
+		if not continuous_step.is_empty():
+			break
+	if continuous_step.is_empty():
+		push_error("Pallet Town did not expose two consecutive movement cells")
+		quit(1)
+		return
+	var world_view: MonWorldMapPlayCanvas = MonWorldMapPlayCanvas.new()
+	world_view.set_content(content)
+	world_view.set_map(prepared_result.get("background_texture") as Texture2D, int(prepared_result.get("width", 0)), int(prepared_result.get("height", 0)), prepared_result.get("objects", []), "pallet-town", prepared_result.get("foreground_texture") as Texture2D)
+	world_view.set_player_state(int(continuous_step.get("x", 0)), int(continuous_step.get("y", 0)), 3)
+	world_view.held_direction = int(continuous_step.get("direction", 0))
+	world_view._request_move(world_view.held_direction)
+	world_view._process(world_view.movement_duration + 0.001)
+	var first_target: Dictionary = continuous_step.get("first", {})
+	if not world_view.movement_active or world_view.movement_start != Vector2(int(first_target.get("x", 0)), int(first_target.get("y", 0))):
+		push_error("held movement inserted an idle gap between adjacent tiles")
+		quit(1)
+		return
+	world_view.free()
 	var warp_result: Dictionary = content.warp_at("pallet-town", 6, 7)
 	if not bool(warp_result.get("ok", false)) or str(warp_result.get("map_id", "")).is_empty():
 		push_error("Pallet Town warp transition was not resolved")
@@ -218,4 +256,5 @@ func _init() -> void:
 		quit(1)
 		return
 	provider._clear_saved_rom()
+	provider.free()
 	quit(0)
