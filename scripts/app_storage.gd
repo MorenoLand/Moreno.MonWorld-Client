@@ -4,6 +4,7 @@ extends RefCounted
 const APP_DIRECTORY: String = "MonWorld"
 const SETTINGS_FILE: String = "settings.json"
 const STRINGS_DIRECTORY: String = "Strings"
+const AUDIO_DIRECTORY: String = "Audio"
 
 static func root_path() -> String:
 	if OS.has_feature("web"):
@@ -25,12 +26,17 @@ static func strings_file_path(content_id: String, language: String = "en") -> St
 static func settings_path() -> String:
 	return root_path().path_join(SETTINGS_FILE)
 
+static func audio_path(content_id: String, key: String, extension: String = "wav") -> String:
+	return root_path().path_join(AUDIO_DIRECTORY).path_join(content_id).path_join("%s.%s" % [key, extension])
+
 static func ensure_layout() -> bool:
 	var root: String = root_path()
 	var strings: String = strings_path()
+	var audio: String = root.path_join(AUDIO_DIRECTORY)
 	var root_result: int = DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(root) if root.begins_with("user://") else root)
 	var strings_result: int = DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(strings) if strings.begins_with("user://") else strings)
-	return root_result == OK or root_result == ERR_ALREADY_EXISTS and (strings_result == OK or strings_result == ERR_ALREADY_EXISTS)
+	var audio_result: int = DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(audio) if audio.begins_with("user://") else audio)
+	return (root_result == OK or root_result == ERR_ALREADY_EXISTS) and (strings_result == OK or strings_result == ERR_ALREADY_EXISTS) and (audio_result == OK or audio_result == ERR_ALREADY_EXISTS)
 
 static func read_json(relative_path: String) -> Dictionary:
 	if not ensure_layout():

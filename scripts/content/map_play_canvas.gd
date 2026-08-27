@@ -4,12 +4,15 @@ extends Control
 signal location_changed(map_id: String, x: int, y: int)
 signal back_requested
 signal interaction_requested(dialogue: Dictionary)
+signal sound_requested(effect: String)
 
 const TILE_PIXELS: float = 16.0
 const CAMERA_MAX_CELLS_X: int = 30
 const CAMERA_MAX_CELLS_Y: int = 20
 const MAX_TILE_SCALE: float = 4.0
 const NORMAL_STEP_DURATION: float = 16.0 / 60.0
+const DOOR_ANIMATION_DURATION: float = 16.0 / 60.0
+const DOOR_FRAME_COUNT: int = 4
 
 var content: MonWorldContent
 var map_id: String = ""
@@ -29,6 +32,8 @@ var movement_target: Vector2 = Vector2.ZERO
 var movement_jump: bool = false
 var movement_stair: bool = false
 var movement_stair_behavior: int = 0
+var movement_door: bool = false
+var door_progress: float = 0.0
 var movement_elapsed: float = 0.0
 var movement_duration: float = 0.14
 var pending_map_id: String = ""
@@ -59,6 +64,7 @@ func set_content(value: MonWorldContent) -> void:
 	animated_foreground_tiles = []
 	if not map_id.is_empty():
 		_set_spawn()
+	_refresh_object_textures()
 	queue_redraw()
 
 func set_input_enabled(value: bool) -> void:
@@ -71,6 +77,8 @@ func set_dialogue_active(value: bool) -> void:
 	if value:
 		held_direction = 0
 		movement_retry_elapsed = 0.0
+	else:
+		_restore_interaction_facing()
 
 func set_authoritative_state(value: bool) -> void:
 	authoritative_state = value
@@ -96,6 +104,7 @@ func set_map(texture: Texture2D, map_width: int, map_height: int, map_objects: A
 	objects = map_objects
 	if changed or not has_spawn:
 		_set_spawn()
+	_refresh_object_textures()
 	set_animation_tick(animation_tick)
 	_update_player_texture()
 	queue_redraw()
@@ -158,7 +167,7 @@ func set_world_entities(values: Array, local_character_id: int) -> void:
 		var entity: Dictionary = value
 		if int(entity.get("character_id", 0)) == local_character_id or str(entity.get("map_id", "")) != map_id:
 			continue
-		var sprite: Dictionary = content.render_facing_object_sprite(19, 1, false, 0)
+		var sprite: Dictionary = content.render_facing_object_sprite(19, int(entity.get("facing", 1)), false, 0)
 		var texture: Texture2D = sprite.get("texture") as Texture2D
 		if texture == null:
 			continue
@@ -170,6 +179,7 @@ func _apply_map(result: Dictionary, reset_spawn: bool) -> void:
 	foreground_texture = result.get("foreground_texture") as Texture2D
 	map_pixel_size = Vector2(int(result.get("width", 0)) * 16, int(result.get("height", 0)) * 16)
 	objects = result.get("objects", [])
+	_refresh_object_textures()
 	_apply_animation_tiles(result.get("animation_tiles", []))
 	if reset_spawn:
 		_set_spawn()
@@ -202,6 +212,8 @@ func _set_spawn() -> void:
 	movement_active = false
 	movement_stair = false
 	movement_stair_behavior = 0
+	movement_door = false
+	door_progress = 0.0
 	pending_warp = {}
 	warp_cooldown = 0.0
 
@@ -243,6 +255,7 @@ func interact() -> void:
 		return
 	var interaction: Dictionary = content.interaction_at(map_id, player_position.x, player_position.y, player_facing, player_elevation, objects)
 	if bool(interaction.get("ok", false)):
+		_face_interaction_object(interaction.get("object", {}))
 		interaction_requested.emit(interaction)
 
 func _key_direction(event: InputEventKey) -> int:
@@ -271,13 +284,16 @@ func _request_move(direction: int) -> void:
 	pending_elevation = int(result.get("elevation", player_elevation))
 	movement_stair = bool(result.get("stair", false))
 	movement_stair_behavior = int(result.get("stair_behavior", 0))
-	pending_warp = result.get("warp", {}) if movement_stair else {}
+	movement_door = bool(result.get("door", false)) and not movement_stair
+	pending_warp = result.get("warp", {}) if movement_stair or movement_door else {}
 	movement_start = Vector2(player_position)
 	movement_target = movement_start + _direction_vector(direction) if pending_map_id != map_id else Vector2(pending_position)
 	movement_jump = bool(result.get("jump", false))
 	movement_elapsed = 0.0
-	movement_duration = 0.24 if movement_stair else 0.32 if movement_jump else NORMAL_STEP_DURATION
+	movement_duration = 0.24 if movement_stair else DOOR_ANIMATION_DURATION if movement_door else 0.32 if movement_jump else NORMAL_STEP_DURATION
+	door_progress = 0.0
 	movement_active = true
+	sound_requested.emit("door" if movement_door else "step")
 	queue_redraw()
 
 func _process(delta: float) -> void:
@@ -293,6 +309,8 @@ func _process(delta: float) -> void:
 			movement_retry_elapsed = 0.0
 		return
 	movement_elapsed += delta
+	if movement_door and movement_duration > 0.0:
+		door_progress = clampf(movement_elapsed / movement_duration, 0.0, 1.0)
 	_update_player_texture()
 	if movement_elapsed < movement_duration:
 		queue_redraw()
@@ -304,6 +322,8 @@ func _process(delta: float) -> void:
 	movement_active = false
 	movement_stair = false
 	movement_stair_behavior = 0
+	movement_door = false
+	door_progress = 0.0
 	pending_warp = {}
 	player_position = completed_position
 	player_elevation = completed_elevation
@@ -340,7 +360,21 @@ func _load_map(next_map_id: String, reset_spawn: bool = false) -> void:
 	set_animation_tick(animation_tick)
 	if not reset_spawn:
 		has_spawn = true
+	_refresh_object_textures()
 	_update_player_texture()
+
+func _refresh_object_textures() -> void:
+	if content == null:
+		return
+	for object_value in objects:
+		if not object_value is Dictionary or not bool(object_value.get("render", true)):
+			continue
+		var object: Dictionary = object_value
+		var sprite: Dictionary = content.render_facing_object_sprite(int(object.get("graphics_id", -1)), int(object.get("facing", object.get("default_facing", 1))), false, 0)
+		if bool(sprite.get("ok", false)):
+			object["texture"] = sprite.get("texture")
+			object["width"] = int(sprite.get("width", 0))
+			object["height"] = int(sprite.get("height", 0))
 
 func _update_player_texture() -> void:
 	if content == null:
@@ -351,13 +385,68 @@ func _update_player_texture() -> void:
 	var sprite: Dictionary = content.render_facing_object_sprite(19, player_facing, movement_active, frame_step)
 	player_texture = sprite.get("texture") as Texture2D
 
+func dialogue_anchor_screen(dialogue: Dictionary) -> Vector2:
+	if map_pixel_size.x <= 0.0 or map_pixel_size.y <= 0.0:
+		return size * 0.5
+	var maximum_camera_size: Vector2 = Vector2(minf(map_pixel_size.x, CAMERA_MAX_CELLS_X * TILE_PIXELS), minf(map_pixel_size.y, CAMERA_MAX_CELLS_Y * TILE_PIXELS))
+	var tile_scale: float = minf(maxf(ceilf(maxf(size.x / maximum_camera_size.x, size.y / maximum_camera_size.y)), 1.0), MAX_TILE_SCALE)
+	var camera_world_size: Vector2 = Vector2(minf(size.x / tile_scale, map_pixel_size.x), minf(size.y / tile_scale, map_pixel_size.y))
+	var world_player: Vector2 = movement_start.lerp(movement_target, clampf(movement_elapsed / movement_duration, 0.0, 1.0)) if movement_active else Vector2(player_position)
+	var camera_center: Vector2 = (world_player + Vector2(0.5, 0.5)) * TILE_PIXELS
+	var camera_origin: Vector2 = camera_center - camera_world_size * 0.5
+	camera_origin.x = clampf(camera_origin.x, 0.0, maxf(map_pixel_size.x - camera_world_size.x, 0.0))
+	camera_origin.y = clampf(camera_origin.y, 0.0, maxf(map_pixel_size.y - camera_world_size.y, 0.0))
+	var object: Dictionary = dialogue.get("object", {})
+	var object_x: float = float(int(object.get("x", player_position.x)) + 0.5) * TILE_PIXELS
+	var object_y: float = float(int(object.get("y", player_position.y)) + 1.0) * TILE_PIXELS
+	var object_height: float = float(int(object.get("height", 16)))
+	return Vector2((object_x - camera_origin.x) * tile_scale, (object_y - object_height - camera_origin.y) * tile_scale)
+
+func _face_interaction_object(object_value: Variant) -> void:
+	if not object_value is Dictionary:
+		return
+	var object: Dictionary = object_value
+	if not bool(object.get("render", true)) or int(object.get("graphics_id", -1)) < 0:
+		return
+	var object_direction: int = _opposite_direction(player_facing)
+	object["facing"] = object_direction
+	var sprite: Dictionary = content.render_facing_object_sprite(int(object.get("graphics_id", -1)), object_direction, false, 0)
+	if bool(sprite.get("ok", false)):
+		object["texture"] = sprite.get("texture")
+		object["width"] = int(sprite.get("width", 0))
+		object["height"] = int(sprite.get("height", 0))
+	queue_redraw()
+
+func _restore_interaction_facing() -> void:
+	for object_value in objects:
+		if not object_value is Dictionary:
+			continue
+		var object: Dictionary = object_value
+		var default_facing: int = int(object.get("default_facing", object.get("facing", 1)))
+		if int(object.get("facing", default_facing)) != default_facing:
+			object["facing"] = default_facing
+	_refresh_object_textures()
+	queue_redraw()
+
+func _opposite_direction(direction: int) -> int:
+	match direction:
+		1:
+			return 2
+		2:
+			return 1
+		3:
+			return 4
+		4:
+			return 3
+	return 1
+
 func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO, size), Color("080B10"), true)
 	if map_texture == null or map_pixel_size.x <= 0.0 or map_pixel_size.y <= 0.0 or not has_spawn:
 		return
 	var maximum_camera_size: Vector2 = Vector2(minf(map_pixel_size.x, CAMERA_MAX_CELLS_X * TILE_PIXELS), minf(map_pixel_size.y, CAMERA_MAX_CELLS_Y * TILE_PIXELS))
 	var tile_scale: float = minf(maxf(ceilf(maxf(size.x / maximum_camera_size.x, size.y / maximum_camera_size.y)), 1.0), MAX_TILE_SCALE)
-	var camera_world_size: Vector2 = size / tile_scale
+	var camera_world_size: Vector2 = Vector2(minf(size.x / tile_scale, map_pixel_size.x), minf(size.y / tile_scale, map_pixel_size.y))
 	var world_player: Vector2 = movement_start.lerp(movement_target, clampf(movement_elapsed / movement_duration, 0.0, 1.0)) if movement_active else Vector2(player_position)
 	if movement_active and movement_jump:
 		world_player.y -= sin(clampf(movement_elapsed / movement_duration, 0.0, 1.0) * PI) * 0.75
@@ -376,6 +465,8 @@ func _draw() -> void:
 		var tile_world_position: Vector2 = Vector2(int(tile.get("x", 0)), int(tile.get("y", 0))) * TILE_PIXELS
 		var tile_destination: Rect2 = Rect2(destination_position + (tile_world_position - camera_origin) * tile_scale, Vector2(16.0, 16.0) * tile_scale)
 		draw_texture_rect(tile_texture, tile_destination, false)
+	if movement_active and movement_door:
+		_draw_door_animation(destination_position, camera_origin, tile_scale)
 	var drawables: Array = []
 	if foreground_texture != null:
 		for row_index in range(int(ceilf(map_pixel_size.y / TILE_PIXELS))):
@@ -387,6 +478,8 @@ func _draw() -> void:
 		if not object_value is Dictionary:
 			continue
 		var object: Dictionary = object_value
+		if not bool(object.get("render", true)):
+			continue
 		var texture: Texture2D = object.get("texture") as Texture2D
 		if texture == null:
 			continue
@@ -437,6 +530,17 @@ func _sort_drawables(left: Dictionary, right: Dictionary) -> bool:
 	if not is_equal_approx(left_y, right_y):
 		return left_y < right_y
 	return int(left.get("sort_order", 0)) < int(right.get("sort_order", 0))
+
+func _draw_door_animation(destination_position: Vector2, camera_origin: Vector2, tile_scale: float) -> void:
+	var door_position: Vector2 = Vector2(pending_position) * TILE_PIXELS
+	var door_rect: Rect2 = Rect2(destination_position + (door_position - camera_origin) * tile_scale, Vector2(TILE_PIXELS, TILE_PIXELS) * tile_scale)
+	if door_rect.end.x < 0.0 or door_rect.end.y < 0.0 or door_rect.position.x > size.x or door_rect.position.y > size.y:
+		return
+	var door_frame: int = mini(int(floor(door_progress * DOOR_FRAME_COUNT)), DOOR_FRAME_COUNT - 1)
+	var opening_width: float = door_rect.size.x * float(door_frame) / float(DOOR_FRAME_COUNT - 1)
+	var opening_rect: Rect2 = Rect2(door_rect.position.x + (door_rect.size.x - opening_width) * 0.5, door_rect.position.y, opening_width, door_rect.size.y)
+	if opening_rect.size.x > 0.0:
+		draw_rect(opening_rect, Color(0.02, 0.02, 0.03, 0.94), true)
 
 func _stair_offset(progress: float, behavior: int) -> Vector2:
 	var frame: float = progress * 12.0

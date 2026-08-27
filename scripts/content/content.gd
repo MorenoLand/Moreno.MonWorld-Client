@@ -31,6 +31,7 @@ const MAPGRID_LAYER_TYPE_MASK: int = 0x60000000
 const MAP_EVENTS_HEADER_SIZE: int = 0x14
 const MAP_OBJECT_EVENT_SIZE: int = 0x18
 const MAP_WARP_EVENT_SIZE: int = 0x08
+const MAP_BG_EVENT_SIZE: int = 0x0C
 const MAP_CONNECTIONS_HEADER_SIZE: int = 0x08
 const MAP_CONNECTION_SIZE: int = 0x0C
 const CONNECTION_SOUTH: int = 1
@@ -178,6 +179,8 @@ func _hydrate_manifest() -> void:
 		if bool(descriptor.get("ok", false)):
 			map_value["width"] = int(descriptor.get("width", 0))
 			map_value["height"] = int(descriptor.get("height", 0))
+			map_value["music_id"] = int(descriptor.get("music_id", 0))
+			map_value["map_type"] = int(descriptor.get("map_type", 0))
 		maps[map_index] = map_value
 	manifest["maps"] = maps
 
@@ -213,7 +216,7 @@ func _read_map_descriptor(map_value: Dictionary) -> Dictionary:
 	var secondary_offset: int = _read_rom_pointer(layout_offset + 20)
 	if width <= 0 or height <= 0 or width > 512 or height > 512:
 		return {"ok": false, "error": "FireRed map dimensions are invalid"}
-	return {"ok": true, "map_group": map_group, "map_index": map_index, "header_offset": header_offset, "layout_offset": layout_offset, "width": width, "height": height, "map_offset": map_offset, "primary_offset": primary_offset, "secondary_offset": secondary_offset}
+	return {"ok": true, "map_group": map_group, "map_index": map_index, "header_offset": header_offset, "layout_offset": layout_offset, "width": width, "height": height, "map_offset": map_offset, "primary_offset": primary_offset, "secondary_offset": secondary_offset, "music_id": _read_u16(header_offset + 0x10), "map_type": int(rom_data[header_offset + 0x17])}
 
 func _map_id_for_location(map_group: int, map_index: int) -> String:
 	for map_value in manifest.get("maps", []):
@@ -232,7 +235,7 @@ func map_data(map_id: String) -> Dictionary:
 	if not reference.is_empty():
 		var descriptor: Dictionary = _read_map_descriptor(reference)
 		if bool(descriptor.get("ok", false)):
-			return {"id": map_id, "name": "ROM map %d/%d" % [int(reference.get("map_group", -1)), int(reference.get("map_index", -1))], "map_group": int(reference.get("map_group", -1)), "map_index": int(reference.get("map_index", -1)), "width": int(descriptor.get("width", 0)), "height": int(descriptor.get("height", 0))}
+			return {"id": map_id, "name": "ROM map %d/%d" % [int(reference.get("map_group", -1)), int(reference.get("map_index", -1))], "map_group": int(reference.get("map_group", -1)), "map_index": int(reference.get("map_index", -1)), "width": int(descriptor.get("width", 0)), "height": int(descriptor.get("height", 0)), "music_id": int(descriptor.get("music_id", 0)), "map_type": int(descriptor.get("map_type", 0))}
 	return {}
 
 func render_map(map_id: String, animation_tick: int = 0) -> Dictionary:
@@ -274,7 +277,7 @@ func render_map(map_id: String, animation_tick: int = 0) -> Dictionary:
 		foreground_texture_cache[cache_key] = foreground_texture
 		cached_map["foreground_textures"] = foreground_texture_cache
 	map_cache[map_id] = cached_map
-	return {"ok": true, "texture": texture, "image": image, "background_texture": background_texture, "foreground_texture": foreground_texture, "width": int(cached_map.get("width", 0)), "height": int(cached_map.get("height", 0)), "header_offset": int(cached_map.get("header_offset", -1)), "layout_offset": int(cached_map.get("layout_offset", -1)), "objects": cached_map.get("objects", []), "warps": cached_map.get("warps", []), "connections": cached_map.get("connections", []), "map_cells": cached_map.get("map_cells", PackedInt32Array()), "animation_phase": animation_phase}
+	return {"ok": true, "texture": texture, "image": image, "background_texture": background_texture, "foreground_texture": foreground_texture, "width": int(cached_map.get("width", 0)), "height": int(cached_map.get("height", 0)), "header_offset": int(cached_map.get("header_offset", -1)), "layout_offset": int(cached_map.get("layout_offset", -1)), "objects": cached_map.get("objects", []), "warps": cached_map.get("warps", []), "connections": cached_map.get("connections", []), "map_cells": cached_map.get("map_cells", PackedInt32Array()), "music_id": int(cached_map.get("music_id", 0)), "map_type": int(cached_map.get("map_type", 0)), "animation_phase": animation_phase}
 
 func prepare_map(map_id: String) -> Dictionary:
 	var cached_map: Dictionary = _get_or_build_map_cache(map_id)
@@ -293,7 +296,7 @@ func prepare_map(map_id: String) -> Dictionary:
 		cached_map["world_background_texture"] = background_texture
 		cached_map["world_foreground_texture"] = foreground_texture
 	var animation: Dictionary = render_map_animation(map_id, 0)
-	return {"ok": true, "texture": background_texture, "background_texture": background_texture, "foreground_texture": foreground_texture, "animation_tiles": animation.get("tiles", []), "width": int(cached_map.get("width", 0)), "height": int(cached_map.get("height", 0)), "header_offset": int(cached_map.get("header_offset", -1)), "layout_offset": int(cached_map.get("layout_offset", -1)), "objects": cached_map.get("objects", []), "warps": cached_map.get("warps", []), "connections": cached_map.get("connections", []), "map_cells": cached_map.get("map_cells", PackedInt32Array()), "animation_phase": 0}
+	return {"ok": true, "texture": background_texture, "background_texture": background_texture, "foreground_texture": foreground_texture, "animation_tiles": animation.get("tiles", []), "width": int(cached_map.get("width", 0)), "height": int(cached_map.get("height", 0)), "header_offset": int(cached_map.get("header_offset", -1)), "layout_offset": int(cached_map.get("layout_offset", -1)), "objects": cached_map.get("objects", []), "warps": cached_map.get("warps", []), "connections": cached_map.get("connections", []), "map_cells": cached_map.get("map_cells", PackedInt32Array()), "music_id": int(cached_map.get("music_id", 0)), "map_type": int(cached_map.get("map_type", 0)), "animation_phase": 0}
 
 func render_map_animation(map_id: String, animation_tick: int) -> Dictionary:
 	var cached_map: Dictionary = _get_or_build_map_cache(map_id)
@@ -421,7 +424,8 @@ func _build_map_cache(map_id: String, map_value: Dictionary) -> Dictionary:
 			_draw_metatile(image, map_x * 16, map_y * 16, tileset, metatile_index, primary, secondary, animated_tiles)
 			_draw_metatile_layers(background_image, foreground_image, map_x * 16, map_y * 16, tileset, metatile_index, primary, secondary)
 	var objects: Array = _read_map_objects(header_offset, map_id)
-	return {"ok": true, "base_image": image, "base_background_image": background_image, "base_foreground_image": foreground_image, "primary": primary, "secondary": secondary, "primary_tiles": primary.get("tiles", PackedByteArray()), "animated_tiles": animated_tiles, "map_cells": map_cells, "objects": objects, "warps": _read_map_warps(header_offset), "connections": _read_map_connections(header_offset), "textures": {}, "images": {}, "background_textures": {}, "foreground_textures": {}, "width": width, "height": height, "header_offset": header_offset, "layout_offset": layout_offset, "map_group": int(map_value.get("map_group", -1)), "map_index": int(map_value.get("map_index", -1))}
+	objects.append_array(_read_map_background_events(header_offset, map_id))
+	return {"ok": true, "base_image": image, "base_background_image": background_image, "base_foreground_image": foreground_image, "primary": primary, "secondary": secondary, "primary_tiles": primary.get("tiles", PackedByteArray()), "animated_tiles": animated_tiles, "map_cells": map_cells, "objects": objects, "warps": _read_map_warps(header_offset), "connections": _read_map_connections(header_offset), "textures": {}, "images": {}, "background_textures": {}, "foreground_textures": {}, "width": width, "height": height, "header_offset": header_offset, "layout_offset": layout_offset, "map_group": int(map_value.get("map_group", -1)), "map_index": int(map_value.get("map_index", -1)), "music_id": int(map_value.get("music_id", 0))}
 
 func map_cell(map_id: String, x: int, y: int) -> Dictionary:
 	var cached_map: Dictionary = _get_or_build_map_cache(map_id)
@@ -533,7 +537,9 @@ func movement_result(map_id: String, x: int, y: int, direction: int, elevation: 
 		if landing.x < 0 or landing.y < 0 or landing.x >= width or landing.y >= height or not can_walk(map_id, destination.x, destination.y, landing.x, landing.y, elevation, occupied):
 			return {"ok": false, "error": "jump landing is blocked"}
 		return {"ok": true, "map_id": map_id, "x": landing.x, "y": landing.y, "from_x": x, "from_y": y, "intermediate_x": destination.x, "intermediate_y": destination.y, "jump": true, "elevation": int(_map_cell_from_cache(_get_or_build_map_cache(map_id), landing.x, landing.y).get("elevation", elevation))}
-	return {"ok": true, "map_id": map_id, "x": destination.x, "y": destination.y, "from_x": x, "from_y": y, "jump": false, "stair": false, "elevation": int(destination_cell.get("elevation", elevation))}
+	var destination_warp: Dictionary = warp_at(map_id, destination.x, destination.y, elevation)
+	var has_door_warp: bool = bool(destination_warp.get("ok", false))
+	return {"ok": true, "map_id": map_id, "x": destination.x, "y": destination.y, "from_x": x, "from_y": y, "jump": false, "stair": false, "door": has_door_warp, "warp": destination_warp if has_door_warp else {}, "elevation": int(destination_cell.get("elevation", elevation))}
 
 func interaction_at(map_id: String, x: int, y: int, direction: int, elevation: int = 3, visible_objects: Array = []) -> Dictionary:
 	var vector: Vector2i = _direction_vector(direction)
@@ -548,14 +554,19 @@ func interaction_at(map_id: String, x: int, y: int, direction: int, elevation: i
 		if not object_value is Dictionary:
 			continue
 		var object: Dictionary = object_value
+		if not bool(object.get("interactable", true)):
+			continue
 		if int(object.get("x", -1)) != target.x or int(object.get("y", -1)) != target.y:
 			continue
 		var object_elevation: int = int(object.get("elevation", elevation))
 		if object_elevation != 0 and object_elevation != elevation:
 			continue
+		var background_kind: int = int(object.get("background_kind", 0))
+		if background_kind > 0 and background_kind != direction:
+			continue
 		var pages: Array = object.get("dialogue_pages", [])
 		var text: String = str(pages[0]) if not pages.is_empty() else "Someone is standing here."
-		return {"ok": true, "kind": "object", "dialogue_id": str(object.get("dialogue_id", "")), "pages": pages, "text": text, "object": object}
+		return {"ok": true, "kind": str(object.get("kind", "object")), "dialogue_id": str(object.get("dialogue_id", "")), "pages": pages, "text": text, "object": object}
 	return {"ok": false, "error": "nothing to interact with"}
 
 func _movement_through_connection(map_id: String, x: int, y: int, direction: int, elevation: int) -> Dictionary:
@@ -653,7 +664,7 @@ func _cell_can_stand(cell: Dictionary) -> bool:
 
 func _position_occupied(objects: Array, x: int, y: int) -> bool:
 	for object_value in objects:
-		if object_value is Dictionary and int(object_value.get("x", -1)) == x and int(object_value.get("y", -1)) == y:
+		if object_value is Dictionary and bool(object_value.get("blocks_movement", true)) and int(object_value.get("x", -1)) == x and int(object_value.get("y", -1)) == y:
 			return true
 	return false
 
@@ -825,6 +836,8 @@ func _read_map_objects(header_offset: int, map_id: String) -> Array:
 		if kind != 0:
 			continue
 		var graphics_id: int = int(rom_data[offset + 1])
+		var movement_type: int = int(rom_data[offset + 9])
+		var default_facing: int = _initial_object_facing(movement_type)
 		var sprite: Dictionary = render_object_sprite(graphics_id, 0)
 		if not bool(sprite.get("ok", false)):
 			continue
@@ -834,8 +847,42 @@ func _read_map_objects(header_offset: int, map_id: String) -> Array:
 		if not dialogue.is_empty():
 			dialogue["id"] = "%s:%d" % [map_id, local_id]
 			_register_dialogue(map_id, local_id, script_offset, dialogue)
-		objects.append({"local_id": local_id, "graphics_id": graphics_id, "resolved_graphics_id": int(sprite.get("resolved_graphics_id", graphics_id)), "x": _read_s16(offset + 4), "y": _read_s16(offset + 6), "elevation": int(rom_data[offset + 8]), "movement_type": int(rom_data[offset + 9]), "script_offset": script_offset, "dialogue_id": str(dialogue.get("id", "")), "dialogue_pages": dialogue.get("pages", []), "texture": sprite.get("texture"), "width": int(sprite.get("width", 0)), "height": int(sprite.get("height", 0)), "frame_count": int(sprite.get("frame_count", 1))})
+		objects.append({"kind": "object", "local_id": local_id, "graphics_id": graphics_id, "resolved_graphics_id": int(sprite.get("resolved_graphics_id", graphics_id)), "x": _read_s16(offset + 4), "y": _read_s16(offset + 6), "elevation": int(rom_data[offset + 8]), "movement_type": movement_type, "default_facing": default_facing, "facing": default_facing, "script_offset": script_offset, "dialogue_id": str(dialogue.get("id", "")), "dialogue_pages": dialogue.get("pages", []), "texture": sprite.get("texture"), "width": int(sprite.get("width", 0)), "height": int(sprite.get("height", 0)), "frame_count": int(sprite.get("frame_count", 1)), "render": true, "blocks_movement": true, "interactable": true})
 	return objects
+
+func _initial_object_facing(movement_type: int) -> int:
+	match movement_type:
+		0x03, 0x07, 0x19, 0x1D, 0x21, 0x26, 0x2A, 0x2D, 0x31, 0x40, 0x45:
+			return CONNECTION_NORTH
+		0x04, 0x08, 0x1A, 0x1F, 0x23, 0x28, 0x2C, 0x30, 0x32, 0x41, 0x44:
+			return CONNECTION_SOUTH
+		0x05, 0x09, 0x1B, 0x20, 0x22, 0x25, 0x2B, 0x2F, 0x33, 0x42, 0x46:
+			return CONNECTION_WEST
+		0x06, 0x0A, 0x1C, 0x1E, 0x24, 0x27, 0x29, 0x2E, 0x34, 0x43, 0x47:
+			return CONNECTION_EAST
+	return CONNECTION_SOUTH
+
+func _read_map_background_events(header_offset: int, map_id: String) -> Array:
+	var events: Array = []
+	var events_offset: int = _read_rom_pointer(header_offset + 4)
+	if events_offset < 0 or not _valid_range(events_offset, MAP_EVENTS_HEADER_SIZE):
+		return events
+	var event_count: int = int(rom_data[events_offset + 3])
+	var events_data_offset: int = _read_rom_pointer(events_offset + 16)
+	if event_count <= 0 or events_data_offset < 0 or not _valid_range(events_data_offset, event_count * MAP_BG_EVENT_SIZE):
+		return events
+	for event_index in range(event_count):
+		var offset: int = events_data_offset + event_index * MAP_BG_EVENT_SIZE
+		var event_kind: int = int(rom_data[offset + 5])
+		if event_kind < 0 or event_kind > 4:
+			continue
+		var script_offset: int = _read_rom_pointer(offset + 8)
+		var dialogue: Dictionary = _read_dialogue_for_script(script_offset)
+		if not dialogue.is_empty():
+			dialogue["id"] = "%s:bg:%d" % [map_id, event_index]
+			_register_dialogue(map_id, -event_index - 1, script_offset, dialogue)
+		events.append({"kind": "sign", "background_kind": event_kind, "local_id": -event_index - 1, "x": int(_read_u16(offset)), "y": int(_read_u16(offset + 2)), "elevation": int(rom_data[offset + 4]), "script_offset": script_offset, "dialogue_id": str(dialogue.get("id", "")), "dialogue_pages": dialogue.get("pages", []), "render": false, "blocks_movement": false, "interactable": true})
+	return events
 
 func _register_dialogue(map_id: String, local_id: int, script_offset: int, dialogue: Dictionary) -> void:
 	var records: Dictionary = string_catalog.get("records", {})

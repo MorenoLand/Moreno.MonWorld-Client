@@ -145,6 +145,25 @@ func _init() -> void:
 		push_error("player-house Mom interaction selected Daisy's grooming dialogue")
 		quit(1)
 		return
+	var sign_dialogue: Dictionary = content.interaction_at("pallet-players-house-1f", 6, 2, 2, 3, house_result.get("objects", []))
+	if not bool(sign_dialogue.get("ok", false)) or str(sign_dialogue.get("kind", "")) != "sign":
+		push_error("ROM background sign interaction was not decoded")
+		quit(1)
+		return
+	var directional_signs: Array = [{"kind": "sign", "background_kind": 2, "local_id": -1, "x": 6, "y": 1, "elevation": 3, "dialogue_pages": ["Synthetic sign"]}]
+	var sign_wrong_direction: Dictionary = content.interaction_at("pallet-players-house-1f", 6, 0, 1, 3, directional_signs)
+	if bool(sign_wrong_direction.get("ok", false)):
+		push_error("directional ROM sign interaction ignored its facing rule")
+		quit(1)
+		return
+	var audio: MonWorldAudio = MonWorldAudio.new()
+	var door_sound: AudioStreamWAV = audio._build_effect_stream("door")
+	var music_sound: AudioStreamWAV = audio._build_music_stream(1)
+	if door_sound == null or door_sound.data.is_empty() or music_sound == null or music_sound.data.is_empty():
+		push_error("audio fallback streams were not generated")
+		quit(1)
+		return
+	audio.free()
 	var spawn: Dictionary = content.default_spawn("pallet-town")
 	if not bool(spawn.get("ok", false)) or not bool(content.map_cell("pallet-town", int(spawn.get("x", 0)), int(spawn.get("y", 0))).get("collision", 1) == 0):
 		push_error("Pallet Town did not produce a walkable spawn")

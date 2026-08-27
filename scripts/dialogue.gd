@@ -5,6 +5,8 @@ signal action_requested
 signal closed
 
 const TYPE_INTERVAL: float = 1.0 / 30.0
+const PANEL_HEIGHT: float = 132.0
+const PANEL_WIDTH: float = 430.0
 var text_label: Label
 var arrow_label: Label
 var current_text: String = ""
@@ -14,6 +16,8 @@ var visible_count: int = 0
 var type_elapsed: float = 0.0
 var open_state: bool = false
 var ignore_next_action: bool = false
+var screen_anchor: Vector2 = Vector2(-1.0, -1.0)
+var actor_anchored: bool = false
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -33,7 +37,7 @@ func _ready() -> void:
 	margin.add_child(box)
 	text_label = Label.new()
 	text_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	text_label.add_theme_font_size_override("font_size", 22)
+	text_label.add_theme_font_size_override("font_size", 20)
 	text_label.custom_minimum_size = Vector2(0, 88)
 	box.add_child(text_label)
 	var arrow_row: HBoxContainer = HBoxContainer.new()
@@ -41,7 +45,7 @@ func _ready() -> void:
 	box.add_child(arrow_row)
 	arrow_label = Label.new()
 	arrow_label.text = "▼"
-	arrow_label.add_theme_font_size_override("font_size", 18)
+	arrow_label.add_theme_font_size_override("font_size", 16)
 	arrow_row.add_child(arrow_label)
 	visible = false
 	set_process(false)
@@ -50,16 +54,30 @@ func _layout_panel() -> void:
 	var viewport_width: float = size.x
 	if viewport_width <= 0.0:
 		viewport_width = get_viewport_rect().size.x
-	var panel_width: float = clampf(viewport_width * 0.70, 300.0, 780.0)
-	if viewport_width > 0.0:
-		panel_width = minf(panel_width, maxf(viewport_width - 24.0, 240.0))
-	offset_left = -panel_width * 0.5
-	offset_right = panel_width * 0.5
+	var viewport_height: float = size.y if size.y > 0.0 else get_viewport_rect().size.y
+	if actor_anchored and screen_anchor.x >= 0.0:
+		var panel_width: float = minf(PANEL_WIDTH, maxf(viewport_width - 24.0, 240.0))
+		var left: float = clampf(screen_anchor.x - panel_width * 0.5, 12.0, maxf(viewport_width - panel_width - 12.0, 12.0))
+		var top: float = screen_anchor.y - PANEL_HEIGHT - 12.0
+		if top < 12.0:
+			top = minf(screen_anchor.y + 12.0, maxf(viewport_height - PANEL_HEIGHT - 12.0, 12.0))
+		set_anchors_preset(Control.PRESET_TOP_LEFT)
+		offset_left = left
+		offset_top = top
+		offset_right = left + panel_width
+		offset_bottom = top + PANEL_HEIGHT
+		return
+	var bottom_panel_width: float = minf(PANEL_WIDTH, maxf(viewport_width - 24.0, 240.0))
+	set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+	offset_left = -bottom_panel_width * 0.5
+	offset_right = bottom_panel_width * 0.5
+	offset_top = -170.0
+	offset_bottom = -28.0
 
 func show_text(value: String, suppress_action: bool = false) -> void:
 	show_pages([value], suppress_action)
 
-func show_pages(values: Array, suppress_action: bool = false) -> void:
+func show_pages(values: Array, suppress_action: bool = false, anchor: Vector2 = Vector2(-1.0, -1.0)) -> void:
 	pages = []
 	for value in values:
 		var page: String = str(value)
@@ -71,8 +89,11 @@ func show_pages(values: Array, suppress_action: bool = false) -> void:
 	type_elapsed = 0.0
 	open_state = not pages.is_empty()
 	ignore_next_action = suppress_action and open_state
+	screen_anchor = anchor
+	actor_anchored = anchor.x >= 0.0 and anchor.y >= 0.0
 	visible = open_state
 	set_process(open_state)
+	_layout_panel()
 	_render()
 
 func is_open() -> bool:

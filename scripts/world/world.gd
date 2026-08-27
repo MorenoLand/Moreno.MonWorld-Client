@@ -14,6 +14,7 @@ var selected_character_id := 0
 var map_view: MonWorldMapPlayCanvas
 var hud: MonWorldHud
 var dialogue_overlay: MonWorldDialogue
+var audio: MonWorldAudio
 var animation_tick: int = 0
 var animation_elapsed: float = 0.0
 var held_input: String = ""
@@ -37,7 +38,10 @@ func _build_ui() -> void:
 	map_view.set_authoritative_state(true)
 	map_view.set_input_enabled(false)
 	map_view.interaction_requested.connect(_on_interaction_requested)
+	map_view.sound_requested.connect(_on_sound_requested)
 	add_child(map_view)
+	audio = MonWorldAudio.new()
+	add_child(audio)
 	hud = MonWorldHud.new()
 	hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(hud)
@@ -169,6 +173,7 @@ func _load_map_texture(map_id: String) -> void:
 	var background_texture: Texture2D = result.get("background_texture", result.get("texture")) as Texture2D
 	var foreground_texture: Texture2D = result.get("foreground_texture") as Texture2D
 	map_view.set_map(background_texture, int(result.get("width", 0)), int(result.get("height", 0)), result.get("objects", []), map_id, foreground_texture)
+	audio.play_map_music(GameState.content, map_id)
 
 func _on_entity_update(value: Dictionary) -> void:
 	var player: Variant = value.get("player")
@@ -184,7 +189,7 @@ func _sync_map_entities() -> void:
 		var entity: Dictionary = entities[key]
 		players.append(entity)
 		if int(entity.get("character_id", 0)) == selected_character_id:
-			map_view.set_player_state(int(entity.get("x", 0)), int(entity.get("y", 0)), int(entity.get("elevation", 3)))
+			map_view.set_player_state(int(entity.get("x", 0)), int(entity.get("y", 0)), int(entity.get("elevation", 3)), int(entity.get("facing", 1)))
 	map_view.set_world_entities(players, selected_character_id)
 
 func _process(delta: float) -> void:
@@ -219,12 +224,17 @@ func _on_interaction_requested(dialogue: Dictionary) -> void:
 	var pages: Array = dialogue.get("pages", [])
 	if pages.is_empty():
 		pages = [str(dialogue.get("text", ""))]
-	dialogue_overlay.show_pages(pages)
+	dialogue_overlay.show_pages(pages, false, map_view.dialogue_anchor_screen(dialogue))
 	map_view.set_dialogue_active(true)
+	audio.play_effect("dialogue")
 
 func _on_dialogue_action() -> void:
+	audio.play_effect("dialogue")
 	if dialogue_overlay != null and dialogue_overlay.handle_action() and not dialogue_overlay.is_open():
 		map_view.set_dialogue_active(false)
+
+func _on_sound_requested(effect: String) -> void:
+	audio.play_effect(effect)
 
 func _unhandled_input(event: InputEvent) -> void:
 	if not event is InputEventKey:

@@ -15,6 +15,7 @@ var play_button: Button
 var preview_button: Button
 var back_button: Button
 var dialogue_overlay: MonWorldDialogue
+var audio: MonWorldAudio
 var preview_shell: Control
 var animation_tick: int = 0
 var animation_elapsed: float = 0.0
@@ -123,7 +124,10 @@ func _build_ui() -> void:
 	play_view.location_changed.connect(_on_play_location_changed)
 	play_view.back_requested.connect(_on_preview_pressed)
 	play_view.interaction_requested.connect(_on_interaction_requested)
+	play_view.sound_requested.connect(_on_sound_requested)
 	add_child(play_view)
+	audio = MonWorldAudio.new()
+	add_child(audio)
 	hud = MonWorldHud.new()
 	hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	hud.visible = false
@@ -187,6 +191,7 @@ func _on_play_pressed() -> void:
 	if hud != null:
 		hud.set_state(content, selected_map_id)
 	play_view.set_animation_tick(animation_tick)
+	audio.play_map_music(content, selected_map_id)
 
 func _on_preview_pressed() -> void:
 	_set_playing(false)
@@ -206,12 +211,17 @@ func _on_interaction_requested(dialogue: Dictionary) -> void:
 	var pages: Array = dialogue.get("pages", [])
 	if pages.is_empty():
 		pages = [str(dialogue.get("text", ""))]
-	dialogue_overlay.show_pages(pages, true)
+	dialogue_overlay.show_pages(pages, true, play_view.dialogue_anchor_screen(dialogue))
 	play_view.set_dialogue_active(true)
+	audio.play_effect("dialogue")
 
 func _on_dialogue_action() -> void:
+	audio.play_effect("dialogue")
 	if dialogue_overlay != null and dialogue_overlay.handle_action() and not dialogue_overlay.is_open():
 		play_view.set_dialogue_active(false)
+
+func _on_sound_requested(effect: String) -> void:
+	audio.play_effect(effect)
 
 func _set_playing(value: bool) -> void:
 	playing = value
@@ -226,6 +236,8 @@ func _set_playing(value: bool) -> void:
 
 func _on_play_location_changed(map_id: String, _x: int, _y: int) -> void:
 	selected_map_id = map_id
+	if playing:
+		audio.play_map_music(content, map_id)
 	if playing and hud != null:
 		hud.set_state(content, map_id)
 	if not playing:
