@@ -4,6 +4,8 @@ The client accepts a user-selected compatible FireRed or LeafGreen `.gba` base R
 
 The reader identifies FireRed and LeafGreen from their GBA header game codes (`BPRE` and `BPRF`) and Nintendo maker code (`01`). A graphics patch can therefore change ROM bytes without being rejected solely because its whole-file fingerprint changed.
 
+ROM handling is profile-driven. Each profile owns its region, content contract, map-group table, map format, animation sources, object graphics, and renderer status. FireRed is the first enabled map reader; LeafGreen, Ruby, Sapphire, and Emerald are recognized profiles with their own future extension points rather than being misread through FireRed offsets.
+
 After a valid Kanto ROM is selected, the client remembers its local path in `user://monworld-roms.json`. If the file is moved or removed, the client clears the stale path and opens Client Management so it can be selected again. ROM bytes are never written to the repository or uploaded to the server.
 
 The current reader performs a structural FireRed map-layout check against the source-defined pointer tables, reads the ROM bytes into the client session, extracts the GBA header identifiers, and exposes the normalized Kanto map contract. The displayed SHA-1 is only a diagnostic fingerprint; it is not an acceptance gate. Unknown game codes and incompatible map layouts are rejected.

@@ -7,6 +7,12 @@ func _init() -> void:
 		push_error("invalid ROM bytes were accepted")
 		quit(1)
 		return
+	for profile_case in [{"code": "BPRF", "game": "LeafGreen", "region": "Kanto"}, {"code": "BPEE", "game": "Emerald", "region": "Hoenn"}, {"code": "AXPE", "game": "Sapphire", "region": "Hoenn"}]:
+		var profile: Dictionary = MonWorldRomProfile.from_header({"game_code": str(profile_case.get("code", "")), "maker_code": "01"})
+		if str(profile.get("game", "")) != str(profile_case.get("game", "")) or str(profile.get("region", "")) != str(profile_case.get("region", "")):
+			push_error("ROM profile registry did not identify %s" % str(profile_case.get("code", "")))
+			quit(1)
+			return
 	var path: String = OS.get_environment("MONWORLD_ROM")
 	var args: PackedStringArray = OS.get_cmdline_user_args()
 	var index: int = 0
@@ -25,6 +31,10 @@ func _init() -> void:
 		quit(1)
 		return
 	var content: MonWorldContent = result.get("content") as MonWorldContent
+	if str(content.source_profile.get("id", "")) != "pokemon-fire-red":
+		push_error("FireRed ROM did not select the FireRed source profile")
+		quit(1)
+		return
 	if (content.manifest.get("maps", []) as Array).size() < 50:
 		push_error("ROM map manifest did not expose the selectable map table")
 		quit(1)
