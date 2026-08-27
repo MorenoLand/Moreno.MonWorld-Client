@@ -18,6 +18,7 @@ const PRIMARY_METATILE_COUNT: int = 640
 const PRIMARY_TILE_COUNT: int = 640
 const PRIMARY_PALETTE_COUNT: int = 7
 const SECONDARY_PALETTE_COUNT: int = 6
+const SECONDARY_ROM_PALETTE_COUNT: int = 16
 const TILE_BYTES: int = 32
 const TILES_PER_METATILE: int = 8
 const MAPGRID_LAYER_TYPE_SHIFT: int = 29
@@ -163,7 +164,7 @@ func _build_map_cache(map_id: String, map_value: Dictionary) -> Dictionary:
 	if map_offset < 0 or not _valid_range(map_offset, map_bytes):
 		return {"ok": false, "error": "could not read the FireRed map cells"}
 	var primary: Dictionary = _read_tileset(primary_offset, PRIMARY_TILE_COUNT, PRIMARY_METATILE_COUNT, PRIMARY_PALETTE_COUNT)
-	var secondary: Dictionary = _read_tileset(secondary_offset, secondary_tile_count, secondary_metatile_count, SECONDARY_PALETTE_COUNT)
+	var secondary: Dictionary = _read_tileset(secondary_offset, secondary_tile_count, secondary_metatile_count, SECONDARY_ROM_PALETTE_COUNT)
 	if primary.is_empty() or secondary.is_empty():
 		return {"ok": false, "error": "could not read the FireRed map tilesets"}
 	primary["is_secondary"] = false
@@ -361,8 +362,7 @@ func _draw_tile(image: Image, destination_x: int, destination_y: int, tile_entry
 	if global_tile_index < PRIMARY_TILE_COUNT:
 		palette_bank = mini(palette_bank, PRIMARY_PALETTE_COUNT - 1)
 	else:
-		palette_bank -= PRIMARY_PALETTE_COUNT
-		palette_bank = clampi(palette_bank, 0, SECONDARY_PALETTE_COUNT - 1)
+		palette_bank = clampi(palette_bank, PRIMARY_PALETTE_COUNT, PRIMARY_PALETTE_COUNT + SECONDARY_PALETTE_COUNT - 1)
 	var h_flip: bool = (tile_entry & 0x0400) != 0
 	var v_flip: bool = (tile_entry & 0x0800) != 0
 	var tile_offset: int = tile_index * TILE_BYTES

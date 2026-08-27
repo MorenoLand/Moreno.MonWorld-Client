@@ -55,6 +55,13 @@ func _init() -> void:
 			push_error("Pallet Town object events were not decoded")
 			quit(1)
 			return
+		if map_id == "pallet-town":
+			for y in image.get_height():
+				for x in image.get_width():
+					if image.get_pixel(x, y) == Color(1, 0, 1):
+						push_error("Pallet Town contains an unmapped magenta palette pixel")
+						quit(1)
+						return
 	var static_result: Dictionary = content.render_map("pallet-town", 0)
 	var animated_result: Dictionary = content.render_map("pallet-town", 7)
 	var static_image: Image = static_result.get("image") as Image
