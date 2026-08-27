@@ -244,6 +244,8 @@ func render_map(map_id: String, animation_tick: int = 0) -> Dictionary:
 	var animation_phase: int = posmod(animation_tick, 40)
 	var texture_cache: Dictionary = cached_map.get("textures", {})
 	var image_cache: Dictionary = cached_map.get("images", {})
+	var background_texture_cache: Dictionary = cached_map.get("background_textures", {})
+	var foreground_texture_cache: Dictionary = cached_map.get("foreground_textures", {})
 	var cache_key: String = str(animation_phase)
 	var texture: Texture2D = texture_cache.get(cache_key) as Texture2D
 	var image: Image = image_cache.get(cache_key) as Image
@@ -255,7 +257,20 @@ func render_map(map_id: String, animation_tick: int = 0) -> Dictionary:
 		cached_map["textures"] = texture_cache
 		cached_map["images"] = image_cache
 		map_cache[map_id] = cached_map
-	return {"ok": true, "texture": texture, "image": image, "width": int(cached_map.get("width", 0)), "height": int(cached_map.get("height", 0)), "header_offset": int(cached_map.get("header_offset", -1)), "layout_offset": int(cached_map.get("layout_offset", -1)), "objects": cached_map.get("objects", []), "warps": cached_map.get("warps", []), "connections": cached_map.get("connections", []), "map_cells": cached_map.get("map_cells", PackedInt32Array()), "animation_phase": animation_phase}
+	var background_texture: Texture2D = background_texture_cache.get(cache_key) as Texture2D
+	if background_texture == null:
+		var background_image: Image = _render_cached_layer(cached_map, animation_phase, false)
+		background_texture = ImageTexture.create_from_image(background_image)
+		background_texture_cache[cache_key] = background_texture
+		cached_map["background_textures"] = background_texture_cache
+	var foreground_texture: Texture2D = foreground_texture_cache.get(cache_key) as Texture2D
+	if foreground_texture == null:
+		var foreground_image: Image = _render_cached_layer(cached_map, animation_phase, true)
+		foreground_texture = ImageTexture.create_from_image(foreground_image)
+		foreground_texture_cache[cache_key] = foreground_texture
+		cached_map["foreground_textures"] = foreground_texture_cache
+	map_cache[map_id] = cached_map
+	return {"ok": true, "texture": texture, "image": image, "background_texture": background_texture, "foreground_texture": foreground_texture, "width": int(cached_map.get("width", 0)), "height": int(cached_map.get("height", 0)), "header_offset": int(cached_map.get("header_offset", -1)), "layout_offset": int(cached_map.get("layout_offset", -1)), "objects": cached_map.get("objects", []), "warps": cached_map.get("warps", []), "connections": cached_map.get("connections", []), "map_cells": cached_map.get("map_cells", PackedInt32Array()), "animation_phase": animation_phase}
 
 func _get_or_build_map_cache(map_id: String, map_value: Dictionary = {}) -> Dictionary:
 	var cached_map: Dictionary = map_cache.get(map_id, {})
@@ -306,6 +321,10 @@ func _build_map_cache(map_id: String, map_value: Dictionary) -> Dictionary:
 	secondary["is_secondary"] = true
 	var image: Image = Image.create(width * 16, height * 16, false, Image.FORMAT_RGBA8)
 	image.fill(Color("101721"))
+	var background_image: Image = Image.create(width * 16, height * 16, false, Image.FORMAT_RGBA8)
+	background_image.fill(Color("101721"))
+	var foreground_image: Image = Image.create(width * 16, height * 16, false, Image.FORMAT_RGBA8)
+	foreground_image.fill(Color(0.0, 0.0, 0.0, 0.0))
 	var animated_tiles: Array = []
 	for map_y in range(height):
 		for map_x in range(width):
@@ -317,8 +336,9 @@ func _build_map_cache(map_id: String, map_value: Dictionary) -> Dictionary:
 				tileset = secondary
 				metatile_index = metatile_id - primary_metatile_count
 			_draw_metatile(image, map_x * 16, map_y * 16, tileset, metatile_index, primary, secondary, animated_tiles)
+			_draw_metatile_layers(background_image, foreground_image, map_x * 16, map_y * 16, tileset, metatile_index, primary, secondary)
 	var objects: Array = _read_map_objects(header_offset)
-	return {"ok": true, "base_image": image, "primary": primary, "secondary": secondary, "primary_tiles": primary.get("tiles", PackedByteArray()), "animated_tiles": animated_tiles, "map_cells": map_cells, "objects": objects, "warps": _read_map_warps(header_offset), "connections": _read_map_connections(header_offset), "textures": {}, "images": {}, "width": width, "height": height, "header_offset": header_offset, "layout_offset": layout_offset, "map_group": int(map_value.get("map_group", -1)), "map_index": int(map_value.get("map_index", -1))}
+	return {"ok": true, "base_image": image, "base_background_image": background_image, "base_foreground_image": foreground_image, "primary": primary, "secondary": secondary, "primary_tiles": primary.get("tiles", PackedByteArray()), "animated_tiles": animated_tiles, "map_cells": map_cells, "objects": objects, "warps": _read_map_warps(header_offset), "connections": _read_map_connections(header_offset), "textures": {}, "images": {}, "background_textures": {}, "foreground_textures": {}, "width": width, "height": height, "header_offset": header_offset, "layout_offset": layout_offset, "map_group": int(map_value.get("map_group", -1)), "map_index": int(map_value.get("map_index", -1))}
 
 func map_cell(map_id: String, x: int, y: int) -> Dictionary:
 	var cached_map: Dictionary = _get_or_build_map_cache(map_id)
@@ -424,7 +444,42 @@ func movement_result(map_id: String, x: int, y: int, direction: int, elevation: 
 		if landing.x < 0 or landing.y < 0 or landing.x >= width or landing.y >= height or not can_walk(map_id, destination.x, destination.y, landing.x, landing.y, elevation, occupied):
 			return {"ok": false, "error": "jump landing is blocked"}
 		return {"ok": true, "map_id": map_id, "x": landing.x, "y": landing.y, "from_x": x, "from_y": y, "intermediate_x": destination.x, "intermediate_y": destination.y, "jump": true, "elevation": int(_map_cell_from_cache(_get_or_build_map_cache(map_id), landing.x, landing.y).get("elevation", elevation))}
-	return {"ok": true, "map_id": map_id, "x": destination.x, "y": destination.y, "from_x": x, "from_y": y, "jump": false, "elevation": int(destination_cell.get("elevation", elevation))}
+	return {"ok": true, "map_id": map_id, "x": destination.x, "y": destination.y, "from_x": x, "from_y": y, "jump": false, "stair": _is_stair_warp_behavior(int(destination_cell.get("behavior", 0))), "stair_behavior": int(destination_cell.get("behavior", 0)), "elevation": int(destination_cell.get("elevation", elevation))}
+
+func interaction_at(map_id: String, x: int, y: int, direction: int, elevation: int = 3, visible_objects: Array = []) -> Dictionary:
+	var vector: Vector2i = _direction_vector(direction)
+	if vector == Vector2i.ZERO:
+		return {"ok": false, "error": "invalid interaction direction"}
+	var objects_to_check: Array = visible_objects
+	if objects_to_check.is_empty():
+		var cached_map: Dictionary = _get_or_build_map_cache(map_id)
+		objects_to_check = cached_map.get("objects", [])
+	var target: Vector2i = Vector2i(x, y) + vector
+	for object_value in objects_to_check:
+		if not object_value is Dictionary:
+			continue
+		var object: Dictionary = object_value
+		if int(object.get("x", -1)) != target.x or int(object.get("y", -1)) != target.y:
+			continue
+		var object_elevation: int = int(object.get("elevation", elevation))
+		if object_elevation != 0 and object_elevation != elevation:
+			continue
+		return {"ok": true, "kind": "object", "text": _interaction_text(object), "object": object}
+	return {"ok": false, "error": "nothing to interact with"}
+
+func _interaction_text(object: Dictionary) -> String:
+	match int(object.get("graphics_id", -1)):
+		88:
+			return "Mom: Take care, honey."
+		71:
+			return "Professor Oak: The world is full of discoveries."
+		18:
+			return "Youngster: Hey! Nice to meet you."
+		23:
+			return "A local resident smiles at you."
+		92, 95:
+			return "There is nothing to interact with right now."
+	return "Someone is standing here."
 
 func _movement_through_connection(map_id: String, x: int, y: int, direction: int, elevation: int) -> Dictionary:
 	var cached_map: Dictionary = _get_or_build_map_cache(map_id)
@@ -552,6 +607,11 @@ func _jump_direction(behavior: int) -> int:
 			return CONNECTION_SOUTH
 	return 0
 
+func _is_stair_warp_behavior(behavior: int) -> bool:
+	var format: Dictionary = source_profile.get("format", {})
+	var stair_behaviors: Array = format.get("stair_warp_behaviors", [0x6C, 0x6D, 0x6E, 0x6F])
+	return stair_behaviors.has(behavior)
+
 func _direction_from_delta(dx: int, dy: int) -> int:
 	if dx == 0 and dy == 1:
 		return CONNECTION_SOUTH
@@ -613,6 +673,35 @@ func _render_cached_map(cached_map: Dictionary, animation_phase: int) -> Image:
 				tileset = secondary
 				metatile_index = metatile_id - primary_metatile_count
 			_draw_metatile(image, map_x * 16, map_y * 16, tileset, metatile_index, primary, secondary, [], animated_primary)
+	return image
+
+func _render_cached_layer(cached_map: Dictionary, animation_phase: int, foreground: bool) -> Image:
+	var width: int = int(cached_map.get("width", 0))
+	var height: int = int(cached_map.get("height", 0))
+	var image: Image = Image.create(width * 16, height * 16, false, Image.FORMAT_RGBA8)
+	image.fill(Color(0.0, 0.0, 0.0, 0.0) if foreground else Color("101721"))
+	var primary: Dictionary = cached_map.get("primary", {})
+	var secondary: Dictionary = cached_map.get("secondary", {})
+	var map_cells: PackedInt32Array = cached_map.get("map_cells", PackedInt32Array())
+	var animated_primary: PackedByteArray = _animated_primary_tiles(cached_map.get("primary_tiles", PackedByteArray()), animation_phase) if animation_phase != 0 else PackedByteArray()
+	var metatile_id_mask: int = _format_int("map_grid_metatile_id_mask", MAPGRID_METATILE_ID_MASK)
+	var primary_metatile_count: int = _format_int("primary_metatile_count", PRIMARY_METATILE_COUNT)
+	var layer_start: int = 4 if foreground else 0
+	for map_y in range(height):
+		for map_x in range(width):
+			var cell_index: int = map_y * width + map_x
+			if cell_index < 0 or cell_index >= map_cells.size():
+				continue
+			var metatile_id: int = int(map_cells[cell_index]) & metatile_id_mask
+			var tileset: Dictionary = primary
+			var metatile_index: int = metatile_id
+			if metatile_id >= primary_metatile_count:
+				tileset = secondary
+				metatile_index = metatile_id - primary_metatile_count
+			var metatiles: PackedInt32Array = tileset.get("metatiles", PackedInt32Array())
+			var base: int = metatile_index * _format_int("tiles_per_metatile", TILES_PER_METATILE)
+			if metatile_index >= 0 and base + layer_start + 4 <= metatiles.size():
+				_draw_metatile_layer(image, map_x * 16, map_y * 16, metatiles, base, layer_start, primary, secondary, [], animated_primary)
 	return image
 
 func _animated_primary_tiles(base_tiles: PackedByteArray, animation_phase: int) -> PackedByteArray:
@@ -723,8 +812,12 @@ func render_object_sprite(graphics_id: int, frame: int = 0, flip_h: bool = false
 	if spec.is_empty():
 		return {"ok": false, "error": "FireRed object graphics are not available for this graphics ID"}
 	var frame_count: int = int(spec.get("frame_count", 1))
-	var frame_index: int = posmod(frame, maxi(frame_count, 1))
-	var cache_key: String = "%d:%d:%d" % [resolved_graphics_id, frame_index, int(flip_h)]
+	var logical_frame_index: int = posmod(frame, maxi(frame_count, 1))
+	var frame_index: int = logical_frame_index
+	var frame_sequence: Array = spec.get("frame_sequence", [])
+	if not frame_sequence.is_empty():
+		frame_index = int(frame_sequence[posmod(logical_frame_index, frame_sequence.size())])
+	var cache_key: String = "%d:%d:%d" % [resolved_graphics_id, logical_frame_index, int(flip_h)]
 	var cached_texture: Texture2D = sprite_cache.get(cache_key) as Texture2D
 	if cached_texture != null:
 		return {"ok": true, "texture": cached_texture, "width": int(spec.get("width", 0)), "height": int(spec.get("height", 0)), "frame_count": frame_count, "resolved_graphics_id": resolved_graphics_id}
@@ -825,6 +918,15 @@ func _draw_metatile(image: Image, destination_x: int, destination_y: int, tilese
 		1:
 			_draw_metatile_layer(image, destination_x, destination_y, metatiles, base, 0, primary, secondary, animated_tiles, primary_override)
 			_draw_metatile_layer(image, destination_x, destination_y, metatiles, base, 4, primary, secondary, animated_tiles, primary_override)
+
+func _draw_metatile_layers(background_image: Image, foreground_image: Image, destination_x: int, destination_y: int, tileset: Dictionary, metatile_index: int, primary: Dictionary, secondary: Dictionary) -> void:
+	var metatiles: PackedInt32Array = tileset.get("metatiles", PackedInt32Array())
+	var tiles_per_metatile: int = _format_int("tiles_per_metatile", TILES_PER_METATILE)
+	var base: int = metatile_index * tiles_per_metatile
+	if metatile_index < 0 or base + tiles_per_metatile > metatiles.size():
+		return
+	_draw_metatile_layer(background_image, destination_x, destination_y, metatiles, base, 0, primary, secondary, [])
+	_draw_metatile_layer(foreground_image, destination_x, destination_y, metatiles, base, 4, primary, secondary, [])
 		2:
 			_draw_metatile_layer(image, destination_x, destination_y, metatiles, base, 0, primary, secondary, animated_tiles, primary_override)
 			_draw_metatile_layer(image, destination_x, destination_y, metatiles, base, 4, primary, secondary, animated_tiles, primary_override)

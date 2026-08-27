@@ -2,10 +2,17 @@ class_name MonWorldMapPlayCanvas
 extends Control
 
 signal location_changed(map_id: String, x: int, y: int)
+signal back_requested
+signal interaction_requested(text: String)
+
+const TILE_PIXELS: float = 16.0
+const CAMERA_MAX_CELLS_X: int = 30
+const CAMERA_MAX_CELLS_Y: int = 20
 
 var content: MonWorldContent
 var map_id: String = ""
 var map_texture: Texture2D
+var foreground_texture: Texture2D
 var map_pixel_size: Vector2 = Vector2.ZERO
 var objects: Array = []
 var player_position: Vector2i = Vector2i.ZERO
@@ -16,11 +23,13 @@ var movement_active: bool = false
 var movement_start: Vector2 = Vector2.ZERO
 var movement_target: Vector2 = Vector2.ZERO
 var movement_jump: bool = false
+var movement_stair: bool = false
 var movement_elapsed: float = 0.0
 var movement_duration: float = 0.14
 var pending_map_id: String = ""
 var pending_position: Vector2i = Vector2i.ZERO
 var pending_elevation: int = 3
+var pending_warp: Dictionary = {}
 var warp_cooldown: float = 0.0
 var has_spawn: bool = false
 var input_enabled: bool = false
@@ -35,6 +44,7 @@ func _ready() -> void:
 func set_content(value: MonWorldContent) -> void:
 	content = value
 	player_texture = null
+	foreground_texture = null
 	if not map_id.is_empty():
 		_set_spawn()
 	queue_redraw()
@@ -54,11 +64,12 @@ func set_animation_tick(value: int) -> void:
 	_update_player_texture()
 	queue_redraw()
 
-func set_map(texture: Texture2D, map_width: int, map_height: int, map_objects: Array, selected_map_id: String = "") -> void:
+func set_map(texture: Texture2D, map_width: int, map_height: int, map_objects: Array, selected_map_id: String = "", map_foreground_texture: Texture2D = null) -> void:
 	var changed: bool = not selected_map_id.is_empty() and map_id != selected_map_id
 	if not selected_map_id.is_empty():
 		map_id = selected_map_id
 	map_texture = texture
+	foreground_texture = map_foreground_texture
 	map_pixel_size = Vector2(map_width * 16, map_height * 16)
 	objects = map_objects
 	if changed or not has_spawn:
@@ -67,7 +78,8 @@ func set_map(texture: Texture2D, map_width: int, map_height: int, map_objects: A
 	queue_redraw()
 
 func _apply_map(result: Dictionary, reset_spawn: bool) -> void:
-	map_texture = result.get("texture") as Texture2D
+	map_texture = result.get("background_texture", result.get("texture")) as Texture2D
+	foreground_texture = result.get("foreground_texture") as Texture2D
 	map_pixel_size = Vector2(int(result.get("width", 0)) * 16, int(result.get("height", 0)) * 16)
 	objects = result.get("objects", [])
 	if reset_spawn:
@@ -85,12 +97,26 @@ func _set_spawn() -> void:
 	player_facing = 1
 	has_spawn = true
 	movement_active = false
+	movement_stair = false
+	pending_warp = {}
 	warp_cooldown = 0.0
 
 func _input(event: InputEvent) -> void:
-	if not input_enabled or not visible or movement_active:
+	if not input_enabled or not visible:
 		return
 	if not event is InputEventKey or not event.pressed or event.echo:
+		return
+	if (event as InputEventKey).keycode == KEY_ESCAPE:
+		get_viewport().set_input_as_handled()
+		back_requested.emit()
+		return
+	if (event as InputEventKey).keycode == KEY_F:
+		get_viewport().set_input_as_handled()
+		var interaction: Dictionary = content.interaction_at(map_id, player_position.x, player_position.y, player_facing, player_elevation, objects)
+		if bool(interaction.get("ok", false)):
+			interaction_requested.emit(str(interaction.get("text", "")))
+		return
+	if movement_active:
 		return
 	var direction: int = _key_direction(event as InputEventKey)
 	if direction == 0:
@@ -122,11 +148,13 @@ func _request_move(direction: int) -> void:
 	pending_map_id = str(result.get("map_id", map_id))
 	pending_position = Vector2i(int(result.get("x", player_position.x)), int(result.get("y", player_position.y)))
 	pending_elevation = int(result.get("elevation", player_elevation))
+	movement_stair = bool(result.get("stair", false))
+	pending_warp = content.warp_at(map_id, pending_position.x, pending_position.y, pending_elevation) if movement_stair else {}
 	movement_start = Vector2(player_position)
 	movement_target = Vector2(pending_position)
 	movement_jump = bool(result.get("jump", false))
 	movement_elapsed = 0.0
-	movement_duration = 0.28 if movement_jump else 0.14
+	movement_duration = 0.20 if movement_stair else 0.28 if movement_jump else 0.14
 	movement_active = true
 	queue_redraw()
 
@@ -140,14 +168,20 @@ func _process(delta: float) -> void:
 	if movement_elapsed < movement_duration:
 		queue_redraw()
 		return
+	var completed_map_id: String = pending_map_id
+	var completed_position: Vector2i = pending_position
+	var completed_elevation: int = pending_elevation
+	var completed_warp: Dictionary = pending_warp
 	movement_active = false
-	player_position = pending_position
-	player_elevation = pending_elevation
-	if pending_map_id != map_id:
-		_load_map(pending_map_id)
+	movement_stair = false
+	pending_warp = {}
+	player_position = completed_position
+	player_elevation = completed_elevation
+	if completed_map_id != map_id:
+		_load_map(completed_map_id)
 	else:
 		_update_player_texture()
-	var warp: Dictionary = content.warp_at(map_id, player_position.x, player_position.y, player_elevation)
+	var warp: Dictionary = completed_warp if not completed_warp.is_empty() else content.warp_at(completed_map_id, completed_position.x, completed_position.y, completed_elevation)
 	if bool(warp.get("ok", false)) and warp_cooldown <= 0.0:
 		map_id = str(warp.get("map_id", map_id))
 		player_position = Vector2i(int(warp.get("x", player_position.x)), int(warp.get("y", player_position.y)))
@@ -183,15 +217,20 @@ func _draw() -> void:
 	if map_texture == null or map_pixel_size.x <= 0.0 or map_pixel_size.y <= 0.0 or not has_spawn:
 		return
 	var available_size: Vector2 = size - Vector2(24.0, 24.0)
-	var tile_scale: float = minf(available_size.x / map_pixel_size.x, available_size.y / map_pixel_size.y)
+	var camera_world_size: Vector2 = Vector2(minf(map_pixel_size.x, CAMERA_MAX_CELLS_X * TILE_PIXELS), minf(map_pixel_size.y, CAMERA_MAX_CELLS_Y * TILE_PIXELS))
+	var tile_scale: float = minf(available_size.x / camera_world_size.x, available_size.y / camera_world_size.y)
 	tile_scale = maxf(tile_scale, 0.01)
 	var world_player: Vector2 = movement_start.lerp(movement_target, clampf(movement_elapsed / movement_duration, 0.0, 1.0)) if movement_active else Vector2(player_position)
 	if movement_active and movement_jump:
 		world_player.y -= sin(clampf(movement_elapsed / movement_duration, 0.0, 1.0) * PI) * 0.75
-	var player_anchor: Vector2 = (world_player + Vector2(0.5, 1.0)) * 16.0
-	var destination_size: Vector2 = map_pixel_size * tile_scale
+	var camera_center: Vector2 = (world_player + Vector2(0.5, 0.5)) * TILE_PIXELS
+	var camera_origin: Vector2 = camera_center - camera_world_size * 0.5
+	camera_origin.x = clampf(camera_origin.x, 0.0, maxf(map_pixel_size.x - camera_world_size.x, 0.0))
+	camera_origin.y = clampf(camera_origin.y, 0.0, maxf(map_pixel_size.y - camera_world_size.y, 0.0))
+	var destination_size: Vector2 = camera_world_size * tile_scale
 	var destination_position: Vector2 = (size - destination_size) * 0.5
-	draw_texture_rect(map_texture, Rect2(destination_position, destination_size), false)
+	draw_texture_rect_region(map_texture, Rect2(destination_position, destination_size), Rect2(camera_origin, camera_world_size), Color.WHITE, false, true)
+	var drawables: Array = []
 	for object_value in objects:
 		if not object_value is Dictionary:
 			continue
@@ -202,13 +241,28 @@ func _draw() -> void:
 		var sprite_size: Vector2 = Vector2(int(object.get("width", 0)), int(object.get("height", 0)))
 		if sprite_size.x <= 0.0 or sprite_size.y <= 0.0:
 			continue
-		var object_anchor: Vector2 = Vector2((int(object.get("x", 0)) + 0.5) * 16.0, (int(object.get("y", 0)) + 1.0) * 16.0)
-		var sprite_position: Vector2 = destination_position + object_anchor * tile_scale - Vector2(sprite_size.x * tile_scale * 0.5, sprite_size.y * tile_scale)
-		draw_texture_rect(texture, Rect2(sprite_position, sprite_size * tile_scale), false)
+		drawables.append({"texture": texture, "width": sprite_size.x, "height": sprite_size.y, "world_anchor": Vector2((int(object.get("x", 0)) + 0.5) * TILE_PIXELS, (int(object.get("y", 0)) + 1.0) * TILE_PIXELS), "sort_y": float(int(object.get("y", 0)) + 1), "sort_order": 0})
 	if player_texture != null:
 		var player_size: Vector2 = Vector2(player_texture.get_width(), player_texture.get_height())
-		var player_position_on_screen: Vector2 = destination_position + player_anchor * tile_scale - Vector2(player_size.x * tile_scale * 0.5, player_size.y * tile_scale)
-		draw_texture_rect(player_texture, Rect2(player_position_on_screen, player_size * tile_scale), false)
+		var player_anchor: Vector2 = (world_player + Vector2(0.5, 1.0)) * TILE_PIXELS
+		drawables.append({"texture": player_texture, "width": player_size.x, "height": player_size.y, "world_anchor": player_anchor, "sort_y": world_player.y + 1.0, "sort_order": 1})
+	drawables.sort_custom(_sort_drawables)
+	for drawable_value in drawables:
+		var drawable: Dictionary = drawable_value
+		var drawable_texture: Texture2D = drawable.get("texture") as Texture2D
+		var drawable_size: Vector2 = Vector2(float(drawable.get("width", 0.0)), float(drawable.get("height", 0.0)))
+		var drawable_anchor: Vector2 = drawable.get("world_anchor", Vector2.ZERO)
+		var drawable_position: Vector2 = destination_position + (drawable_anchor - camera_origin) * tile_scale - Vector2(drawable_size.x * tile_scale * 0.5, drawable_size.y * tile_scale)
+		draw_texture_rect(drawable_texture, Rect2(drawable_position, drawable_size * tile_scale), false)
+	if foreground_texture != null:
+		draw_texture_rect_region(foreground_texture, Rect2(destination_position, destination_size), Rect2(camera_origin, camera_world_size), Color.WHITE, false, true)
 	var font: Font = ThemeDB.fallback_font
 	draw_rect(Rect2(12, size.y - 42, minf(size.x - 24, 540), 30), Color(0.03, 0.04, 0.06, 0.85), true)
 	draw_string(font, Vector2(24, size.y - 21), "WASD / arrows: move   •   ROM map: %s   •   %d, %d" % [map_id, player_position.x, player_position.y], HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("d7e0eb"))
+
+func _sort_drawables(left: Dictionary, right: Dictionary) -> bool:
+	var left_y: float = float(left.get("sort_y", 0.0))
+	var right_y: float = float(right.get("sort_y", 0.0))
+	if not is_equal_approx(left_y, right_y):
+		return left_y < right_y
+	return int(left.get("sort_order", 0)) < int(right.get("sort_order", 0))

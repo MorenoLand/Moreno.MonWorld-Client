@@ -13,6 +13,8 @@ var map_selector: OptionButton
 var play_button: Button
 var preview_button: Button
 var back_button: Button
+var dialogue_panel: PanelContainer
+var dialogue_label: Label
 var preview_chrome: Array = []
 var animation_tick: int = 0
 var animation_elapsed: float = 0.0
@@ -115,7 +117,10 @@ func _build_ui() -> void:
 	play_view.visible = false
 	play_view.set_content(content)
 	play_view.location_changed.connect(_on_play_location_changed)
+	play_view.back_requested.connect(_on_preview_pressed)
+	play_view.interaction_requested.connect(_on_interaction_requested)
 	panel.add_child(play_view)
+	_build_dialogue_overlay()
 	map_status = Label.new()
 	map_status.modulate = Color("b8c7d9")
 	box.add_child(map_status)
@@ -173,6 +178,29 @@ func _on_back_pressed() -> void:
 		return
 	exit_requested.emit()
 
+func _build_dialogue_overlay() -> void:
+	dialogue_panel = PanelContainer.new()
+	dialogue_panel.visible = false
+	dialogue_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	dialogue_panel.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	dialogue_panel.offset_left = 48.0
+	dialogue_panel.offset_top = -150.0
+	dialogue_panel.offset_right = -48.0
+	dialogue_panel.offset_bottom = -48.0
+	dialogue_label = Label.new()
+	dialogue_label.text = ""
+	dialogue_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	dialogue_label.add_theme_font_size_override("font_size", 22)
+	dialogue_label.custom_minimum_size = Vector2(0, 72)
+	dialogue_panel.add_child(dialogue_label)
+	play_view.add_child(dialogue_panel)
+
+func _on_interaction_requested(text: String) -> void:
+	if dialogue_label == null or dialogue_panel == null:
+		return
+	dialogue_label.text = text
+	dialogue_panel.visible = not text.is_empty()
+
 func _set_playing(value: bool) -> void:
 	playing = value
 	for chrome_value in preview_chrome:
@@ -181,6 +209,8 @@ func _set_playing(value: bool) -> void:
 	map_view.visible = not value
 	play_view.visible = value
 	play_view.set_input_enabled(value)
+	if dialogue_panel != null:
+		dialogue_panel.visible = false
 	if back_button != null:
 		back_button.text = "Back to map selection" if value else "Back to login"
 
@@ -201,11 +231,13 @@ func _render_selected_map() -> void:
 		map_status.text = str(result.get("error", "Map rendering failed"))
 		return
 	var texture: Texture2D = result.get("texture") as Texture2D
+	var background_texture: Texture2D = result.get("background_texture", texture) as Texture2D
+	var foreground_texture: Texture2D = result.get("foreground_texture") as Texture2D
 	map_view.set_map(texture, int(result.get("width", 0)), int(result.get("height", 0)), result.get("objects", []))
 	if play_view != null:
 		if playing and play_view.map_id == selected_map_id:
 			play_view.set_animation_tick(animation_tick)
 		else:
-			play_view.set_map(texture, int(result.get("width", 0)), int(result.get("height", 0)), result.get("objects", []), selected_map_id)
+			play_view.set_map(background_texture, int(result.get("width", 0)), int(result.get("height", 0)), result.get("objects", []), selected_map_id, foreground_texture)
 	map_details.text = "%d × %d map cells  •  actual 16×16 metatiles  •  %d ROM object events" % [int(result.get("width", 0)), int(result.get("height", 0)), (result.get("objects", []) as Array).size()]
 	map_status.text = "Use Play selected map to walk the ROM map; collision, ledges, warps, and map connections are active." if not playing else "Playing the selected ROM map; collision, ledges, warps, and map connections are active."

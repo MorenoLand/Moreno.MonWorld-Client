@@ -116,6 +116,25 @@ func _init() -> void:
 		push_error("Pallet Town connections or warps were not decoded")
 		quit(1)
 		return
+	if pallet_result.get("background_texture") == null or pallet_result.get("foreground_texture") == null:
+		push_error("map render did not expose separated draw layers")
+		quit(1)
+		return
+	var house_result: Dictionary = content.render_map("pallet-players-house-1f")
+	var mom_found: bool = false
+	for object_value in house_result.get("objects", []):
+		if object_value is Dictionary and int(object_value.get("graphics_id", -1)) == 88:
+			mom_found = int(object_value.get("resolved_graphics_id", -1)) == 88 and int(object_value.get("width", 0)) == 16 and int(object_value.get("height", 0)) == 32
+			break
+	if not mom_found:
+		push_error("Pallet Town Mom did not resolve to the source graphics record")
+		quit(1)
+		return
+	var dialogue: Dictionary = content.interaction_at("pallet-players-house-1f", 8, 5, 2, 3, house_result.get("objects", []))
+	if not bool(dialogue.get("ok", false)) or not str(dialogue.get("text", "")).begins_with("Mom:"):
+		push_error("object interaction did not produce Mom dialogue")
+		quit(1)
+		return
 	var spawn: Dictionary = content.default_spawn("pallet-town")
 	if not bool(spawn.get("ok", false)) or not bool(content.map_cell("pallet-town", int(spawn.get("x", 0)), int(spawn.get("y", 0))).get("collision", 1) == 0):
 		push_error("Pallet Town did not produce a walkable spawn")
