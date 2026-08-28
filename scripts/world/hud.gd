@@ -99,7 +99,7 @@ func _refresh() -> void:
 	for index in range(party_labels.size()):
 		var party_label: Label = party_labels[index] as Label
 		var member: Variant = current_party[index] if index < current_party.size() else {}
-		party_label.text = str(member.get("label", "")) if member is Dictionary else ""
+		party_label.text = _party_slot_text(member as Dictionary) if member is Dictionary else ""
 
 func _refresh_time() -> void:
 	if time_label == null:
@@ -118,3 +118,12 @@ func _format_money(value: int) -> String:
 		digits = digits.substr(0, digits.length() - 3)
 	formatted = digits + formatted
 	return "-" + formatted if negative else formatted
+
+func _party_slot_text(member: Dictionary) -> String:
+	var dex_id: int = int(member.get("dex_id", 0))
+	if dex_id <= 0:
+		return ""
+	var nickname: String = str(member.get("nickname", "")).strip_edges()
+	if nickname.is_empty():
+		nickname = "#%03d" % dex_id
+	return "%s\nLv %d" % [nickname.left(7), int(member.get("level", 0))]

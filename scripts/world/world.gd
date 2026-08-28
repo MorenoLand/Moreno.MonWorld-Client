@@ -106,7 +106,16 @@ func _on_world_snapshot(value: Dictionary) -> void:
 	title_label.text = "Map: %s" % str(snapshot.get("map_id", "unknown"))
 	status_label.text = "Authoritative movement active. Arrow keys or WASD move one tile."
 	if hud != null:
-		hud.set_state(GameState.content, str(snapshot.get("map_id", "")), snapshot, snapshot.get("party", []))
+		var party: Array = []
+		var snapshot_party: Variant = snapshot.get("party", [])
+		if snapshot_party is Array:
+			party = snapshot_party
+		if party.is_empty():
+			var selected_party: Variant = GameState.current_character.get("party", [])
+			if selected_party is Array:
+				party = selected_party
+		snapshot["party"] = party
+		hud.set_state(GameState.content, str(snapshot.get("map_id", "")), snapshot, party)
 	_load_map_texture(str(snapshot.get("map_id", "")))
 	_sync_map_entities()
 
