@@ -15,3 +15,5 @@ Run protocol fixtures in a separate Godot process without closing the editor:
 ```powershell
 godot --headless --path . --script res://tests/openmmo_protocol_test.gd
 ```
+
+For an opt-in live smoke run, set `OPENMMOGO_ROOT_PUBLIC_KEY`, `OPENMMOGO_USERNAME`, `OPENMMOGO_PASSWORD`, and `OPENMMOGO_ROM`, optionally set `OPENMMOGO_LOGIN_ENDPOINT`, then run `res://tests/headless_smoke.tscn` in a separate headless Godot process. Credentials are read only from the process environment and are never printed.

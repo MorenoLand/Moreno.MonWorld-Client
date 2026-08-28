@@ -30,7 +30,7 @@ window/stretch/mode="canvas_items"
 
 login_host="127.0.0.1"
 login_port=2106
-root_public_key_path=""
+root_public_key_path="res://config/openmmo/game.public.pem"
 
 [rendering]
 

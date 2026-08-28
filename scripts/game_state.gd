@@ -1,5 +1,7 @@
 extends Node
 
+const DEFAULT_ROOT_PUBLIC_KEY_PATH: String = "res://config/openmmo/game.public.pem"
+
 signal characters_changed(characters: Array)
 signal world_snapshot_received(snapshot: Dictionary)
 signal entity_update_received(update: Dictionary)
@@ -25,7 +27,8 @@ var current_snapshot: Dictionary = {}
 var current_character: Dictionary = {}
 var login_host: String = "127.0.0.1"
 var login_port: int = 2106
-var root_public_key_path: String = ""
+var root_public_key_path: String = DEFAULT_ROOT_PUBLIC_KEY_PATH
+var custom_root_public_key_path: String = ""
 var login_flow: String = "idle"
 var game_flow: String = "idle"
 var flow_deadline_msec: int = 0
@@ -51,7 +54,12 @@ func _ready() -> void:
 	var settings: Dictionary = MonWorldStorage.read_json(MonWorldStorage.SETTINGS_FILE)
 	login_host = str(settings.get("login_host", ProjectSettings.get_setting("openmmo/login_host", "127.0.0.1")))
 	login_port = int(settings.get("login_port", ProjectSettings.get_setting("openmmo/login_port", 2106)))
-	root_public_key_path = str(settings.get("root_public_key_path", ProjectSettings.get_setting("openmmo/root_public_key_path", "")))
+	custom_root_public_key_path = str(settings.get("root_public_key_path", "")).strip_edges()
+	if not custom_root_public_key_path.is_empty() and FileAccess.file_exists(custom_root_public_key_path):
+		root_public_key_path = custom_root_public_key_path
+	else:
+		custom_root_public_key_path = ""
+		root_public_key_path = str(ProjectSettings.get_setting("openmmo/root_public_key_path", DEFAULT_ROOT_PUBLIC_KEY_PATH))
 	hardware_id = _load_hardware_id(settings)
 	set_process(true)
 
@@ -67,16 +75,21 @@ func configure_server(endpoint: String, public_key_path: String) -> Dictionary:
 	var parsed: Dictionary = _parse_endpoint(endpoint, 2106)
 	if not parsed.ok:
 		return parsed
-	var key_path: String = public_key_path.strip_edges()
-	if key_path.is_empty() or not FileAccess.file_exists(key_path):
-		return {"ok": false, "error": "Select the OpenMMO server public key PEM file"}
+	var custom_key_path: String = public_key_path.strip_edges()
+	var key_path: String = DEFAULT_ROOT_PUBLIC_KEY_PATH if custom_key_path.is_empty() else custom_key_path
+	if not FileAccess.file_exists(key_path):
+		return {"ok": false, "error": "The bundled OpenMMO server key is missing" if custom_key_path.is_empty() else "The custom OpenMMO server key could not be found"}
 	login_host = str(parsed.host)
 	login_port = int(parsed.port)
 	root_public_key_path = key_path
+	custom_root_public_key_path = custom_key_path
 	return {"ok": true}
 
 func endpoint_text() -> String:
 	return "%s:%d" % [login_host, login_port]
+
+func public_key_override() -> String:
+	return custom_root_public_key_path
 
 func use_content(value: MonWorldContent) -> Dictionary:
 	content = value
@@ -86,7 +99,7 @@ func login(username: String, password: String, stay_logged_in: bool = false) -> 
 	if login_flow != "idle" or game_flow != "idle":
 		return {"ok": false, "error": "another connection is already in progress"}
 	if root_public_key_path.is_empty() or not FileAccess.file_exists(root_public_key_path):
-		return {"ok": false, "error": "Select the OpenMMO server public key PEM file"}
+		return {"ok": false, "error": "The OpenMMO server key is unavailable; restore the bundled key or choose a custom key in Settings"}
 	user = {"username": username, "password": password, "stay_logged_in": stay_logged_in}
 	game_access.clear()
 	login_flow = "connecting"
@@ -219,15 +232,22 @@ func _on_game_packet(opcode: int, payload: PackedByteArray) -> void:
 		user["playtime"] = int(response.get("playtime", 0))
 		user["reward_points"] = int(response.get("reward_points", 0))
 		user["balance"] = int(response.get("balance", 0))
-		game_session.send_packet(GAME_PROTOCOL_SCRIPT.REQUEST_CHARACTERS, GAME_PROTOCOL_SCRIPT.encode_request_characters())
-		_finish_game_connection({"ok": true, "data": response})
+		game_flow = "characters"
+		if not game_session.send_packet(GAME_PROTOCOL_SCRIPT.REQUEST_CHARACTERS, GAME_PROTOCOL_SCRIPT.encode_request_characters()):
+			_finish_game_connection({"ok": false, "error": "OpenMMO character-list request could not be sent"})
 	elif opcode == GAME_PROTOCOL_SCRIPT.REQUEST_CHARACTERS:
 		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_characters(payload)
 		if response.ok:
 			characters = response.characters
 			characters_changed.emit(characters)
+			if game_flow == "characters":
+				_finish_game_connection({"ok": true, "data": {"characters": characters}})
 		else:
-			connection_error.emit(str(response.get("error", "OpenMMO character list is malformed")))
+			var message: String = str(response.get("error", "OpenMMO character list is malformed"))
+			if game_flow == "characters":
+				_finish_game_connection({"ok": false, "error": message})
+			else:
+				connection_error.emit(message)
 	elif opcode == GAME_PROTOCOL_SCRIPT.LOAD_MAP:
 		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_load_map(payload)
 		if not response.ok:

@@ -145,14 +145,16 @@ func restore_saved_rom() -> bool:
 		return false
 	var path: String = str(roms.get("kanto", ""))
 	if path.is_empty():
+		return false
+	if not FileAccess.file_exists(path):
 		_clear_saved_rom()
+		content_failed.emit("The saved Kanto ROM was moved or removed; select it again.")
 		return false
 	var result: Dictionary = MonWorldContent.from_rom_path(path)
 	if bool(result.get("ok", false)):
 		content_loaded.emit(result.get("content"))
 		return true
-	_clear_saved_rom()
-	content_failed.emit("The saved Kanto ROM could not be loaded; select it again.")
+	content_failed.emit("The saved Kanto ROM is still selected but could not be decoded: %s" % str(result.get("error", "unknown content error")))
 	return false
 
 func _save_rom_path(path: String) -> void:
