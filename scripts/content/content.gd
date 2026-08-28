@@ -285,6 +285,11 @@ func render_map(map_id: String, animation_tick: int = 0) -> Dictionary:
 	var foreground_texture_cache: Dictionary = cached_map.get("foreground_textures", {})
 	var animated_tiles: Array = cached_map.get("animated_tiles", [])
 	if animated_tiles.is_empty() or animation_phase == 0:
+		if animation_phase == 0:
+			texture_cache.clear()
+			image_cache.clear()
+			background_texture_cache.clear()
+			foreground_texture_cache.clear()
 		var prepared: Dictionary = prepare_map(map_id)
 		if not bool(prepared.get("ok", false)):
 			return prepared
@@ -297,23 +302,23 @@ func render_map(map_id: String, animation_tick: int = 0) -> Dictionary:
 	if texture == null or image == null:
 		image = _render_cached_map(cached_map, animation_phase)
 		texture = ImageTexture.create_from_image(image)
+		texture_cache.clear()
 		texture_cache[cache_key] = texture
+		image_cache.clear()
 		image_cache[cache_key] = image
-		cached_map["textures"] = texture_cache
-		cached_map["images"] = image_cache
 		map_cache[map_id] = cached_map
 	var background_texture: Texture2D = background_texture_cache.get(cache_key) as Texture2D
 	if background_texture == null:
 		var background_image: Image = _render_cached_layer(cached_map, animation_phase, false)
 		background_texture = ImageTexture.create_from_image(background_image)
+		background_texture_cache.clear()
 		background_texture_cache[cache_key] = background_texture
-		cached_map["background_textures"] = background_texture_cache
 	var foreground_texture: Texture2D = foreground_texture_cache.get(cache_key) as Texture2D
 	if foreground_texture == null:
 		var foreground_image: Image = _render_cached_layer(cached_map, animation_phase, true)
 		foreground_texture = ImageTexture.create_from_image(foreground_image)
+		foreground_texture_cache.clear()
 		foreground_texture_cache[cache_key] = foreground_texture
-		cached_map["foreground_textures"] = foreground_texture_cache
 	map_cache[map_id] = cached_map
 	return {"ok": true, "texture": texture, "image": image, "background_texture": background_texture, "foreground_texture": foreground_texture, "width": int(cached_map.get("width", 0)), "height": int(cached_map.get("height", 0)), "header_offset": int(cached_map.get("header_offset", -1)), "layout_offset": int(cached_map.get("layout_offset", -1)), "objects": cached_map.get("objects", []), "warps": cached_map.get("warps", []), "connections": cached_map.get("connections", []), "map_cells": cached_map.get("map_cells", PackedInt32Array()), "music_id": int(cached_map.get("music_id", 0)), "map_type": int(cached_map.get("map_type", 0)), "animation_phase": animation_phase}
 
