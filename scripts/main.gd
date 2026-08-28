@@ -14,8 +14,13 @@ func _replace_screen(scene: PackedScene) -> Node:
 
 func _show_auth() -> void:
 	var screen = _replace_screen(preload("res://scenes/auth.tscn"))
-	screen.authenticated.connect(_show_world)
+	screen.authenticated.connect(_show_character_selection)
 	screen.local_preview_requested.connect(_show_local_preview)
+
+func _show_character_selection() -> void:
+	var screen = _replace_screen(preload("res://scenes/character_selection.tscn"))
+	screen.character_selected.connect(_show_world)
+	screen.logout_requested.connect(_show_auth)
 
 func _show_world() -> void:
 	var screen = _replace_screen(preload("res://scenes/world.tscn"))

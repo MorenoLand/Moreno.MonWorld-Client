@@ -184,7 +184,7 @@ func _finish_key_derivation(result: Dictionary) -> void:
 	incoming_round = 0
 	if compressed_inbound:
 		inflater = StreamPeerGZIP.new()
-		if inflater.start_decompression(true) != OK:
+		if inflater.start_decompression(true, 1024 * 1024) != OK:
 			_fail("OpenMMO deflate stream could not start")
 			return
 	state = State.ESTABLISHED
@@ -223,15 +223,23 @@ func _decompress_packet(packet: PackedByteArray) -> PackedByteArray:
 		return output
 	var compressed: PackedByteArray = packet.slice(2)
 	compressed.append_array(PackedByteArray([0, 0, 0xFF, 0xFF]))
-	if inflater.put_data(compressed) != OK:
-		_fail("OpenMMO compressed frame could not be inflated")
-		return PackedByteArray()
-	while inflater.get_available_bytes() > 0:
-		var result: Array = inflater.get_partial_data(inflater.get_available_bytes())
-		if int(result[0]) != OK:
-			_fail("OpenMMO compressed frame read failed")
+	var input_offset: int = 0
+	while input_offset < compressed.size():
+		var put_result: Array = inflater.put_partial_data(compressed.slice(input_offset))
+		if put_result.size() < 2 or int(put_result[0]) != OK:
+			_fail("OpenMMO compressed frame could not be inflated")
 			return PackedByteArray()
-		output.append_array(result[1] as PackedByteArray)
+		var consumed: int = int(put_result[1])
+		if consumed <= 0 and inflater.get_available_bytes() <= 0:
+			_fail("OpenMMO compressed frame made no progress")
+			return PackedByteArray()
+		input_offset += consumed
+		while inflater.get_available_bytes() > 0:
+			var result: Array = inflater.get_partial_data(inflater.get_available_bytes())
+			if result.size() < 2 or int(result[0]) != OK:
+				_fail("OpenMMO compressed frame read failed")
+				return PackedByteArray()
+			output.append_array(result[1] as PackedByteArray)
 	return output
 
 func _client_hello() -> PackedByteArray:

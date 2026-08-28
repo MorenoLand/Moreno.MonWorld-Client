@@ -4,8 +4,6 @@ signal battle_requested
 
 var title_label: Label
 var status_label: Label
-var character_box: VBoxContainer
-var create_name_input: LineEdit
 var chat_log: RichTextLabel
 var chat_input: LineEdit
 var snapshot: Dictionary = {}
@@ -22,7 +20,7 @@ var held_input_elapsed: float = 0.0
 
 func _ready() -> void:
 	set_process_unhandled_input(true)
-	GameState.characters_changed.connect(_on_characters_changed)
+	selected_character_id = int(GameState.current_character.get("id", 0))
 	GameState.map_load_received.connect(_on_map_load)
 	GameState.render_screen_changed.connect(_on_render_screen)
 	GameState.world_snapshot_received.connect(_on_world_snapshot)
@@ -30,7 +28,8 @@ func _ready() -> void:
 	GameState.chat_received.connect(_on_chat)
 	GameState.connection_error.connect(_on_connection_error)
 	_build_ui()
-	_on_characters_changed(GameState.characters)
+	if not GameState.pending_map_load.is_empty():
+		call_deferred("_consume_pending_map_load")
 	queue_redraw()
 
 func _build_ui() -> void:
@@ -59,33 +58,6 @@ func _build_ui() -> void:
 	status_label.position = Vector2(24, 47)
 	add_child(status_label)
 	status_label.visible = false
-	var side := VBoxContainer.new()
-	side.set_anchor(SIDE_LEFT, 1.0)
-	side.set_anchor(SIDE_RIGHT, 1.0)
-	side.offset_left = -320
-	side.offset_right = -24
-	side.offset_top = 72
-	side.offset_bottom = -158
-	side.add_theme_constant_override("separation", 8)
-	add_child(side)
-	var character_title := Label.new()
-	character_title.text = "Characters"
-	character_title.add_theme_font_size_override("font_size", 18)
-	side.add_child(character_title)
-	character_box = VBoxContainer.new()
-	character_box.add_theme_constant_override("separation", 6)
-	side.add_child(character_box)
-	create_name_input = LineEdit.new()
-	create_name_input.placeholder_text = "New character name"
-	side.add_child(create_name_input)
-	var create_button := Button.new()
-	create_button.text = "Create character"
-	create_button.pressed.connect(_create_character)
-	side.add_child(create_button)
-	var battle_button := Button.new()
-	battle_button.text = "Open battle foundation"
-	battle_button.pressed.connect(func(): battle_requested.emit())
-	side.add_child(battle_button)
 	chat_log = RichTextLabel.new()
 	chat_log.bbcode_enabled = false
 	chat_log.scroll_active = true
@@ -119,37 +91,9 @@ func _build_ui() -> void:
 func _layout_ui() -> void:
 	map_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
-func _on_characters_changed(value: Array) -> void:
-	if character_box == null:
-		return
-	for child in character_box.get_children():
-		child.queue_free()
-	for character_value in value:
-		if not character_value is Dictionary:
-			continue
-		var character: Dictionary = character_value
-		var button := Button.new()
-		button.text = "%s  (%s, %d, %d)" % [character.get("name", "Character"), character.get("map_id", ""), character.get("x", 0), character.get("y", 0)]
-		button.pressed.connect(_select_character.bind(int(character.get("id", 0))))
-		character_box.add_child(button)
-	if value.is_empty():
-		status_label.text = "Create a character to enter the world."
-
-func _select_character(character_id: int) -> void:
-	if GameState.select_character(character_id):
-		selected_character_id = character_id
-		status_label.text = "Selecting character…"
-
-func _create_character() -> void:
-	var name := create_name_input.text.strip_edges()
-	if name.is_empty():
-		return
-	var result: Dictionary = await GameState.create_character(name)
-	if result.ok:
-		create_name_input.clear()
-		status_label.text = "Character created. Select it to enter the map."
-	else:
-		status_label.text = str(result.error)
+func _consume_pending_map_load() -> void:
+	if not GameState.pending_map_load.is_empty():
+		_on_map_load(GameState.pending_map_load)
 
 func _on_world_snapshot(value: Dictionary) -> void:
 	snapshot = value
@@ -294,7 +238,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			held_input = ""
 			held_input_elapsed = 0.0
 		return
-	if key_event.echo or get_viewport().gui_get_focus_owner() == chat_input or get_viewport().gui_get_focus_owner() == create_name_input:
+	if key_event.echo or get_viewport().gui_get_focus_owner() == chat_input:
 		return
 	held_input = direction
 	held_input_elapsed = 0.0
