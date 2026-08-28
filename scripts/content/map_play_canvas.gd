@@ -10,7 +10,7 @@ const TILE_PIXELS: float = 16.0
 const CAMERA_MAX_CELLS_X: int = 30
 const CAMERA_MAX_CELLS_Y: int = 20
 const MAX_TILE_SCALE: float = 4.0
-const NORMAL_STEP_DURATION: float = 16.0 / 60.0
+const NORMAL_STEP_DURATION: float = 0.14
 const DOOR_ANIMATION_DURATION: float = 16.0 / 60.0
 const DOOR_FRAME_COUNT: int = 4
 
@@ -350,6 +350,9 @@ func _process(delta: float) -> void:
 		_update_player_texture()
 		location_changed.emit(map_id, player_position.x, player_position.y)
 		queue_redraw()
+		if held_direction != 0 and completed_map_id == map_id:
+			movement_retry_elapsed = 0.0
+			_request_move(held_direction)
 		return
 	if completed_map_id != map_id:
 		_load_map(completed_map_id)
