@@ -37,6 +37,7 @@ var hardware_id: PackedByteArray = PackedByteArray()
 var server_maps: Dictionary = {}
 var pending_map_load: Dictionary = {}
 var awaiting_local_entity: bool = false
+var map_transition_pending: bool = false
 
 func _ready() -> void:
 	login_session = SESSION_SCRIPT.new()
@@ -176,6 +177,7 @@ func disconnect_game() -> void:
 	pending_map_load.clear()
 	server_maps.clear()
 	awaiting_local_entity = false
+	map_transition_pending = false
 	game_session.close()
 
 func _on_login_established() -> void:
@@ -263,6 +265,11 @@ func _on_game_packet(opcode: int, payload: PackedByteArray) -> void:
 				_finish_game_connection({"ok": false, "error": message})
 			else:
 				connection_error.emit(message)
+	elif opcode == GAME_PROTOCOL_SCRIPT.MAP_TRANSITION:
+		map_transition_pending = true
+		pending_map_load.clear()
+		awaiting_local_entity = false
+		render_screen_changed.emit(false)
 	elif opcode == GAME_PROTOCOL_SCRIPT.LOAD_MAP:
 		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_load_map(payload)
 		if not response.ok:
@@ -270,6 +277,10 @@ func _on_game_packet(opcode: int, payload: PackedByteArray) -> void:
 			return
 		server_maps[str(response.key)] = response
 		if bool(response.get("reload_player", false)):
+			var active_map_load: bool = map_transition_pending or (pending_map_load.is_empty() and not awaiting_local_entity)
+			if not active_map_load:
+				return
+			map_transition_pending = false
 			if content == null:
 				connection_error.emit("Select a local ROM before entering the OpenMMO world")
 				return

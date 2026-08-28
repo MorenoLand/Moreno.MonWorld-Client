@@ -8,6 +8,7 @@ const REQUEST_PLAYER: int = 0x05
 const MOVEMENT: int = 0x06
 const FACE_DIRECTION: int = 0x07
 const LOAD_MAP: int = 0x10
+const MAP_TRANSITION: int = 0x1B
 const RENDER_SCREEN: int = 0xB4
 const ENTITY_MOVE_GBA: int = 0xEA
 const ENTITY_MOVE_NDS: int = 0xE4

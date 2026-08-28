@@ -115,7 +115,13 @@ func set_map(texture: Texture2D, map_width: int, map_height: int, map_objects: A
 	map_pixel_size = Vector2(map_width * 16, map_height * 16)
 	objects = map_objects
 	if changed or not has_spawn:
-		_set_spawn()
+		if authoritative_state:
+			has_spawn = false
+			movement_active = false
+			pending_map_id = ""
+			pending_warp = {}
+		else:
+			_set_spawn()
 	_refresh_object_textures()
 	if animation_tick > 0:
 		set_animation_tick(animation_tick)
