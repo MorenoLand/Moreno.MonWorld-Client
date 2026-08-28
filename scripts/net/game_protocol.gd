@@ -6,6 +6,7 @@ const REQUEST_CHARACTERS: int = 0x02
 const SELECT_CHARACTER: int = 0x04
 const REQUEST_PLAYER: int = 0x05
 const MOVEMENT: int = 0x06
+const MAP_LOADED_ACK: int = 0x33
 const FACE_DIRECTION: int = 0x07
 const CHAT_SEND: int = 0x08
 const CHAT_MESSAGE: int = 0x09
@@ -77,6 +78,9 @@ static func encode_select_character(character_id: int, character_id_hash: int = 
 	return output
 
 static func encode_request_player() -> PackedByteArray:
+	return PackedByteArray()
+
+static func encode_map_loaded_ack() -> PackedByteArray:
 	return PackedByteArray()
 
 static func encode_movement(x: int, y: int, direction: String, running: bool = false) -> PackedByteArray:

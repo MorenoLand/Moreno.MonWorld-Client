@@ -289,14 +289,8 @@ func _sync_map_entities() -> void:
 			map_view.set_player_state(int(entity.get("x", 0)), int(entity.get("y", 0)), int(entity.get("elevation", 3)), int(entity.get("facing", 1)))
 	map_view.set_world_entities(players, selected_character_id)
 
-func _process(delta: float) -> void:
-	if held_input.is_empty() or map_view == null or (dialogue_overlay != null and dialogue_overlay.is_open()) or (chat_box != null and chat_box.input_focused()):
-		return
-	held_input_elapsed += delta
-	if held_input_elapsed < 0.1:
-		return
-	held_input_elapsed = 0.0
-	map_view.request_move(held_input)
+func _process(_delta: float) -> void:
+	return
 
 func _on_chat(value: Dictionary) -> void:
 	if chat_box != null:
@@ -409,28 +403,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if dialogue_overlay != null and dialogue_overlay.is_open():
 		return
-	var direction: String = ""
-	match key_event.keycode:
-		KEY_UP, KEY_W:
-			direction = "up"
-		KEY_DOWN, KEY_S:
-			direction = "down"
-		KEY_LEFT, KEY_A:
-			direction = "left"
-		KEY_RIGHT, KEY_D:
-			direction = "right"
-	if direction.is_empty():
-		return
-	if not key_event.pressed:
-		if held_input == direction:
-			held_input = ""
-			held_input_elapsed = 0.0
-		return
-	if key_event.echo or (chat_box != null and chat_box.input_focused()):
-		return
-	held_input = direction
-	held_input_elapsed = 0.0
-	map_view.request_move(direction)
+	return
 
 func _hotkey_slot_for_key(keycode: int) -> int:
 	match keycode:

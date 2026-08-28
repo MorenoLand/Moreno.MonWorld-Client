@@ -40,6 +40,7 @@ var server_maps: Dictionary = {}
 var pending_map_load: Dictionary = {}
 var awaiting_local_entity: bool = false
 var map_transition_pending: bool = false
+var active_map_key: String = ""
 
 func _ready() -> void:
 	login_session = SESSION_SCRIPT.new()
@@ -149,12 +150,24 @@ func select_character(character_id: int) -> bool:
 		if character_value is Dictionary and int(character_value.get("id", 0)) == character_id:
 			current_character = (character_value as Dictionary).duplicate(true)
 			break
+	active_map_key = ""
+	pending_map_load.clear()
+	awaiting_local_entity = false
+	map_transition_pending = false
 	return game_session.send_packet(GAME_PROTOCOL_SCRIPT.SELECT_CHARACTER, GAME_PROTOCOL_SCRIPT.encode_select_character(character_id))
 
 func complete_map_load(load_key: String) -> bool:
 	if pending_map_load.is_empty() or str(pending_map_load.get("key", "")) != load_key:
 		return false
+	var map_load: Dictionary = pending_map_load.duplicate(true)
+	var reload_local_player: bool = bool(map_load.get("delete_cache", false)) and bool(map_load.get("reload_player", false))
+	if not reload_local_player:
+		pending_map_load.clear()
+		return true
 	awaiting_local_entity = true
+	if not game_session.send_packet(GAME_PROTOCOL_SCRIPT.MAP_LOADED_ACK, GAME_PROTOCOL_SCRIPT.encode_map_loaded_ack()):
+		awaiting_local_entity = false
+		return false
 	if not game_session.send_packet(GAME_PROTOCOL_SCRIPT.REQUEST_PLAYER, GAME_PROTOCOL_SCRIPT.encode_request_player()):
 		awaiting_local_entity = false
 		return false
@@ -311,21 +324,21 @@ func _on_game_packet(opcode: int, payload: PackedByteArray) -> void:
 			connection_error.emit(str(response.get("error", "OpenMMO map packet is malformed")))
 			return
 		server_maps[str(response.key)] = response
-		if bool(response.get("reload_player", false)):
-			var active_map_load: bool = map_transition_pending or (pending_map_load.is_empty() and not awaiting_local_entity)
-			if not active_map_load:
-				return
-			map_transition_pending = false
-			if content == null:
-				connection_error.emit("Select a local ROM before entering the OpenMMO world")
-				return
-			var local_map_id: String = content.map_id_for_location(int(response.get("bank_id", -1)), int(response.get("map_id", -1)))
-			if content.map_data(local_map_id).is_empty():
-				connection_error.emit("The selected ROM does not contain OpenMMO map %d/%d" % [int(response.get("bank_id", -1)), int(response.get("map_id", -1))])
-				return
-			response["local_map_id"] = local_map_id
-			pending_map_load = response
-			map_load_received.emit(response)
+		var switch_current: bool = bool(response.get("delete_cache", false)) or active_map_key.is_empty()
+		if not switch_current:
+			return
+		map_transition_pending = false
+		if content == null:
+			connection_error.emit("Select a local ROM before entering the OpenMMO world")
+			return
+		var local_map_id: String = content.map_id_for_location(int(response.get("bank_id", -1)), int(response.get("map_id", -1)))
+		if content.map_data(local_map_id).is_empty():
+			connection_error.emit("The selected ROM does not contain OpenMMO map %d/%d" % [int(response.get("bank_id", -1)), int(response.get("map_id", -1))])
+			return
+		response["local_map_id"] = local_map_id
+		active_map_key = str(response.get("key", ""))
+		pending_map_load = response
+		map_load_received.emit(response)
 	elif opcode == GAME_PROTOCOL_SCRIPT.NPC_SPAWN:
 		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_npc_spawn(payload)
 		if not response.ok:

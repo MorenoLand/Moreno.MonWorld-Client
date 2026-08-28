@@ -487,10 +487,24 @@ func _key_direction(event: InputEventKey) -> int:
 			return 4
 	return 0
 
+func _physical_direction() -> int:
+	if not input_enabled or not visible or dialogue_active:
+		return 0
+	var direction: int = 0
+	if Input.is_key_pressed(KEY_UP) or Input.is_key_pressed(KEY_W):
+		direction = 2
+	if Input.is_key_pressed(KEY_DOWN) or Input.is_key_pressed(KEY_S):
+		direction = 1
+	if Input.is_key_pressed(KEY_LEFT) or Input.is_key_pressed(KEY_A):
+		direction = 3
+	if Input.is_key_pressed(KEY_RIGHT) or Input.is_key_pressed(KEY_D):
+		direction = 4
+	return direction
+
 func _request_move(direction: int) -> bool:
 	if content == null or map_id.is_empty() or not has_spawn:
 		return false
-	if authoritative_state and (movement_active or move_request_pending):
+	if authoritative_state and movement_active:
 		return false
 	player_facing = direction
 	_update_player_texture()
@@ -552,6 +566,8 @@ func _process(delta: float) -> void:
 	if _text_input_has_focus():
 		held_direction = 0
 		movement_retry_elapsed = 0.0
+	else:
+		held_direction = _physical_direction()
 	if warp_cooldown > 0.0:
 		warp_cooldown = maxf(warp_cooldown - delta, 0.0)
 	animation_elapsed += delta
@@ -559,18 +575,6 @@ func _process(delta: float) -> void:
 		animation_elapsed = fmod(animation_elapsed, ANIMATION_FRAME_INTERVAL)
 		animation_tick += 1
 		queue_redraw()
-	if move_request_pending:
-		move_request_elapsed += delta
-		if move_request_elapsed >= 0.35:
-			move_request_pending = false
-			move_request_elapsed = 0.0
-			if movement_prediction_pending and movement_active:
-				movement_active = false
-				movement_prediction_pending = false
-				player_position = Vector2i(movement_start)
-				pending_map_id = ""
-				pending_warp = {}
-				queue_redraw()
 	if not movement_active:
 		if held_direction != 0:
 			movement_retry_elapsed += delta
