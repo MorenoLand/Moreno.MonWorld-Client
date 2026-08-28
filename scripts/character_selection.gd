@@ -7,6 +7,7 @@ var card_grid: GridContainer
 var status_label: Label
 var play_buttons: Array[Button] = []
 var selecting: bool = false
+var warmed_map_ids: Dictionary = {}
 
 func _ready() -> void:
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
@@ -111,6 +112,23 @@ func _on_characters_changed(value: Array) -> void:
 	for character_value in value:
 		if character_value is Dictionary:
 			_add_character_card(character_value as Dictionary)
+	call_deferred("_warm_character_maps", value.duplicate())
+
+func _warm_character_maps(values: Array) -> void:
+	if GameState.content == null:
+		return
+	for character_value in values:
+		if not character_value is Dictionary:
+			continue
+		var character: Dictionary = character_value
+		var map_id: String = GameState.content.map_id_for_location(int(character.get("bank_id", -1)), int(character.get("map_id", -1)))
+		if map_id.is_empty() or warmed_map_ids.has(map_id):
+			continue
+		warmed_map_ids[map_id] = true
+		await get_tree().process_frame
+		if selecting or GameState.content == null:
+			return
+		GameState.content.prepare_map(map_id, false)
 
 func _add_character_card(character: Dictionary) -> void:
 	var card := PanelContainer.new()
