@@ -1,21 +1,39 @@
 class_name MonWorldAudio
 extends Node
 
-const MUSIC_SAMPLE_RATE: int = 22050
-const MUSIC_BUFFER_LENGTH: float = 2.0
-const MUSIC_BUFFER_CAPACITY_FRAMES: int = 44100
-const MUSIC_TARGET_FRAMES: int = 33075
-const MUSIC_MIN_FREE_FRAMES: int = MUSIC_BUFFER_CAPACITY_FRAMES - MUSIC_TARGET_FRAMES
-const MUSIC_CHUNK_FRAMES: int = 4096
+const MUSIC_SAMPLE_RATE: int = MonWorldRomAudio.SAMPLE_RATE
+const MUSIC_BUFFER_LENGTH: float = 4.0
+const MUSIC_RENDER_CHUNK_FRAMES: int = 2048
+const WEB_RENDER_CHUNK_FRAMES: int = 512
+const MUSIC_PREBUFFER_FRAMES: int = 16384
+const MUSIC_CACHE_LIMIT: int = 4
 var music_player: AudioStreamPlayer
 var sfx_player: AudioStreamPlayer
 var rom_audio: MonWorldRomAudio
-var music_stream: AudioStreamGenerator
-var music_playback: AudioStreamGeneratorPlayback
-var music_state: Dictionary = {}
-var music_frame: int = 0
 var current_music_key: String = ""
 var current_content_id: String = ""
+var music_render_thread: Thread
+var music_render_mutex: Mutex = Mutex.new()
+var music_render_generation: int = 0
+var rendering_music_key: String = ""
+var requested_music_key: String = ""
+var requested_music_content: MonWorldContent
+var requested_music_id: int = -1
+var requested_music_generation: int = 0
+var rendered_chunks: Array = []
+var render_complete: bool = false
+var render_error: String = ""
+var playback_chunks: Array = []
+var playback_source_complete: bool = false
+var playback_chunk_index: int = 0
+var music_generator: AudioStreamGenerator
+var music_playback: AudioStreamGeneratorPlayback
+var queued_music_key: String = ""
+var music_start_generation: int = 0
+var cooperative_prepared: Dictionary = {}
+var cooperative_frame: int = 0
+var music_cache: Dictionary = {}
+var music_cache_order: Array[String] = []
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
@@ -28,6 +46,14 @@ func _ready() -> void:
 	add_child(sfx_player)
 	set_process(true)
 
+func _exit_tree() -> void:
+	music_start_generation += 1
+	music_render_mutex.lock()
+	music_render_generation += 1
+	music_render_mutex.unlock()
+	if music_render_thread != null and music_render_thread.is_started():
+		music_render_thread.wait_to_finish()
+
 func play_map_music(content: MonWorldContent, map_id: String) -> void:
 	if content == null or map_id.is_empty() or music_player == null:
 		return
@@ -35,55 +61,257 @@ func play_map_music(content: MonWorldContent, map_id: String) -> void:
 	if map.is_empty():
 		return
 	var music_id: int = int(map.get("music_id", 0))
-	var key: String = "%s:%d" % [content.content_id(), music_id]
-	if key == current_music_key and music_player.playing:
+	var fingerprint: String = content.rom_sha1 if not content.rom_sha1.is_empty() else str(content.rom_data.size())
+	var key: String = "%s:%s:%d" % [content.content_id(), fingerprint, music_id]
+	if key == current_music_key and (music_player.playing or rendering_music_key == key or requested_music_key == key or queued_music_key == key):
 		return
-	stop_music()
-	var prepared: Dictionary = rom_audio.prepare_song(content, music_id)
-	if prepared.is_empty():
-		return
+	_cancel_current_music()
 	current_music_key = key
 	current_content_id = content.content_id()
-	music_state = prepared
-	music_stream = AudioStreamGenerator.new()
-	music_stream.mix_rate = MUSIC_SAMPLE_RATE
-	music_stream.buffer_length = MUSIC_BUFFER_LENGTH
-	music_player.stream = music_stream
-	music_player.play()
-	music_playback = music_player.get_stream_playback() as AudioStreamGeneratorPlayback
-	_fill_music_buffer()
+	var cached: Variant = music_cache.get(key)
+	if cached is Array:
+		playback_chunks = (cached as Array).duplicate()
+		playback_source_complete = true
+		_maybe_queue_music_start()
+		return
+	requested_music_key = key
+	requested_music_content = content
+	requested_music_id = music_id
+	requested_music_generation = music_render_generation
+	if OS.has_feature("web"):
+		_begin_requested_cooperative_render()
+	else:
+		_start_music_render_if_idle()
 
 func _process(_delta: float) -> void:
-	_fill_music_buffer()
+	_poll_music_render_thread()
+	if not cooperative_prepared.is_empty():
+		_advance_cooperative_render()
+	elif not OS.has_feature("web"):
+		_start_music_render_if_idle()
+	_sync_rendered_chunks()
+	_maybe_queue_music_start()
+	_pump_music_buffer()
 
-func _fill_music_buffer() -> void:
-	if music_player == null or not music_player.playing or music_state.is_empty():
-		return
-	if music_playback == null:
-		music_playback = music_player.get_stream_playback() as AudioStreamGeneratorPlayback
-	if music_playback == null:
-		return
-	var available: int = music_playback.get_frames_available()
-	while available > MUSIC_MIN_FREE_FRAMES:
-		var chunk_frames: int = mini(MUSIC_CHUNK_FRAMES, available - MUSIC_MIN_FREE_FRAMES)
-		if chunk_frames <= 0:
-			break
-		var frames: PackedVector2Array = rom_audio.render_song_frames(music_state, music_frame, chunk_frames)
-		if frames.size() != chunk_frames:
-			break
-		music_playback.push_buffer(frames)
-		var loop_frames: int = maxi(int(music_state.get("loop_frames", music_state.get("duration_frames", 1))), 1)
-		music_frame = posmod(music_frame + chunk_frames, loop_frames)
-		available = music_playback.get_frames_available()
-
-func stop_music() -> void:
-	current_music_key = ""
+func _cancel_current_music() -> void:
+	music_start_generation += 1
+	music_render_mutex.lock()
+	music_render_generation += 1
+	music_render_mutex.unlock()
+	requested_music_key = ""
+	requested_music_content = null
+	requested_music_id = -1
+	queued_music_key = ""
+	playback_chunks = []
+	playback_source_complete = false
+	playback_chunk_index = 0
+	music_playback = null
+	music_generator = null
+	cooperative_prepared = {}
+	cooperative_frame = 0
 	if music_player != null:
 		music_player.stop()
-	music_playback = null
-	music_stream = null
-	music_state = {}
-	music_frame = 0
+
+func _begin_render_state(key: String) -> void:
+	rendering_music_key = key
+	playback_chunks = []
+	playback_source_complete = false
+	playback_chunk_index = 0
+	music_render_mutex.lock()
+	rendered_chunks = []
+	render_complete = false
+	render_error = ""
+	music_render_mutex.unlock()
+
+func _start_music_render_if_idle() -> void:
+	if requested_music_key.is_empty() or requested_music_content == null or requested_music_id < 0:
+		return
+	if music_render_thread != null and music_render_thread.is_started():
+		return
+	var key: String = requested_music_key
+	var content: MonWorldContent = requested_music_content
+	var song_id: int = requested_music_id
+	var generation: int = requested_music_generation
+	requested_music_key = ""
+	requested_music_content = null
+	requested_music_id = -1
+	_begin_render_state(key)
+	music_render_thread = Thread.new()
+	var start_error: Error = music_render_thread.start(Callable(self, "_render_music_worker").bind(content, song_id, key, generation), Thread.PRIORITY_LOW)
+	if start_error != OK:
+		music_render_thread = null
+		rendering_music_key = ""
+		requested_music_key = key
+		requested_music_content = content
+		requested_music_id = song_id
+		requested_music_generation = generation
+		_begin_requested_cooperative_render()
+
+func _render_music_worker(content: MonWorldContent, song_id: int, key: String, generation: int) -> Dictionary:
+	var decoder: MonWorldRomAudio = MonWorldRomAudio.new()
+	var prepared: Dictionary = decoder.prepare_song(content, song_id)
+	if prepared.is_empty():
+		music_render_mutex.lock()
+		render_error = decoder.last_error
+		music_render_mutex.unlock()
+		return {"ok": false, "key": key, "generation": generation}
+	var total_frames: int = int(prepared.get("loop_frames", prepared.get("duration_frames", 0)))
+	var frame: int = 0
+	while frame < total_frames:
+		music_render_mutex.lock()
+		var cancelled: bool = generation != music_render_generation
+		music_render_mutex.unlock()
+		if cancelled:
+			return {"ok": false, "key": key, "generation": generation, "cancelled": true}
+		var chunk_frames: int = mini(MUSIC_RENDER_CHUNK_FRAMES, total_frames - frame)
+		var chunk: PackedVector2Array = decoder.render_song_frames(prepared, frame, chunk_frames)
+		if chunk.size() != chunk_frames:
+			return {"ok": false, "key": key, "generation": generation}
+		music_render_mutex.lock()
+		rendered_chunks.append(chunk)
+		music_render_mutex.unlock()
+		frame += chunk_frames
+	music_render_mutex.lock()
+	render_complete = true
+	music_render_mutex.unlock()
+	return {"ok": true, "key": key, "generation": generation}
+
+func _poll_music_render_thread() -> void:
+	if music_render_thread == null or not music_render_thread.is_started() or music_render_thread.is_alive():
+		return
+	var result_value: Variant = music_render_thread.wait_to_finish()
+	music_render_thread = null
+	music_render_mutex.lock()
+	var generation: int = music_render_generation
+	music_render_mutex.unlock()
+	if result_value is Dictionary:
+		var result: Dictionary = result_value as Dictionary
+		if bool(result.get("ok", false)) and int(result.get("generation", -1)) == generation:
+			_sync_rendered_chunks()
+			playback_source_complete = true
+			_cache_music_chunks(str(result.get("key", "")), playback_chunks)
+		elif int(result.get("generation", -1)) == generation:
+			rendering_music_key = ""
+	if not requested_music_key.is_empty():
+		_start_music_render_if_idle()
+
+func _begin_requested_cooperative_render() -> void:
+	if requested_music_key.is_empty() or requested_music_content == null or requested_music_id < 0:
+		return
+	var key: String = requested_music_key
+	var content: MonWorldContent = requested_music_content
+	var song_id: int = requested_music_id
+	requested_music_key = ""
+	requested_music_content = null
+	requested_music_id = -1
+	var prepared: Dictionary = rom_audio.prepare_song(content, song_id)
+	if prepared.is_empty():
+		render_error = rom_audio.last_error
+		rendering_music_key = ""
+		return
+	_begin_render_state(key)
+	cooperative_prepared = prepared
+	cooperative_frame = 0
+
+func _advance_cooperative_render() -> void:
+	if cooperative_prepared.is_empty() or rendering_music_key != current_music_key:
+		return
+	var total_frames: int = int(cooperative_prepared.get("loop_frames", cooperative_prepared.get("duration_frames", 0)))
+	if cooperative_frame >= total_frames:
+		cooperative_prepared = {}
+		playback_source_complete = true
+		_cache_music_chunks(rendering_music_key, playback_chunks)
+		return
+	var chunk_frames: int = mini(WEB_RENDER_CHUNK_FRAMES, total_frames - cooperative_frame)
+	var chunk: PackedVector2Array = rom_audio.render_song_frames(cooperative_prepared, cooperative_frame, chunk_frames)
+	if chunk.size() != chunk_frames:
+		cooperative_prepared = {}
+		render_error = "ROM audio renderer produced an incomplete chunk"
+		rendering_music_key = ""
+		return
+	music_render_mutex.lock()
+	rendered_chunks.append(chunk)
+	music_render_mutex.unlock()
+	cooperative_frame += chunk_frames
+	if cooperative_frame >= total_frames:
+		music_render_mutex.lock()
+		render_complete = true
+		music_render_mutex.unlock()
+
+func _sync_rendered_chunks() -> void:
+	if rendering_music_key != current_music_key:
+		return
+	music_render_mutex.lock()
+	var available_count: int = rendered_chunks.size()
+	while playback_chunks.size() < available_count:
+		playback_chunks.append(rendered_chunks[playback_chunks.size()])
+	var completed: bool = render_complete
+	music_render_mutex.unlock()
+	if completed:
+		playback_source_complete = true
+
+func _maybe_queue_music_start() -> void:
+	if current_music_key.is_empty() or music_player.playing or not queued_music_key.is_empty() or playback_chunks.is_empty():
+		return
+	if _prebuffered_frame_count() < MUSIC_PREBUFFER_FRAMES and not playback_source_complete:
+		return
+	queued_music_key = current_music_key
+	var generation: int = music_start_generation
+	_start_music_after_presented_frame(current_music_key, generation)
+
+func _prebuffered_frame_count() -> int:
+	var frame_count: int = 0
+	for chunk_value in playback_chunks:
+		var chunk: PackedVector2Array = chunk_value as PackedVector2Array
+		frame_count += chunk.size()
+	return frame_count
+
+func _start_music_after_presented_frame(key: String, generation: int) -> void:
+	if DisplayServer.get_name() == "headless":
+		await get_tree().process_frame
+	else:
+		await RenderingServer.frame_post_draw
+	if generation != music_start_generation or key != current_music_key or playback_chunks.is_empty():
+		return
+	queued_music_key = ""
+	music_generator = AudioStreamGenerator.new()
+	music_generator.mix_rate = MUSIC_SAMPLE_RATE
+	music_generator.buffer_length = MUSIC_BUFFER_LENGTH
+	music_player.stream = music_generator
+	music_player.play()
+	music_playback = music_player.get_stream_playback() as AudioStreamGeneratorPlayback
+	_pump_music_buffer()
+
+func _pump_music_buffer() -> void:
+	if music_playback == null or not music_player.playing or playback_chunks.is_empty():
+		return
+	var available: int = music_playback.get_frames_available()
+	while available > 0:
+		if playback_chunk_index >= playback_chunks.size():
+			if playback_source_complete:
+				playback_chunk_index = 0
+			else:
+				break
+		var chunk: PackedVector2Array = playback_chunks[playback_chunk_index] as PackedVector2Array
+		if chunk.is_empty() or available < chunk.size():
+			break
+		music_playback.push_buffer(chunk)
+		playback_chunk_index += 1
+		available = music_playback.get_frames_available()
+
+func _cache_music_chunks(key: String, chunks: Array) -> void:
+	if key.is_empty() or chunks.is_empty():
+		return
+	music_cache[key] = chunks.duplicate()
+	music_cache_order.erase(key)
+	music_cache_order.append(key)
+	while music_cache_order.size() > MUSIC_CACHE_LIMIT:
+		music_cache.erase(music_cache_order.pop_front())
+
+func stop_music() -> void:
+	_cancel_current_music()
+	current_music_key = ""
+	current_content_id = ""
 
 func play_effect(effect: String) -> void:
 	if sfx_player == null or effect.is_empty():

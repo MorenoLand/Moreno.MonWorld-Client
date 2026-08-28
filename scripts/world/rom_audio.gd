@@ -1,7 +1,8 @@
 class_name MonWorldRomAudio
 extends RefCounted
 
-const SAMPLE_RATE: int = 22050
+const SAMPLE_RATE: int = 13379
+const M4A_VBLANK_RATE: float = 59.7275
 const MAX_RENDER_SECONDS: float = 60.0
 const MAX_TRACK_COMMANDS: int = 12000
 const MAX_TRACK_EVENTS: int = 1600
@@ -55,7 +56,6 @@ func build_song_stream(content: MonWorldContent, song_id: int) -> AudioStream:
 		return null
 	stream_cache[cache_key] = stream
 	return stream
-
 func inspect_song(content: MonWorldContent, song_id: int) -> Dictionary:
 	var prepared: Dictionary = prepare_song(content, song_id)
 	if prepared.is_empty():
@@ -284,6 +284,9 @@ func _parse_track(data: PackedByteArray, track_offset: int, tone_offset: int, in
 			if running_status == 0:
 				break
 			status = running_status
+		if status >= 0x80 and status <= 0xB0:
+			now_ticks += _clock_value(status - 0x80)
+			continue
 		if status >= COMMAND_TIE:
 			var note_index: int = status - 0xCF
 			var gate_ticks: int = _clock_value(note_index)
@@ -304,7 +307,6 @@ func _parse_track(data: PackedByteArray, track_offset: int, tone_offset: int, in
 			if gate_ticks > 0:
 				var event_tone: Dictionary = dynamic_tone.duplicate(true)
 				events.append({"start_tick": now_ticks, "duration_ticks": gate_ticks, "start_extra_seconds": now_extra_seconds, "key": note_key + key_shift, "velocity": velocity, "volume": volume, "pan": pan, "bend": bend, "bend_range": bend_range, "tune": tune, "tone": event_tone})
-			now_ticks += gate_ticks
 			continue
 		match status:
 			COMMAND_FINE:
@@ -745,11 +747,11 @@ func _ticks_to_seconds(ticks: int, tempo_changes: Array = []) -> float:
 		if change_tick > ticks:
 			break
 		if change_tick > current_tick:
-			seconds += float(change_tick - current_tick) * 150.0 / (maxf(tempo, 1.0) * 60.0)
+			seconds += float(change_tick - current_tick) * 150.0 / (maxf(tempo, 1.0) * M4A_VBLANK_RATE)
 			current_tick = change_tick
 		tempo = maxf(float(change.get("tempo", tempo)), 1.0)
 	if ticks > current_tick:
-		seconds += float(ticks - current_tick) * 150.0 / (maxf(tempo, 1.0) * 60.0)
+		seconds += float(ticks - current_tick) * 150.0 / (maxf(tempo, 1.0) * M4A_VBLANK_RATE)
 	return seconds
 
 func _clock_value(index: int) -> int:
