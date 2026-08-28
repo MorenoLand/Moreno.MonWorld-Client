@@ -57,13 +57,25 @@ var move_request_elapsed: float = 0.0
 var world_entities: Array = []
 var authoritative_state: bool = false
 var dialogue_active: bool = false
+var resize_redraw_pending: bool = false
 
 func _ready() -> void:
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	clip_contents = true
 	focus_mode = Control.FOCUS_ALL
-	resized.connect(queue_redraw)
-	queue_redraw()
+    resized.connect(_on_resized)
+    queue_redraw()
+
+func _on_resized() -> void:
+    if resize_redraw_pending:
+        return
+    resize_redraw_pending = true
+    call_deferred("_finish_resize")
+
+func _finish_resize() -> void:
+    resize_redraw_pending = false
+    if is_inside_tree():
+        queue_redraw()
 
 func set_content(value: MonWorldContent) -> void:
 	content = value

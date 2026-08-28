@@ -13,6 +13,10 @@ var map_view: MonWorldMapPlayCanvas
 var hud: MonWorldHud
 var dialogue_overlay: MonWorldDialogue
 var audio: MonWorldAudio
+var transition_overlay: ColorRect
+var transition_tween: Tween
+var transition_reveal_pending: bool = false
+var transition_map_ready: bool = false
 var animation_tick: int = 0
 var animation_elapsed: float = 0.0
 var held_input: String = ""
@@ -91,6 +95,12 @@ func _build_ui() -> void:
 	send_button.offset_bottom = -18
 	send_button.pressed.connect(func(): _send_chat(chat_input.text))
 	add_child(send_button)
+	transition_overlay = ColorRect.new()
+	transition_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	transition_overlay.color = Color(0.0, 0.0, 0.0, 0.0)
+	transition_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	transition_overlay.visible = false
+	add_child(transition_overlay)
 	resized.connect(_layout_ui)
 	_layout_ui()
 
@@ -137,6 +147,9 @@ func _on_map_load(value: Dictionary) -> void:
 		return
 	_sync_map_entities()
 	GameState.call_deferred("complete_map_load", str(value.get("key", "")))
+	transition_map_ready = true
+	if transition_reveal_pending:
+		_reveal_screen_transition()
 
 func _load_map_texture(map_id: String, expected_width: int = 0, expected_height: int = 0) -> bool:
 	if GameState.content == null or map_id.is_empty():
@@ -211,10 +224,56 @@ func _on_entity_update(value: Dictionary) -> void:
 		_sync_map_entities()
 
 func _on_render_screen(visible: bool) -> void:
+	if not visible:
+		transition_reveal_pending = true
+		transition_map_ready = false
+		_cover_screen_transition()
+		return
+	if transition_reveal_pending:
+		if transition_map_ready:
+			_reveal_screen_transition()
+		return
+	if transition_overlay != null:
+		transition_overlay.visible = false
 	if map_view != null:
-		map_view.visible = visible
+		map_view.visible = true
 	if hud != null:
-		hud.visible = visible
+		hud.visible = true
+
+func _cover_screen_transition() -> void:
+	if transition_overlay == null:
+		return
+	if transition_tween != null:
+		transition_tween.kill()
+	transition_overlay.visible = true
+	transition_tween = create_tween()
+	transition_tween.tween_property(transition_overlay, "color", Color(0.0, 0.0, 0.0, 1.0), 0.10)
+	transition_tween.tween_callback(func() -> void:
+		if map_view != null:
+			map_view.visible = false
+		if hud != null:
+			hud.visible = false
+	)
+
+func _reveal_screen_transition() -> void:
+	transition_reveal_pending = false
+	transition_map_ready = false
+	if map_view != null:
+		map_view.visible = true
+	if hud != null:
+		hud.visible = true
+	if transition_overlay == null:
+		return
+	if transition_tween != null:
+		transition_tween.kill()
+	transition_overlay.visible = true
+	transition_overlay.color = Color(0.0, 0.0, 0.0, 1.0)
+	transition_tween = create_tween()
+	transition_tween.tween_property(transition_overlay, "color", Color(0.0, 0.0, 0.0, 0.0), 0.12)
+	transition_tween.tween_callback(func() -> void:
+		if transition_overlay != null:
+			transition_overlay.visible = false
+	)
 
 func _sync_map_entities() -> void:
 	if map_view == null:
@@ -308,6 +367,11 @@ func _unhandled_input(event: InputEvent) -> void:
 	if not event is InputEventKey:
 		return
 	var key_event: InputEventKey = event as InputEventKey
+	if key_event.keycode == KEY_F3 and key_event.pressed and not key_event.echo:
+		if hud != null:
+			hud.toggle_stats()
+		get_viewport().set_input_as_handled()
+		return
 	if key_event.keycode == KEY_F and key_event.pressed and not key_event.echo:
 		get_viewport().set_input_as_handled()
 		if dialogue_overlay == null or not dialogue_overlay.is_open():
