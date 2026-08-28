@@ -1,7 +1,9 @@
 extends SceneTree
 
+const SESSION_SCRIPT: GDScript = preload("res://scripts/net/session.gd")
+
 func _init() -> void:
-	if load("res://scripts/net/session.gd") == null:
+	if SESSION_SCRIPT == null:
 		push_error("OpenMMO session script did not load")
 		quit(1)
 		return

@@ -74,11 +74,11 @@ class Reader extends RefCounted:
 		return read_bytes(read_u16_le())
 
 	func read_utf16_le_null() -> String:
-		var codepoints: PackedInt32Array = PackedInt32Array()
+		var value: String = ""
 		while remaining() >= 2:
 			var first: int = read_u16_le()
 			if first == 0:
-				return String.from_utf32_buffer(codepoints.to_byte_array())
+				return value
 			if first >= 0xD800 and first <= 0xDBFF:
 				if remaining() < 2:
 					failed = true
@@ -87,9 +87,9 @@ class Reader extends RefCounted:
 				if second < 0xDC00 or second > 0xDFFF:
 					failed = true
 					return ""
-				codepoints.append(0x10000 + ((first - 0xD800) << 10) + second - 0xDC00)
+				value += String.chr(0x10000 + ((first - 0xD800) << 10) + second - 0xDC00)
 			else:
-				codepoints.append(first)
+				value += String.chr(first)
 		failed = true
 		return ""
 
