@@ -1,27 +1,28 @@
-# Cross-platform multiplayer client for original worlds
+# Godot desktop client for shared monster-catching worlds
 
-This repository contains a standard Godot 4 client foundation for MonWorld. It uses GDScript only, Compatibility rendering, binary WebSocket transport, and a single-thread Web export so the same project can target Web, Linux, Windows, and macOS.
+This repository contains OpenMMOGo, a GDScript client for the OpenMMO login and game protocols. The current target is a native Godot 4 desktop client using raw TCP, the OpenMMO encrypted session handshake, and the existing server's packet contract. A Web transport proxy remains future work.
 
-The client provides direct API authentication, character selection, authoritative multiplayer movement, chat, a separate battle presentation scene, and a local ROM reader. Desktop users can select a compatible FireRed or LeafGreen base ROM through the operating system file picker; Web users can select one through the browser. ROM bytes remain local to the client session and are never sent to the server.
+The implemented foundation covers encrypted login, server discovery, game-node selection, game-session authentication, and character-list decoding. The existing local ROM reader and gameplay renderer remain the visual-content path while the remaining OpenMMO world, movement, chat, and battle packets are integrated.
 
 No ROM, official asset, extracted asset, capture, generated map, or other third-party game data is included. The client reads the user-selected ROM directly and identifies the supported game from its GBA header and map-layout structure. Graphics-patched ROMs remain usable when those source structures are preserved.
 
 ## Requirements
 
-- Godot 4 with GDScript and Web export templates.
-- A running Moreno.MonWorld-Server instance.
+- Godot 4.7 with GDScript.
+- A running OpenMMO login and game server.
+- The matching OpenMMO `game.public.pem` trust key.
 - A compatible local FireRed or LeafGreen base ROM.
 
-Set the server URL in the `monworld/server_url` project setting or use the field on the sign-in screen. The development server defaults to `http://127.0.0.1:8081`.
+Set the login host, port, and root public-key path on the sign-in screen. The development login endpoint defaults to `127.0.0.1:2106`.
 
 ## Run and export
 
-Open the project in Godot and run the main scene. The `Web`, `Linux`, `Windows`, and `macOS` export presets are in `export_presets.cfg`; Web is configured without threads.
+Open the project in Godot and run the main scene. Native desktop is the active protocol target. Existing export presets remain available, but Web networking requires a future TCP proxy.
 
 Unknown game codes and incompatible map layouts are rejected. The selected ROM is read directly and is not uploaded.
 
 ## Project boundaries
 
-The client protocol is an original MonWorld protocol and is not drop-in wire compatibility with another project. Reference material may inform behavior, but no reference source or proprietary data is copied into this repository.
+The client implements the OpenMMO wire protocol independently in GDScript. The OpenMMO server remains a separate read-only dependency and is not bundled here.
 
 See `docs/rom-content.md`, `docs/protocol.md`, and `docs/development.md` for focused guidance.

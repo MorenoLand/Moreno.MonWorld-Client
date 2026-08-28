@@ -1,18 +1,9 @@
 # Client protocol boundary
 
-The game connection uses binary WebSocket messages at `/ws/game`. The first message is an authentication frame containing a short-lived, one-time API ticket and the local `content_id`.
+The native client connects directly to OpenMMO's login and game TCP endpoints. Frames use a little-endian inclusive `u16` length followed by the packet body.
 
-Each frame has a 14-byte little-endian header:
+Each connection performs the OpenMMO P-256 handshake. The client validates the server's `SHA256withECDSA` signature against the operator-provided `game.public.pem`, derives the shared session keys, and then applies AES-CTR, the negotiated checksum, and persistent raw-deflate compression in the same order as the server.
 
-| Offset | Size | Field |
-| ---: | ---: | --- |
-| 0 | 2 | Magic `0x4D57` |
-| 2 | 1 | Version `1` |
-| 3 | 1 | Flags |
-| 4 | 2 | Message type |
-| 6 | 4 | Sequence |
-| 10 | 4 | UTF-8 JSON payload length |
+The login sequence authenticates the account, requests the server list, and resolves a game node. The game sequence sends `Join` (`0x01`), requests characters (`0x02`), selects a character (`0x04`), consumes the server startup state, and requests the player (`0x05`) after the map packet (`0x10`) has been decoded.
 
-Client sequences start at one for authentication and increase for every later frame. The server rejects malformed frames and non-increasing client sequences. Inputs express actions such as a direction or battle choice; accepted positions, battle state, inventory, and other authority remain server-owned.
-
-This is an original MonWorld protocol. Other projects and reverse-engineering material are behavioral references only.
+Packet fields are implemented from the OpenMMO source contract. There is no JSON, HTTP API, WebSocket, or compatibility fallback in the active online path.

@@ -10,7 +10,7 @@ After a valid Kanto ROM is selected, the client remembers its local path in `use
 
 The current reader performs a structural FireRed map-layout check against the source-defined pointer tables, reads the ROM bytes into the client session, extracts the GBA header identifiers, and exposes the normalized Kanto map contract. The displayed SHA-1 is only a diagnostic fingerprint; it is not an acceptance gate. Unknown game codes and incompatible map layouts are rejected.
 
-The server publishes the expected `content_id` at `GET /api/v1/content`. The client compares that identifier before opening a game session, and the server compares it again during the one-time WebSocket ticket exchange. ROM bytes never go to the server.
+Online sessions receive authoritative map and player state from OpenMMO game packets. The selected ROM remains local and supplies the matching base-game visual content; ROM bytes never go to the server. Server-defined map and custom-content packet support is integrated at the protocol and renderer boundary rather than through a generated content pack.
 
 No ROM, extracted asset, generated map, or derived content file belongs in this repository. Optional extraction stages must keep their output outside Git and remain independent of the network protocol.
 

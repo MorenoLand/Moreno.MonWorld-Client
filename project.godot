@@ -26,9 +26,11 @@ window/size/window_width_override=1280
 window/size/window_height_override=720
 window/stretch/mode="canvas_items"
 
-[monworld]
+[openmmo]
 
-server_url="http://127.0.0.1:8081"
+login_host="127.0.0.1"
+login_port=2106
+root_public_key_path=""
 
 [rendering]
 
