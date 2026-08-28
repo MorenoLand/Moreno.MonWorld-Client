@@ -10,7 +10,7 @@ const TILE_PIXELS: float = 16.0
 const CAMERA_MAX_CELLS_X: int = 30
 const CAMERA_MAX_CELLS_Y: int = 20
 const MAX_TILE_SCALE: float = 4.0
-const NORMAL_STEP_DURATION: float = 0.14
+const NORMAL_STEP_DURATION: float = 0.20
 const DOOR_ANIMATION_DURATION: float = 16.0 / 60.0
 const DOOR_FRAME_COUNT: int = 4
 
