@@ -31,6 +31,7 @@ var incoming_checksum_key: PackedByteArray = PackedByteArray()
 var outgoing_round: int = 0
 var incoming_round: int = 0
 var inflater: StreamPeerGZIP
+var inflater_needs_header: bool = true
 
 func connect_openmmo(host: String, port: int, public_key_path: String, use_compression: bool = false) -> Error:
 	close()
@@ -67,6 +68,8 @@ func close() -> void:
 		incoming_cipher.finish()
 	if inflater != null:
 		inflater.finish()
+	inflater = null
+	inflater_needs_header = true
 	if peer.get_status() != StreamPeerTCP.STATUS_NONE:
 		peer.disconnect_from_host()
 	var was_connected: bool = state != State.DISCONNECTED
@@ -184,6 +187,7 @@ func _finish_key_derivation(result: Dictionary) -> void:
 	incoming_round = 0
 	if compressed_inbound:
 		inflater = StreamPeerGZIP.new()
+		inflater_needs_header = true
 		if inflater.start_decompression(true, 1024 * 1024) != OK:
 			_fail("OpenMMO deflate stream could not start")
 			return
@@ -222,6 +226,9 @@ func _decompress_packet(packet: PackedByteArray) -> PackedByteArray:
 		output.append_array(packet.slice(2))
 		return output
 	var compressed: PackedByteArray = packet.slice(2)
+	if inflater_needs_header:
+		compressed = PackedByteArray([0x78, 0x9C]) + compressed
+		inflater_needs_header = false
 	compressed.append_array(PackedByteArray([0, 0, 0xFF, 0xFF]))
 	var input_offset: int = 0
 	while input_offset < compressed.size():
