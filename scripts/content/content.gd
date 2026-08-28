@@ -394,6 +394,8 @@ func _build_map_cache(map_id: String, map_value: Dictionary) -> Dictionary:
 	var foreground_image: Image = Image.create(width * 16, height * 16, false, Image.FORMAT_RGBA8)
 	foreground_image.fill(Color(0.0, 0.0, 0.0, 0.0))
 	var animated_tiles: Array = []
+	var animated_background_tiles: Array = []
+	var animated_foreground_tiles: Array = []
 	for map_y in range(height):
 		for map_x in range(width):
 			var map_word: int = map_cells[map_y * width + map_x]
@@ -404,10 +406,10 @@ func _build_map_cache(map_id: String, map_value: Dictionary) -> Dictionary:
 				tileset = secondary
 				metatile_index = metatile_id - primary_metatile_count
 			_draw_metatile(image, map_x * 16, map_y * 16, tileset, metatile_index, primary, secondary, animated_tiles)
-			_draw_metatile_layers(background_image, foreground_image, map_x * 16, map_y * 16, tileset, metatile_index, primary, secondary)
+		_draw_metatile_layers(background_image, foreground_image, map_x * 16, map_y * 16, tileset, metatile_index, primary, secondary, animated_background_tiles, animated_foreground_tiles)
 	var objects: Array = _read_map_objects(header_offset, map_id)
 	objects.append_array(_read_map_background_events(header_offset, map_id))
-	return {"ok": true, "base_image": image, "base_background_image": background_image, "base_foreground_image": foreground_image, "primary": primary, "secondary": secondary, "primary_tiles": primary.get("tiles", PackedByteArray()), "animated_tiles": animated_tiles, "map_cells": map_cells, "objects": objects, "warps": _read_map_warps(header_offset), "connections": _read_map_connections(header_offset), "textures": {}, "images": {}, "background_textures": {}, "foreground_textures": {}, "width": width, "height": height, "header_offset": header_offset, "layout_offset": layout_offset, "map_group": int(map_value.get("map_group", -1)), "map_index": int(map_value.get("map_index", -1)), "music_id": int(map_value.get("music_id", 0))}
+	return {"ok": true, "base_image": image, "base_background_image": background_image, "base_foreground_image": foreground_image, "primary": primary, "secondary": secondary, "primary_tiles": primary.get("tiles", PackedByteArray()), "animated_tiles": animated_tiles, "animated_background_tiles": animated_background_tiles, "animated_foreground_tiles": animated_foreground_tiles, "map_cells": map_cells, "objects": objects, "warps": _read_map_warps(header_offset), "connections": _read_map_connections(header_offset), "textures": {}, "images": {}, "background_textures": {}, "foreground_textures": {}, "width": width, "height": height, "header_offset": header_offset, "layout_offset": layout_offset, "map_group": int(map_value.get("map_group", -1)), "map_index": int(map_value.get("map_index", -1)), "music_id": int(map_value.get("music_id", 0))}
 
 func map_cell(map_id: String, x: int, y: int) -> Dictionary:
 	var cached_map: Dictionary = _get_or_build_map_cache(map_id)
@@ -733,63 +735,28 @@ func _render_cached_map(cached_map: Dictionary, animation_phase: int) -> Image:
 	var animated_tiles: Array = cached_map.get("animated_tiles", [])
 	if animated_tiles.is_empty() or animation_phase == 0:
 		return (cached_map.get("base_image") as Image).duplicate()
+	var image: Image = (cached_map.get("base_image") as Image).duplicate()
 	var primary: Dictionary = cached_map.get("primary", {})
 	var secondary: Dictionary = cached_map.get("secondary", {})
 	var animated_primary: PackedByteArray = _animated_primary_tiles(cached_map.get("primary_tiles", PackedByteArray()), animation_phase)
-	var width: int = int(cached_map.get("width", 0))
-	var height: int = int(cached_map.get("height", 0))
-	var map_cells: PackedInt32Array = cached_map.get("map_cells", PackedInt32Array())
-	var metatile_id_mask: int = _format_int("map_grid_metatile_id_mask", MAPGRID_METATILE_ID_MASK)
-	var primary_metatile_count: int = _format_int("primary_metatile_count", PRIMARY_METATILE_COUNT)
-	var image: Image = Image.create(width * 16, height * 16, false, Image.FORMAT_RGBA8)
-	image.fill(Color.BLACK)
-	for map_y in range(height):
-		for map_x in range(width):
-			var cell_index: int = map_y * width + map_x
-			if cell_index < 0 or cell_index >= map_cells.size():
-				continue
-			var metatile_id: int = int(map_cells[cell_index]) & metatile_id_mask
-			var tileset: Dictionary = primary
-			var metatile_index: int = metatile_id
-			if metatile_id >= primary_metatile_count:
-				tileset = secondary
-				metatile_index = metatile_id - primary_metatile_count
-			_draw_metatile(image, map_x * 16, map_y * 16, tileset, metatile_index, primary, secondary, [], animated_primary)
+	var ignored_animated_tiles: Array = []
+	for tile_value in animated_tiles:
+		if tile_value is Dictionary:
+			var tile: Dictionary = tile_value
+			_draw_tile(image, int(tile.get("x", 0)), int(tile.get("y", 0)), int(tile.get("entry", 0)), primary, secondary, ignored_animated_tiles, animated_primary)
 	return image
 
 func _render_cached_layer(cached_map: Dictionary, animation_phase: int, foreground: bool) -> Image:
-	var width: int = int(cached_map.get("width", 0))
-	var height: int = int(cached_map.get("height", 0))
-	var image: Image = Image.create(width * 16, height * 16, false, Image.FORMAT_RGBA8)
-	image.fill(Color(0.0, 0.0, 0.0, 0.0) if foreground else Color.BLACK)
+	var image: Image = (cached_map.get("base_foreground_image" if foreground else "base_background_image") as Image).duplicate()
 	var primary: Dictionary = cached_map.get("primary", {})
 	var secondary: Dictionary = cached_map.get("secondary", {})
-	var map_cells: PackedInt32Array = cached_map.get("map_cells", PackedInt32Array())
 	var animated_primary: PackedByteArray = _animated_primary_tiles(cached_map.get("primary_tiles", PackedByteArray()), animation_phase) if animation_phase != 0 else PackedByteArray()
-	var metatile_id_mask: int = _format_int("map_grid_metatile_id_mask", MAPGRID_METATILE_ID_MASK)
-	var primary_metatile_count: int = _format_int("primary_metatile_count", PRIMARY_METATILE_COUNT)
-	for map_y in range(height):
-		for map_x in range(width):
-			var cell_index: int = map_y * width + map_x
-			if cell_index < 0 or cell_index >= map_cells.size():
-				continue
-			var metatile_id: int = int(map_cells[cell_index]) & metatile_id_mask
-			var tileset: Dictionary = primary
-			var metatile_index: int = metatile_id
-			if metatile_id >= primary_metatile_count:
-				tileset = secondary
-				metatile_index = metatile_id - primary_metatile_count
-			var metatiles: PackedInt32Array = tileset.get("metatiles", PackedInt32Array())
-			var base: int = metatile_index * _format_int("tiles_per_metatile", TILES_PER_METATILE)
-			if metatile_index < 0 or base + 4 > metatiles.size():
-				continue
-			var layer_type: int = 0
-			var attributes: PackedInt32Array = tileset.get("attributes", PackedInt32Array())
-			if metatile_index < attributes.size():
-				layer_type = (int(attributes[metatile_index]) & _format_int("map_grid_layer_type_mask", MAPGRID_LAYER_TYPE_MASK)) >> _format_int("map_grid_layer_type_shift", MAPGRID_LAYER_TYPE_SHIFT)
-			_draw_metatile_layer(image, map_x * 16, map_y * 16, metatiles, base, 0, primary, secondary, [], animated_primary)
-			if (foreground and layer_type != 1) or (not foreground and layer_type == 1):
-				_draw_metatile_layer(image, map_x * 16, map_y * 16, metatiles, base, 4, primary, secondary, [], animated_primary)
+	var animated_tiles: Array = cached_map.get("animated_foreground_tiles" if foreground else "animated_background_tiles", [])
+	var ignored_animated_tiles: Array = []
+	for tile_value in animated_tiles:
+		if tile_value is Dictionary:
+			var tile: Dictionary = tile_value
+			_draw_tile(image, int(tile.get("x", 0)), int(tile.get("y", 0)), int(tile.get("entry", 0)), primary, secondary, ignored_animated_tiles, animated_primary)
 	return image
 
 func _animated_primary_tiles(base_tiles: PackedByteArray, animation_phase: int) -> PackedByteArray:
@@ -1198,7 +1165,7 @@ func _draw_metatile(image: Image, destination_x: int, destination_y: int, tilese
 			_draw_metatile_layer(image, destination_x, destination_y, metatiles, base, 0, primary, secondary, animated_tiles, primary_override)
 			_draw_metatile_layer(image, destination_x, destination_y, metatiles, base, 4, primary, secondary, animated_tiles, primary_override)
 
-func _draw_metatile_layers(background_image: Image, foreground_image: Image, destination_x: int, destination_y: int, tileset: Dictionary, metatile_index: int, primary: Dictionary, secondary: Dictionary, primary_override: PackedByteArray = PackedByteArray()) -> void:
+func _draw_metatile_layers(background_image: Image, foreground_image: Image, destination_x: int, destination_y: int, tileset: Dictionary, metatile_index: int, primary: Dictionary, secondary: Dictionary, animated_background_tiles: Array = [], animated_foreground_tiles: Array = [], primary_override: PackedByteArray = PackedByteArray()) -> void:
 	var metatiles: PackedInt32Array = tileset.get("metatiles", PackedInt32Array())
 	var tiles_per_metatile: int = _format_int("tiles_per_metatile", TILES_PER_METATILE)
 	var base: int = metatile_index * tiles_per_metatile
@@ -1208,8 +1175,11 @@ func _draw_metatile_layers(background_image: Image, foreground_image: Image, des
 	var layer_type: int = 0
 	if metatile_index < attributes.size():
 		layer_type = (int(attributes[metatile_index]) & _format_int("map_grid_layer_type_mask", MAPGRID_LAYER_TYPE_MASK)) >> _format_int("map_grid_layer_type_shift", MAPGRID_LAYER_TYPE_SHIFT)
-	_draw_metatile_layer(background_image, destination_x, destination_y, metatiles, base, 0, primary, secondary, [], primary_override)
-	_draw_metatile_layer(background_image if layer_type == 1 else foreground_image, destination_x, destination_y, metatiles, base, 4, primary, secondary, [], primary_override)
+	_draw_metatile_layer(background_image, destination_x, destination_y, metatiles, base, 0, primary, secondary, animated_background_tiles, primary_override)
+	if layer_type == 1:
+		_draw_metatile_layer(background_image, destination_x, destination_y, metatiles, base, 4, primary, secondary, animated_background_tiles, primary_override)
+	else:
+		_draw_metatile_layer(foreground_image, destination_x, destination_y, metatiles, base, 4, primary, secondary, animated_foreground_tiles, primary_override)
 
 func _draw_metatile_layer(image: Image, destination_x: int, destination_y: int, metatiles: PackedInt32Array, base: int, start: int, primary: Dictionary, secondary: Dictionary, animated_tiles: Array, primary_override: PackedByteArray = PackedByteArray()) -> void:
 	var tiles_per_metatile: int = _format_int("tiles_per_metatile", TILES_PER_METATILE)
