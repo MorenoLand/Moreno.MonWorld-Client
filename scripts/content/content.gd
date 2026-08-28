@@ -392,7 +392,8 @@ func prepare_connected_world(root_map_id: String, max_maps: int = 96, preload_de
 		if map_id == root_map_id and not bool(prepared.get("ok", false)):
 			return prepared
 		var server_map: Dictionary = _server_map_for_local_map(map_id, server_maps)
-		var region: Dictionary = {"map_id": map_id, "origin": origin, "width": width, "height": height, "background_texture": prepared.get("background_texture"), "foreground_texture": prepared.get("foreground_texture"), "objects": prepared.get("objects", []), "warps": prepared.get("warps", []), "connections": topology.get("connections", []), "animated_background_tiles": prepared.get("animated_background_tiles", []), "animated_foreground_tiles": prepared.get("animated_foreground_tiles", []), "border_texture": server_border_texture(map_id, server_map), "music_id": int(topology.get("music_id", 0)), "map_type": int(topology.get("map_type", 0)), "ready": bool(prepared.get("ok", false))}
+		var border_texture: Texture2D = server_border_texture(map_id, server_map) if bool(prepared.get("ok", false)) else null
+		var region: Dictionary = {"map_id": map_id, "origin": origin, "width": width, "height": height, "background_texture": prepared.get("background_texture"), "foreground_texture": prepared.get("foreground_texture"), "objects": prepared.get("objects", []), "warps": prepared.get("warps", []), "connections": topology.get("connections", []), "animated_background_tiles": prepared.get("animated_background_tiles", []), "animated_foreground_tiles": prepared.get("animated_foreground_tiles", []), "border_texture": border_texture, "music_id": int(topology.get("music_id", 0)), "map_type": int(topology.get("map_type", 0)), "ready": bool(prepared.get("ok", false))}
 		regions.append(region)
 		placed[map_id] = origin
 		for connection_value in topology.get("connections", []):

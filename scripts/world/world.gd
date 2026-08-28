@@ -20,6 +20,7 @@ var held_input_elapsed: float = 0.0
 var map_has_animation: bool = false
 var server_dialogue_active: bool = false
 var server_dialogue_sequence: int = 0
+var connected_world_generation: int = 0
 
 func _ready() -> void:
 	set_process_unhandled_input(true)
@@ -140,7 +141,9 @@ func _on_map_load(value: Dictionary) -> void:
 func _load_map_texture(map_id: String, expected_width: int = 0, expected_height: int = 0) -> bool:
 	if GameState.content == null or map_id.is_empty():
 		return false
-	var connected_world: Dictionary = GameState.content.prepare_connected_world(map_id, 96, 1, GameState.server_maps)
+	connected_world_generation += 1
+	var generation: int = connected_world_generation
+	var connected_world: Dictionary = GameState.content.prepare_connected_world(map_id, 96, 0, GameState.server_maps)
 	if not bool(connected_world.get("ok", false)):
 		status_label.text = "Map renderer: %s" % str(connected_world.get("error", "map rendering failed"))
 		return false
@@ -159,7 +162,34 @@ func _load_map_texture(map_id: String, expected_width: int = 0, expected_height:
 			break
 	map_view.set_world(connected_world, map_id)
 	audio.play_map_music(GameState.content, map_id)
+	call_deferred("_preload_connected_regions", connected_world, map_id, generation)
 	return true
+
+func _preload_connected_regions(world_value: Dictionary, root_map_id: String, generation: int) -> void:
+	var regions: Array = world_value.get("regions", [])
+	for region_value in regions:
+		if generation != connected_world_generation or not region_value is Dictionary:
+			return
+		var region: Dictionary = region_value
+		var region_id: String = str(region.get("map_id", ""))
+		if region_id.is_empty() or region_id == root_map_id or bool(region.get("ready", false)):
+			continue
+		await get_tree().process_frame
+		if generation != connected_world_generation:
+			return
+		var prepared: Dictionary = GameState.content.prepare_map(region_id, false)
+		if not bool(prepared.get("ok", false)):
+			continue
+		region["background_texture"] = prepared.get("background_texture")
+		region["foreground_texture"] = prepared.get("foreground_texture")
+		region["objects"] = prepared.get("objects", [])
+		region["warps"] = prepared.get("warps", [])
+		region["animated_background_tiles"] = prepared.get("animated_background_tiles", [])
+		region["animated_foreground_tiles"] = prepared.get("animated_foreground_tiles", [])
+		region["border_texture"] = GameState.content.server_border_texture(region_id, GameState.content._server_map_for_local_map(region_id, GameState.server_maps))
+		region["ready"] = true
+		if map_view != null:
+			map_view.queue_redraw()
 
 func _on_entity_update(value: Dictionary) -> void:
 	var player: Variant = value.get("player")
