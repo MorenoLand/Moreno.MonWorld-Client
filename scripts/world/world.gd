@@ -140,13 +140,10 @@ func _on_map_load(value: Dictionary) -> void:
 func _load_map_texture(map_id: String, expected_width: int = 0, expected_height: int = 0) -> bool:
 	if GameState.content == null or map_id.is_empty():
 		return false
+	if map_view != null and map_view.map_id == map_id and not map_view.regions.is_empty():
+		return true
 	connected_world_generation += 1
 	var generation: int = connected_world_generation
-	var connected_world: Dictionary = GameState.content.prepare_connected_world(map_id, 96, 0, GameState.server_maps)
-	if not bool(connected_world.get("ok", false)):
-		status_label.text = "Map renderer: %s" % str(connected_world.get("error", "map rendering failed"))
-		return false
-	var regions: Array = connected_world.get("regions", [])
 	var result: Dictionary = GameState.content.prepare_map(map_id, false)
 	if not bool(result.get("ok", false)):
 		status_label.text = "Map renderer: %s" % str(result.get("error", "map rendering failed"))
@@ -155,14 +152,28 @@ func _load_map_texture(map_id: String, expected_width: int = 0, expected_height:
 		status_label.text = "The local ROM map dimensions do not match the OpenMMO map"
 		return false
 	map_has_animation = false
+	map_has_animation = not (result.get("animated_background_tiles", []) as Array).is_empty() or not (result.get("animated_foreground_tiles", []) as Array).is_empty()
+	var root_region: Dictionary = {"map_id": map_id, "origin": Vector2i.ZERO, "width": int(result.get("width", 0)), "height": int(result.get("height", 0)), "background_texture": result.get("background_texture"), "foreground_texture": result.get("foreground_texture"), "objects": result.get("objects", []), "warps": result.get("warps", []), "connections": result.get("connections", []), "animated_background_tiles": result.get("animated_background_tiles", []), "animated_foreground_tiles": result.get("animated_foreground_tiles", []), "border_texture": GameState.content.server_border_texture(map_id, GameState.content._server_map_for_local_map(map_id, GameState.server_maps)), "music_id": int(result.get("music_id", 0)), "map_type": int(result.get("map_type", 0)), "ready": true}
+	var root_world: Dictionary = {"ok": true, "root_map_id": map_id, "regions": [root_region], "map_origins": {map_id: Vector2i.ZERO}}
+	map_view.set_world(root_world, map_id)
+	audio.play_map_music(GameState.content, map_id)
+	call_deferred("_expand_connected_world", map_id, generation)
+	return true
+
+func _expand_connected_world(root_map_id: String, generation: int) -> void:
+	await get_tree().process_frame
+	if generation != connected_world_generation or map_view == null or map_view.map_id != root_map_id:
+		return
+	var connected_world: Dictionary = GameState.content.prepare_connected_world(root_map_id, 96, 0, GameState.server_maps)
+	if not bool(connected_world.get("ok", false)) or generation != connected_world_generation:
+		return
+	var regions: Array = connected_world.get("regions", [])
 	for region_value in regions:
 		if region_value is Dictionary and (not (region_value.get("animated_background_tiles", []) as Array).is_empty() or not (region_value.get("animated_foreground_tiles", []) as Array).is_empty()):
 			map_has_animation = true
 			break
-	map_view.set_world(connected_world, map_id)
-	audio.play_map_music(GameState.content, map_id)
-	call_deferred("_preload_connected_regions", connected_world, map_id, generation)
-	return true
+	map_view.set_world(connected_world, root_map_id)
+	call_deferred("_preload_connected_regions", connected_world, root_map_id, generation)
 
 func _preload_connected_regions(world_value: Dictionary, root_map_id: String, generation: int) -> void:
 	var regions: Array = world_value.get("regions", [])
@@ -357,6 +368,16 @@ func _unhandled_input(event: InputEvent) -> void:
 	if key_event.keycode == KEY_F3 and key_event.pressed and not key_event.echo:
 		if hud != null:
 			hud.toggle_stats()
+		get_viewport().set_input_as_handled()
+		return
+	if key_event.keycode == KEY_B and key_event.pressed and not key_event.echo:
+		if hud != null:
+			hud.toggle_bag()
+		get_viewport().set_input_as_handled()
+		return
+	if key_event.keycode == KEY_M and key_event.pressed and not key_event.echo:
+		if hud != null:
+			hud.toggle_menu()
 		get_viewport().set_input_as_handled()
 		return
 	if key_event.keycode == KEY_F and key_event.pressed and not key_event.echo:

@@ -305,11 +305,6 @@ func render_map(map_id: String, animation_tick: int = 0) -> Dictionary:
 	var foreground_texture_cache: Dictionary = cached_map.get("foreground_textures", {})
 	var animated_tiles: Array = cached_map.get("animated_tiles", [])
 	if animated_tiles.is_empty() or animation_phase == 0:
-		if animation_phase == 0:
-			texture_cache.clear()
-			image_cache.clear()
-			background_texture_cache.clear()
-			foreground_texture_cache.clear()
 		var prepared: Dictionary = prepare_map(map_id)
 		if not bool(prepared.get("ok", false)):
 			return prepared
