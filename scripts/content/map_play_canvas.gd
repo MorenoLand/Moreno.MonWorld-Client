@@ -63,19 +63,19 @@ func _ready() -> void:
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	clip_contents = true
 	focus_mode = Control.FOCUS_ALL
-    resized.connect(_on_resized)
-    queue_redraw()
+	resized.connect(_on_resized)
+	queue_redraw()
 
 func _on_resized() -> void:
-    if resize_redraw_pending:
-        return
-    resize_redraw_pending = true
-    call_deferred("_finish_resize")
+	if resize_redraw_pending:
+		return
+	resize_redraw_pending = true
+	call_deferred("_finish_resize")
 
 func _finish_resize() -> void:
-    resize_redraw_pending = false
-    if is_inside_tree():
-        queue_redraw()
+	resize_redraw_pending = false
+	if is_inside_tree():
+		queue_redraw()
 
 func set_content(value) -> void:
 	content = value
