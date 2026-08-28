@@ -67,10 +67,10 @@ func _build_ui() -> void:
 	info_box.add_child(time_label)
 	party_box = VBoxContainer.new()
 	party_box.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	party_box.offset_left = -136.0
+	party_box.offset_left = -88.0
 	party_box.offset_top = 100.0
 	party_box.offset_right = -16.0
-	party_box.custom_minimum_size = Vector2(112.0, 0.0)
+	party_box.custom_minimum_size = Vector2(72.0, 0.0)
 	party_box.add_theme_constant_override("separation", 5)
 	party_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(party_box)
@@ -81,12 +81,12 @@ func _build_ui() -> void:
 	party_box.add_child(party_title)
 	for index in range(PARTY_COUNT):
 		var slot: PanelContainer = PanelContainer.new()
-		slot.custom_minimum_size = Vector2(112.0, 44.0)
+		slot.custom_minimum_size = Vector2(72.0, 52.0)
 		slot.add_theme_stylebox_override("panel", _panel_style(Color("10151eb8"), Color("5f7185")))
 		var label: Label = Label.new()
 		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		label.add_theme_font_size_override("font_size", 12)
+		label.add_theme_font_size_override("font_size", 10)
 		slot.add_child(label)
 		party_labels.append(label)
 		party_box.add_child(slot)

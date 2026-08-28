@@ -52,10 +52,10 @@ func _build_ui() -> void:
 	map_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	map_view.set_content(GameState.content)
 	map_view.set_authoritative_state(true)
-	map_view.set_input_enabled(true)
 	map_view.interaction_requested.connect(_on_interaction_requested)
 	map_view.sound_requested.connect(_on_sound_requested)
 	add_child(map_view)
+	map_view.set_input_enabled(true)
 	audio = AUDIO_SCRIPT.new()
 	add_child(audio)
 	hud = HUD_SCRIPT.new()
@@ -161,19 +161,24 @@ func _load_map_texture(map_id: String, expected_width: int = 0, expected_height:
 	return true
 
 func _expand_connected_world(root_map_id: String, generation: int) -> void:
-	await get_tree().process_frame
-	if generation != connected_world_generation or map_view == null or map_view.map_id != root_map_id:
-		return
-	var connected_world: Dictionary = GameState.content.prepare_connected_world(root_map_id, 96, 0, GameState.server_maps)
-	if not bool(connected_world.get("ok", false)) or generation != connected_world_generation:
-		return
-	var regions: Array = connected_world.get("regions", [])
-	for region_value in regions:
-		if region_value is Dictionary and (not (region_value.get("animated_background_tiles", []) as Array).is_empty() or not (region_value.get("animated_foreground_tiles", []) as Array).is_empty()):
-			map_has_animation = true
-			break
-	map_view.set_world(connected_world, root_map_id)
-	call_deferred("_preload_connected_regions", connected_world, root_map_id, generation)
+	var map_limit: int = 8
+	while map_limit <= 96:
+		await get_tree().process_frame
+		if generation != connected_world_generation or map_view == null or map_view.map_id != root_map_id:
+			return
+		var connected_world: Dictionary = GameState.content.prepare_connected_world(root_map_id, map_limit, 0, GameState.server_maps)
+		if not bool(connected_world.get("ok", false)) or generation != connected_world_generation:
+			return
+		var regions: Array = connected_world.get("regions", [])
+		for region_value in regions:
+			if region_value is Dictionary and (not (region_value.get("animated_background_tiles", []) as Array).is_empty() or not (region_value.get("animated_foreground_tiles", []) as Array).is_empty()):
+				map_has_animation = true
+				break
+		map_view.set_world(connected_world, root_map_id)
+		if map_limit >= 96:
+			call_deferred("_preload_connected_regions", connected_world, root_map_id, generation)
+			return
+		map_limit += 8
 
 func _preload_connected_regions(world_value: Dictionary, root_map_id: String, generation: int) -> void:
 	var regions: Array = world_value.get("regions", [])
@@ -284,7 +289,13 @@ func _sync_map_entities() -> void:
 	map_view.set_world_entities(players, selected_character_id)
 
 func _process(delta: float) -> void:
-	pass
+	if held_input.is_empty() or map_view == null or (dialogue_overlay != null and dialogue_overlay.is_open()) or (chat_box != null and chat_box.input_focused()):
+		return
+	held_input_elapsed += delta
+	if held_input_elapsed < 0.1:
+		return
+	held_input_elapsed = 0.0
+	map_view.request_move(held_input)
 
 func _on_chat(value: Dictionary) -> void:
 	if chat_box != null:
