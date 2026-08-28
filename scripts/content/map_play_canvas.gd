@@ -10,6 +10,7 @@ const TILE_PIXELS: float = 16.0
 const CAMERA_MAX_CELLS_X: int = 30
 const CAMERA_MAX_CELLS_Y: int = 20
 const MAX_TILE_SCALE: float = 4.0
+const REFERENCE_VIEWPORT_SIZE: Vector2 = Vector2(1280.0, 720.0)
 const NORMAL_STEP_DURATION: float = 0.20
 const DOOR_ANIMATION_DURATION: float = 16.0 / 60.0
 const DOOR_FRAME_COUNT: int = 4
@@ -52,6 +53,7 @@ func _ready() -> void:
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	clip_contents = true
 	focus_mode = Control.FOCUS_ALL
+	resized.connect(queue_redraw)
 	queue_redraw()
 
 func set_content(value: MonWorldContent) -> void:
@@ -408,11 +410,16 @@ func _update_player_texture() -> void:
 	var sprite: Dictionary = content.render_facing_object_sprite(19, player_facing, movement_active, frame_step)
 	player_texture = sprite.get("texture") as Texture2D
 
+func _tile_scale() -> float:
+	var maximum_camera_size: Vector2 = Vector2(minf(map_pixel_size.x, CAMERA_MAX_CELLS_X * TILE_PIXELS), minf(map_pixel_size.y, CAMERA_MAX_CELLS_Y * TILE_PIXELS))
+	var reference_scale: float = minf(maxf(ceilf(maxf(REFERENCE_VIEWPORT_SIZE.x / maximum_camera_size.x, REFERENCE_VIEWPORT_SIZE.y / maximum_camera_size.y)), 1.0), MAX_TILE_SCALE)
+	var viewport_scale: float = maxf(ceilf(maxf(size.x / maximum_camera_size.x, size.y / maximum_camera_size.y)), 1.0)
+	return minf(reference_scale, viewport_scale)
+
 func dialogue_anchor_screen(dialogue: Dictionary) -> Vector2:
 	if map_pixel_size.x <= 0.0 or map_pixel_size.y <= 0.0:
 		return size * 0.5
-	var maximum_camera_size: Vector2 = Vector2(minf(map_pixel_size.x, CAMERA_MAX_CELLS_X * TILE_PIXELS), minf(map_pixel_size.y, CAMERA_MAX_CELLS_Y * TILE_PIXELS))
-	var tile_scale: float = minf(maxf(ceilf(maxf(size.x / maximum_camera_size.x, size.y / maximum_camera_size.y)), 1.0), MAX_TILE_SCALE)
+	var tile_scale: float = _tile_scale()
 	var camera_world_size: Vector2 = Vector2(minf(size.x / tile_scale, map_pixel_size.x), minf(size.y / tile_scale, map_pixel_size.y))
 	var world_player: Vector2 = movement_start.lerp(movement_target, clampf(movement_elapsed / movement_duration, 0.0, 1.0)) if movement_active else Vector2(player_position)
 	var camera_center: Vector2 = (world_player + Vector2(0.5, 0.5)) * TILE_PIXELS
@@ -481,8 +488,7 @@ func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO, size), Color.BLACK, true)
 	if map_texture == null or map_pixel_size.x <= 0.0 or map_pixel_size.y <= 0.0 or not has_spawn:
 		return
-	var maximum_camera_size: Vector2 = Vector2(minf(map_pixel_size.x, CAMERA_MAX_CELLS_X * TILE_PIXELS), minf(map_pixel_size.y, CAMERA_MAX_CELLS_Y * TILE_PIXELS))
-	var tile_scale: float = minf(maxf(ceilf(maxf(size.x / maximum_camera_size.x, size.y / maximum_camera_size.y)), 1.0), MAX_TILE_SCALE)
+	var tile_scale: float = _tile_scale()
 	var camera_world_size: Vector2 = Vector2(minf(size.x / tile_scale, map_pixel_size.x), minf(size.y / tile_scale, map_pixel_size.y))
 	var world_player: Vector2 = movement_start.lerp(movement_target, clampf(movement_elapsed / movement_duration, 0.0, 1.0)) if movement_active else Vector2(player_position)
 	if movement_active and movement_jump:
