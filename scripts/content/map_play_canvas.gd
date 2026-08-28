@@ -91,6 +91,21 @@ func set_animation_tick(value: int) -> void:
 	_update_player_texture()
 	queue_redraw()
 
+func request_move(direction_name: String) -> bool:
+	var direction: int = 0
+	match direction_name.to_lower():
+		"down":
+			direction = 1
+		"up":
+			direction = 2
+		"left":
+			direction = 3
+		"right":
+			direction = 4
+	if direction == 0:
+		return false
+	return _request_move(direction)
+
 func set_map(texture: Texture2D, map_width: int, map_height: int, map_objects: Array, selected_map_id: String = "", map_foreground_texture: Texture2D = null) -> void:
 	var changed: bool = not selected_map_id.is_empty() and map_id != selected_map_id
 	if not selected_map_id.is_empty():
@@ -253,15 +268,17 @@ func _key_direction(event: InputEventKey) -> int:
 			return 4
 	return 0
 
-func _request_move(direction: int) -> void:
+func _request_move(direction: int) -> bool:
 	if content == null or map_id.is_empty() or not has_spawn:
-		return
+		return false
 	player_facing = direction
 	_update_player_texture()
 	queue_redraw()
 	var result: Dictionary = content.movement_result(map_id, player_position.x, player_position.y, direction, player_elevation, objects)
 	if not bool(result.get("ok", false)):
-		return
+		return false
+	if authoritative_state and not GameState.send_input(_direction_name(direction), player_position.x, player_position.y):
+		return false
 	pending_map_id = str(result.get("map_id", map_id))
 	pending_position = Vector2i(int(result.get("x", player_position.x)), int(result.get("y", player_position.y)))
 	pending_elevation = int(result.get("elevation", player_elevation))
@@ -278,6 +295,7 @@ func _request_move(direction: int) -> void:
 	movement_active = true
 	sound_requested.emit("door" if movement_door else "step")
 	queue_redraw()
+	return true
 
 func _process(delta: float) -> void:
 	if warp_cooldown > 0.0:
@@ -425,6 +443,18 @@ func _opposite_direction(direction: int) -> int:
 		4:
 			return 3
 	return 1
+
+func _direction_name(direction: int) -> String:
+	match direction:
+		1:
+			return "down"
+		2:
+			return "up"
+		3:
+			return "left"
+		4:
+			return "right"
+	return ""
 
 func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO, size), Color("080B10"), true)

@@ -256,6 +256,14 @@ func render_map(map_id: String, animation_tick: int = 0) -> Dictionary:
 	var image_cache: Dictionary = cached_map.get("images", {})
 	var background_texture_cache: Dictionary = cached_map.get("background_textures", {})
 	var foreground_texture_cache: Dictionary = cached_map.get("foreground_textures", {})
+	var animated_tiles: Array = cached_map.get("animated_tiles", [])
+	if animated_tiles.is_empty() or animation_phase == 0:
+		var prepared: Dictionary = prepare_map(map_id)
+		if not bool(prepared.get("ok", false)):
+			return prepared
+		prepared["image"] = cached_map.get("base_image") as Image
+		prepared["animation_phase"] = animation_phase
+		return prepared
 	var cache_key: String = str(animation_phase)
 	var texture: Texture2D = texture_cache.get(cache_key) as Texture2D
 	var image: Image = image_cache.get(cache_key) as Image
@@ -300,6 +308,10 @@ func prepare_map(map_id: String) -> Dictionary:
 		cached_map["world_background_texture"] = background_texture
 		cached_map["world_foreground_texture"] = foreground_texture
 	return {"ok": true, "texture": world_texture, "background_texture": background_texture, "foreground_texture": foreground_texture, "world_texture": world_texture, "width": int(cached_map.get("width", 0)), "height": int(cached_map.get("height", 0)), "header_offset": int(cached_map.get("header_offset", -1)), "layout_offset": int(cached_map.get("layout_offset", -1)), "objects": cached_map.get("objects", []), "warps": cached_map.get("warps", []), "connections": cached_map.get("connections", []), "map_cells": cached_map.get("map_cells", PackedInt32Array()), "music_id": int(cached_map.get("music_id", 0)), "map_type": int(cached_map.get("map_type", 0)), "animation_phase": 0}
+
+func has_animated_tiles(map_id: String) -> bool:
+	var cached_map: Dictionary = _get_or_build_map_cache(map_id)
+	return bool(cached_map.get("ok", false)) and not (cached_map.get("animated_tiles", []) as Array).is_empty()
 
 func _get_or_build_map_cache(map_id: String, map_value: Dictionary = {}) -> Dictionary:
 	var cached_map: Dictionary = map_cache.get(map_id, {})

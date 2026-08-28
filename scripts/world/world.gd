@@ -12,11 +12,12 @@ var selected_character_id := 0
 var map_view: MonWorldMapPlayCanvas
 var hud: MonWorldHud
 var dialogue_overlay: MonWorldDialogue
-var audio: MonWorldAudio
-var animation_tick: int = 0
-var animation_elapsed: float = 0.0
+	var audio: MonWorldAudio
+	var animation_tick: int = 0
+	var animation_elapsed: float = 0.0
 var held_input: String = ""
 var held_input_elapsed: float = 0.0
+var map_has_animation: bool = false
 
 func _ready() -> void:
 	set_process_unhandled_input(true)
@@ -136,8 +137,9 @@ func _load_map_texture(map_id: String, expected_width: int = 0, expected_height:
 	if expected_width > 0 and expected_height > 0 and (int(result.get("width", 0)) != expected_width or int(result.get("height", 0)) != expected_height):
 		status_label.text = "The local ROM map dimensions do not match the OpenMMO map"
 		return false
-	var background_texture: Texture2D = result.get("texture", result.get("background_texture")) as Texture2D
+	var background_texture: Texture2D = result.get("background_texture") as Texture2D
 	var foreground_texture: Texture2D = result.get("foreground_texture") as Texture2D
+	map_has_animation = GameState.content.has_animated_tiles(map_id)
 	map_view.set_map(background_texture, int(result.get("width", 0)), int(result.get("height", 0)), result.get("objects", []), map_id, foreground_texture)
 	audio.play_map_music(GameState.content, map_id)
 	return true
@@ -146,7 +148,13 @@ func _on_entity_update(value: Dictionary) -> void:
 	var player: Variant = value.get("player")
 	if player is Dictionary:
 		var entity: Dictionary = player
-		entities[str(entity.get("entity_id", entity.get("character_id", entity.get("user_id", 0))))] = entity
+		var key := str(entity.get("entity_id", entity.get("character_id", entity.get("user_id", 0))))
+		var merged: Dictionary = {}
+		var existing: Variant = entities.get(key, {})
+		if existing is Dictionary:
+			merged = (existing as Dictionary).duplicate(true)
+		merged.merge(entity, true)
+		entities[key] = merged
 		_sync_map_entities()
 
 func _on_render_screen(visible: bool) -> void:
@@ -173,7 +181,9 @@ func _process(delta: float) -> void:
 		held_input_elapsed += delta
 		if held_input_elapsed >= MonWorldMapPlayCanvas.NORMAL_STEP_DURATION:
 			held_input_elapsed = 0.0
-			GameState.send_input(held_input)
+			map_view.request_move(held_input)
+	if not map_has_animation:
+		return
 	animation_elapsed += delta
 	if animation_elapsed < 0.125:
 		return
@@ -242,4 +252,4 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	held_input = direction
 	held_input_elapsed = 0.0
-	GameState.send_input(direction)
+	map_view.request_move(direction)

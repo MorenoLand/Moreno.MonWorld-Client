@@ -154,8 +154,13 @@ func complete_map_load(load_key: String) -> bool:
 	awaiting_local_entity = true
 	return true
 
-func send_input(_direction: String) -> bool:
-	return false
+func send_input(direction: String, source_x: int = -1, source_y: int = -1, running: bool = false) -> bool:
+	var x: int = source_x if source_x >= 0 else int(current_character.get("x", -1))
+	var y: int = source_y if source_y >= 0 else int(current_character.get("y", -1))
+	if x < 0 or y < 0:
+		return false
+	var payload: PackedByteArray = GAME_PROTOCOL_SCRIPT.encode_movement(x, y, direction, running)
+	return not payload.is_empty() and game_session.send_packet(GAME_PROTOCOL_SCRIPT.MOVEMENT, payload)
 
 func send_chat(_text: String) -> bool:
 	return false
@@ -283,12 +288,41 @@ func _on_game_packet(opcode: int, payload: PackedByteArray) -> void:
 			current_character["bank_id"] = int(player.get("bank_id", 0))
 			current_character["map_id"] = int(player.get("wire_map_id", 0))
 		entity_update_received.emit({"player": player, "local": is_local})
+	elif opcode == GAME_PROTOCOL_SCRIPT.ENTITY_MOVE_GBA:
+		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_gba_entity_move(payload)
+		if response.ok:
+			_emit_entity_update(response.entity)
+		else:
+			connection_error.emit(str(response.get("error", "OpenMMO GBA movement packet is malformed")))
+	elif opcode == GAME_PROTOCOL_SCRIPT.ENTITY_MOVE_NDS:
+		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_entity_move(payload)
+		if response.ok:
+			_emit_entity_update(response.entity)
+		else:
+			connection_error.emit(str(response.get("error", "OpenMMO movement packet is malformed")))
+	elif opcode == GAME_PROTOCOL_SCRIPT.ENTITY_FACE_TURN:
+		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_entity_face_turn(payload)
+		if response.ok:
+			_emit_entity_update(response.entity)
+		else:
+			connection_error.emit(str(response.get("error", "OpenMMO face-turn packet is malformed")))
 	elif opcode == GAME_PROTOCOL_SCRIPT.RENDER_SCREEN:
 		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_render_screen(payload)
 		if response.ok:
 			render_screen_changed.emit(bool(response.visible))
 		else:
 			connection_error.emit(str(response.error))
+
+func _emit_entity_update(entity: Dictionary) -> void:
+	var entity_id: int = int(entity.get("entity_id", 0))
+	entity["character_id"] = entity_id
+	if content != null and entity.has("bank_id") and entity.has("wire_map_id"):
+		entity["map_id"] = content.map_id_for_location(int(entity.get("bank_id", -1)), int(entity.get("wire_map_id", -1)))
+	if entity_id == int(current_character.get("id", 0)):
+		for key in ["x", "y", "facing", "bank_id", "wire_map_id", "map_id"]:
+			if entity.has(key):
+				current_character[key] = entity[key]
+	entity_update_received.emit({"player": entity, "local": entity_id == int(current_character.get("id", 0))})
 
 func _on_login_failed(message: String) -> void:
 	if login_flow != "idle":

@@ -5,8 +5,13 @@ const JOIN: int = 0x01
 const REQUEST_CHARACTERS: int = 0x02
 const SELECT_CHARACTER: int = 0x04
 const REQUEST_PLAYER: int = 0x05
+const MOVEMENT: int = 0x06
+const FACE_DIRECTION: int = 0x07
 const LOAD_MAP: int = 0x10
 const RENDER_SCREEN: int = 0xB4
+const ENTITY_MOVE_GBA: int = 0xEA
+const ENTITY_MOVE_NDS: int = 0xE4
+const ENTITY_FACE_TURN: int = 0x07
 const SPECIAL_MAP_ROM_TYPES: Array[int] = [2, 3, 4, 10]
 
 static func encode_join(user_id: int, session_token: PackedByteArray, hardware_id: PackedByteArray) -> PackedByteArray:
@@ -61,6 +66,20 @@ static func encode_select_character(character_id: int, character_id_hash: int = 
 
 static func encode_request_player() -> PackedByteArray:
 	return PackedByteArray()
+
+static func encode_movement(x: int, y: int, direction: String, running: bool = false) -> PackedByteArray:
+	var direction_ordinal: int = _direction_ordinal(direction)
+	if direction_ordinal < 0:
+		return PackedByteArray()
+	var output: PackedByteArray = PackedByteArray()
+	OpenMMOCodec.append_s16_le(output, x)
+	OpenMMOCodec.append_s16_le(output, y)
+	OpenMMOCodec.append_u8(output, direction_ordinal | (0x80 if running else 0))
+	return output
+
+static func encode_face_direction(direction: String) -> PackedByteArray:
+	var direction_ordinal: int = _direction_ordinal(direction)
+	return PackedByteArray() if direction_ordinal < 0 else PackedByteArray([direction_ordinal])
 
 static func decode_load_map(payload: PackedByteArray) -> Dictionary:
 	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
@@ -158,6 +177,36 @@ static func decode_load_entity(payload: PackedByteArray) -> Dictionary:
 		reader.read_utf16_le_null()
 	return {"ok": not reader.failed and reader.remaining() == 0, "error": "OpenMMO entity packet is malformed" if reader.failed or reader.remaining() != 0 else "", "entity": entity}
 
+static func decode_gba_entity_move(payload: PackedByteArray) -> Dictionary:
+	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
+	var entity: Dictionary = {"entity_id": reader.read_s64_le(), "bank_id": reader.read_u8(), "wire_map_id": reader.read_u8(), "x": reader.read_u8(), "y": reader.read_u8(), "movement_mode": reader.read_u8()}
+	var direction_ordinal: int = reader.read_u8()
+	if direction_ordinal > 3:
+		reader.failed = true
+	else:
+		entity["facing"] = direction_ordinal + 1
+	return {"ok": not reader.failed and reader.remaining() == 0, "error": "OpenMMO GBA movement packet is malformed" if reader.failed or reader.remaining() != 0 else "", "entity": entity}
+
+static func decode_entity_move(payload: PackedByteArray) -> Dictionary:
+	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
+	var entity: Dictionary = {"entity_id": reader.read_s64_le(), "x": reader.read_s16_le(), "y": reader.read_s16_le()}
+	var direction_ordinal: int = reader.read_u8()
+	if direction_ordinal > 3:
+		reader.failed = true
+	else:
+		entity["facing"] = direction_ordinal + 1
+	return {"ok": not reader.failed and reader.remaining() == 0, "error": "OpenMMO movement packet is malformed" if reader.failed or reader.remaining() != 0 else "", "entity": entity}
+
+static func decode_entity_face_turn(payload: PackedByteArray) -> Dictionary:
+	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
+	var entity: Dictionary = {"entity_id": reader.read_s64_le()}
+	var direction_ordinal: int = reader.read_u8()
+	if direction_ordinal > 3:
+		reader.failed = true
+	else:
+		entity["facing"] = direction_ordinal + 1
+	return {"ok": not reader.failed and reader.remaining() == 0, "error": "OpenMMO face-turn packet is malformed" if reader.failed or reader.remaining() != 0 else "", "entity": entity}
+
 static func decode_render_screen(payload: PackedByteArray) -> Dictionary:
 	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
 	var visible: bool = reader.read_bool()
@@ -165,6 +214,18 @@ static func decode_render_screen(payload: PackedByteArray) -> Dictionary:
 
 static func map_key(rom_type: int, region_id: int, bank_id: int, map_id: int) -> String:
 	return "%d:%d:%d:%d" % [rom_type, region_id, bank_id, map_id]
+
+static func _direction_ordinal(direction: String) -> int:
+	match direction.to_lower():
+		"down":
+			return 0
+		"up":
+			return 1
+		"left":
+			return 2
+		"right":
+			return 3
+	return -1
 
 static func decode_characters(payload: PackedByteArray) -> Dictionary:
 	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
