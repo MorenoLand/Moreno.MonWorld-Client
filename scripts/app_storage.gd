@@ -1,14 +1,14 @@
 class_name MonWorldStorage
 extends RefCounted
 
-const APP_DIRECTORY: String = "MonWorld"
+const APP_DIRECTORY: String = "OpenMMOGo"
 const SETTINGS_FILE: String = "settings.json"
 const STRINGS_DIRECTORY: String = "Strings"
 const AUDIO_DIRECTORY: String = "Audio"
 
 static func root_path() -> String:
 	if OS.has_feature("web"):
-		return "user://monworld"
+		return "user://openmmogo"
 	var appdata: String = OS.get_environment("APPDATA")
 	if not appdata.is_empty():
 		return appdata.path_join(APP_DIRECTORY)
@@ -87,4 +87,4 @@ static func read_strings(content_id: String, language: String = "en") -> Diction
 	return parsed if parsed is Dictionary else {}
 
 static func session_rom_path() -> String:
-	return "user://monworld-session.gba" if OS.has_feature("web") else root_path().path_join("session.gba")
+	return "user://openmmogo-session.gba" if OS.has_feature("web") else root_path().path_join("session.gba")

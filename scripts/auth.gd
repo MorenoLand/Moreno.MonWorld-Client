@@ -47,7 +47,7 @@ func _build_ui() -> void:
 	box.add_theme_constant_override("margin_bottom", 24)
 	panel.add_child(box)
 	var title := Label.new()
-	title.text = "Multiplayer world client"
+	title.text = "OpenMMOGo"
 	title.add_theme_font_size_override("font_size", 28)
 	box.add_child(title)
 	server_input = LineEdit.new()
