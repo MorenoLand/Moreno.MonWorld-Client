@@ -2,16 +2,22 @@ extends Control
 
 signal battle_requested
 
+const MAP_VIEW_SCRIPT = preload("res://scripts/content/map_play_canvas.gd")
+const HUD_SCRIPT = preload("res://scripts/world/hud.gd")
+const DIALOGUE_SCRIPT = preload("res://scripts/dialogue.gd")
+const AUDIO_SCRIPT = preload("res://scripts/world/audio.gd")
+const CHAT_SCRIPT = preload("res://scripts/world/chat.gd")
+
 var title_label: Label
 var status_label: Label
-var chat_box: OpenMMOChat
+var chat_box
 var snapshot: Dictionary = {}
 var entities: Dictionary = {}
 var selected_character_id := 0
-var map_view: OpenMMOMapPlayCanvas
-var hud: OpenMMOHud
-var dialogue_overlay: OpenMMODialogue
-var audio: OpenMMOAudio
+var map_view
+var hud
+var dialogue_overlay
+var audio
 var transition_overlay: ColorRect
 var transition_tween: Tween
 var transition_reveal_pending: bool = false
@@ -42,7 +48,7 @@ func _ready() -> void:
 	queue_redraw()
 
 func _build_ui() -> void:
-	map_view = OpenMMOMapPlayCanvas.new()
+	map_view = MAP_VIEW_SCRIPT.new()
 	map_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	map_view.set_content(GameState.content)
 	map_view.set_authoritative_state(true)
@@ -50,15 +56,15 @@ func _build_ui() -> void:
 	map_view.interaction_requested.connect(_on_interaction_requested)
 	map_view.sound_requested.connect(_on_sound_requested)
 	add_child(map_view)
-	audio = OpenMMOAudio.new()
+	audio = AUDIO_SCRIPT.new()
 	add_child(audio)
-	hud = OpenMMOHud.new()
+	hud = HUD_SCRIPT.new()
 	hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(hud)
-	chat_box = OpenMMOChat.new()
+	chat_box = CHAT_SCRIPT.new()
 	chat_box.message_submitted.connect(_send_chat)
 	add_child(chat_box)
-	dialogue_overlay = OpenMMODialogue.new()
+	dialogue_overlay = DIALOGUE_SCRIPT.new()
 	dialogue_overlay.action_requested.connect(_on_dialogue_action)
 	add_child(dialogue_overlay)
 	title_label = Label.new()
