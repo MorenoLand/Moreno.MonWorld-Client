@@ -411,7 +411,7 @@ func _build_map_cache(map_id: String, map_value: Dictionary) -> Dictionary:
 				tileset = secondary
 				metatile_index = metatile_id - primary_metatile_count
 			_draw_metatile(image, map_x * 16, map_y * 16, tileset, metatile_index, primary, secondary, animated_tiles)
-		_draw_metatile_layers(background_image, foreground_image, map_x * 16, map_y * 16, tileset, metatile_index, primary, secondary, animated_background_tiles, animated_foreground_tiles)
+			_draw_metatile_layers(background_image, foreground_image, map_x * 16, map_y * 16, tileset, metatile_index, primary, secondary, animated_background_tiles, animated_foreground_tiles)
 	var objects: Array = _read_map_objects(header_offset, map_id)
 	objects.append_array(_read_map_background_events(header_offset, map_id))
 	return {"ok": true, "base_image": image, "base_background_image": background_image, "base_foreground_image": foreground_image, "primary": primary, "secondary": secondary, "primary_tiles": primary.get("tiles", PackedByteArray()), "animated_tiles": animated_tiles, "animated_background_tiles": animated_background_tiles, "animated_foreground_tiles": animated_foreground_tiles, "map_cells": map_cells, "objects": objects, "warps": _read_map_warps(header_offset), "connections": _read_map_connections(header_offset), "textures": {}, "images": {}, "background_textures": {}, "foreground_textures": {}, "width": width, "height": height, "header_offset": header_offset, "layout_offset": layout_offset, "map_group": int(map_value.get("map_group", -1)), "map_index": int(map_value.get("map_index", -1)), "music_id": int(map_value.get("music_id", 0))}
