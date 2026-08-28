@@ -28,6 +28,7 @@ var world_bounds: Rect2 = Rect2()
 var player_position: Vector2i = Vector2i.ZERO
 var player_elevation: int = 3
 var player_texture: Texture2D
+var player_texture_key: String = ""
 var animation_tick: int = 0
 var animation_elapsed: float = 0.0
 var movement_active: bool = false
@@ -66,6 +67,7 @@ func _ready() -> void:
 func set_content(value: MonWorldContent) -> void:
 	content = value
 	player_texture = null
+	player_texture_key = ""
 	foreground_texture = null
 	if not map_id.is_empty():
 		_set_spawn()
@@ -615,8 +617,13 @@ func _update_player_texture() -> void:
 	var frame_step: int = 0
 	if movement_active and movement_duration > 0.0:
 		frame_step = int(floorf(clampf(movement_elapsed / movement_duration, 0.0, 0.999) * 4.0))
+	var movement_key: int = 1 if movement_active else 0
+	var texture_key: String = "%d:%d:%d" % [player_facing, movement_key, frame_step]
+	if player_texture != null and player_texture_key == texture_key:
+		return
 	var sprite: Dictionary = content.render_facing_object_sprite(19, player_facing, movement_active, frame_step)
 	player_texture = sprite.get("texture") as Texture2D
+	player_texture_key = texture_key if player_texture != null else ""
 
 func _tile_scale() -> float:
 	var maximum_camera_size: Vector2 = Vector2(CAMERA_MAX_CELLS_X * TILE_PIXELS, CAMERA_MAX_CELLS_Y * TILE_PIXELS)
