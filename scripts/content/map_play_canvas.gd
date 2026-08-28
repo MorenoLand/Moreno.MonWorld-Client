@@ -17,7 +17,7 @@ const ANIMATION_FRAME_INTERVAL: float = 0.125
 const DOOR_ANIMATION_DURATION: float = 16.0 / 60.0
 const DOOR_FRAME_COUNT: int = 4
 
-var content: OpenMMOContent
+var content
 var map_id: String = ""
 var map_texture: Texture2D
 var foreground_texture: Texture2D
@@ -77,7 +77,7 @@ func _finish_resize() -> void:
     if is_inside_tree():
         queue_redraw()
 
-func set_content(value: OpenMMOContent) -> void:
+func set_content(value) -> void:
 	content = value
 	player_texture = null
 	player_texture_key = ""

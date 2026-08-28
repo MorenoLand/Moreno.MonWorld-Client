@@ -1,7 +1,8 @@
 class_name OpenMMOAudio
 extends Node
 
-const MUSIC_SAMPLE_RATE: int = OpenMMORomAudio.SAMPLE_RATE
+const ROM_AUDIO_SCRIPT = preload("res://scripts/world/rom_audio.gd")
+const MUSIC_SAMPLE_RATE: int = ROM_AUDIO_SCRIPT.SAMPLE_RATE
 const MUSIC_BUFFER_LENGTH: float = 2.0
 const MUSIC_RENDER_CHUNK_FRAMES: int = 2048
 const WEB_RENDER_CHUNK_FRAMES: int = 512
@@ -10,7 +11,7 @@ const MUSIC_CACHE_LIMIT: int = 4
 const MUSIC_RENDER_WAIT_MSEC: int = 4
 var music_player: AudioStreamPlayer
 var sfx_player: AudioStreamPlayer
-var rom_audio: OpenMMORomAudio
+var rom_audio
 var current_music_key: String = ""
 var current_content_id: String = ""
 var music_render_thread: Thread
@@ -18,7 +19,7 @@ var music_render_mutex: Mutex = Mutex.new()
 var music_render_generation: int = 0
 var rendering_music_key: String = ""
 var requested_music_key: String = ""
-var requested_music_content: OpenMMOContent
+var requested_music_content
 var requested_music_id: int = -1
 var requested_music_generation: int = 0
 var rendered_chunks: Array = []
@@ -42,7 +43,7 @@ var music_cache_order: Array[String] = []
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
-	rom_audio = OpenMMORomAudio.new()
+	rom_audio = ROM_AUDIO_SCRIPT.new()
 	music_player = AudioStreamPlayer.new()
 	music_player.volume_db = -14.0
 	add_child(music_player)
@@ -59,7 +60,7 @@ func _exit_tree() -> void:
 	if music_render_thread != null and music_render_thread.is_started():
 		music_render_thread.wait_to_finish()
 
-func play_map_music(content: OpenMMOContent, map_id: String) -> void:
+func play_map_music(content, map_id: String) -> void:
 	if content == null or map_id.is_empty() or music_player == null:
 		return
 	var map: Dictionary = content.map_data(map_id)
@@ -140,7 +141,7 @@ func _start_music_render_if_idle() -> void:
 	if music_render_thread != null and music_render_thread.is_started():
 		return
 	var key: String = requested_music_key
-	var content: OpenMMOContent = requested_music_content
+	var content = requested_music_content
 	var song_id: int = requested_music_id
 	var generation: int = requested_music_generation
 	requested_music_key = ""
@@ -158,8 +159,8 @@ func _start_music_render_if_idle() -> void:
 		requested_music_generation = generation
 		_begin_requested_cooperative_render()
 
-func _render_music_worker(content: OpenMMOContent, song_id: int, key: String, generation: int) -> Dictionary:
-	var decoder: OpenMMORomAudio = OpenMMORomAudio.new()
+func _render_music_worker(content, song_id: int, key: String, generation: int) -> Dictionary:
+	var decoder = ROM_AUDIO_SCRIPT.new()
 	var prepared: Dictionary = decoder.prepare_song(content, song_id)
 	if prepared.is_empty():
 		music_render_mutex.lock()
@@ -219,7 +220,7 @@ func _begin_requested_cooperative_render() -> void:
 	if requested_music_key.is_empty() or requested_music_content == null or requested_music_id < 0:
 		return
 	var key: String = requested_music_key
-	var content: OpenMMOContent = requested_music_content
+	var content = requested_music_content
 	var song_id: int = requested_music_id
 	requested_music_key = ""
 	requested_music_content = null
