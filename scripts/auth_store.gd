@@ -7,13 +7,14 @@ static func load_saved() -> Dictionary:
 		return {}
 	var username: String = str(credentials.get("username", "")).strip_edges()
 	var password: String = str(credentials.get("password", ""))
-	if username.is_empty() or password.is_empty():
+	var token: String = str(credentials.get("token", "")).strip_edges()
+	if username.is_empty() or (password.is_empty() and token.is_empty()):
 		return {}
-	return {"username": username, "password": password}
+	return {"username": username, "password": password, "token": token}
 
-static func save(username: String, password: String) -> void:
+static func save(username: String, password: String, token: String = "") -> void:
 	var settings: Dictionary = MonWorldStorage.read_json(MonWorldStorage.SETTINGS_FILE)
-	settings["credentials"] = {"username": username, "password": password}
+	settings["credentials"] = {"username": username, "password": password, "token": token}
 	MonWorldStorage.write_json(MonWorldStorage.SETTINGS_FILE, settings)
 
 static func clear() -> void:

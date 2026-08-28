@@ -149,19 +149,26 @@ func _handle_server_hello(frame: PackedByteArray) -> void:
 		_fail("OpenMMO ServerHello is malformed")
 		return
 	var root_public: PackedByteArray = _load_root_public_point()
+	var root_public_pem: String = FileAccess.get_file_as_string(root_public_key_path)
 	var raw_signature: PackedByteArray = _ecdsa_der_to_raw(signature)
-	if root_public.is_empty() or raw_signature.size() != 64:
+	if root_public.is_empty() or root_public_pem.strip_edges().is_empty() or raw_signature.size() != 64:
 		_fail("OpenMMO root public key or server signature is malformed")
 		return
 	pending_checksum_size = checksum_size
 	state = State.DERIVING_KEYS
 	derivation_thread = Thread.new()
-	var error: Error = derivation_thread.start(Callable(self, "_derive_handshake").bind(server_public, root_public, _sha256(server_public), raw_signature))
+	var error: Error = derivation_thread.start(Callable(self, "_derive_handshake").bind(server_public, root_public, _sha256(server_public), raw_signature, signature, root_public_pem))
 	if error != OK:
 		derivation_thread = null
 		_fail("OpenMMO P-256 worker could not start")
 
-func _derive_handshake(server_public: PackedByteArray, root_public: PackedByteArray, digest: PackedByteArray, signature: PackedByteArray) -> Dictionary:
+func _derive_handshake(server_public: PackedByteArray, root_public: PackedByteArray, digest: PackedByteArray, signature: PackedByteArray, signature_der: PackedByteArray, root_public_pem: String) -> Dictionary:
+	if not OS.has_feature("web"):
+		var native_key := CryptoKey.new()
+		if native_key.load_from_string(root_public_pem, true) == OK:
+			if not Crypto.new().verify(HashingContext.HASH_SHA256, digest, signature_der, native_key):
+				return {"ok": false, "error": "OpenMMO server signature is invalid"}
+			return P256_SCRIPT.new().generate_handshake(server_public)
 	return P256_SCRIPT.new().generate_verified_handshake(server_public, root_public, digest, signature)
 
 func _finish_key_derivation(result: Dictionary) -> void:

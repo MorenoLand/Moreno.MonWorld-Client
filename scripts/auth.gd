@@ -20,6 +20,9 @@ var settings_key_input: LineEdit
 var settings_key_button: Button
 var settings_status_label: Label
 var busy := false
+var saved_username: String = ""
+var saved_password: String = ""
+var saved_token: String = ""
 
 func _ready() -> void:
 	provider = MonWorldContentProvider.new()
@@ -290,6 +293,9 @@ func _load_saved_credentials() -> void:
 		return
 	username_input.text = str(saved.get("username", ""))
 	password_input.text = str(saved.get("password", ""))
+	saved_username = username_input.text
+	saved_password = password_input.text
+	saved_token = str(saved.get("token", ""))
 	remember_input.button_pressed = true
 
 func _initialize_content() -> void:
@@ -381,7 +387,8 @@ func _submit() -> void:
 		return
 	var username: String = username_input.text.strip_edges()
 	var password: String = password_input.text
-	if username.is_empty() or password.is_empty():
+	var token: String = saved_token if remember_input.button_pressed and username == saved_username and password == saved_password else ""
+	if username.is_empty() or (password.is_empty() and token.is_empty()):
 		_set_status("Username and password are required.", true)
 		return
 	if GameState.content == null:
@@ -395,12 +402,15 @@ func _submit() -> void:
 	busy = true
 	submit_button.disabled = true
 	_set_status("Authenticating…")
-	var result: Dictionary = await GameState.login(username, password, remember_input.button_pressed)
+	var result: Dictionary = await GameState.login(username, password, remember_input.button_pressed, token)
 	if not result.ok:
 		_finish_submit(str(result.error), true)
 		return
 	if remember_input.button_pressed:
-		MonWorldAuthStore.save(username, password)
+		MonWorldAuthStore.save(username, password, str(result.get("remember_token", "")))
+		saved_username = username
+		saved_password = password
+		saved_token = str(result.get("remember_token", ""))
 	else:
 		MonWorldAuthStore.clear()
 	_set_status("Opening game connection…")

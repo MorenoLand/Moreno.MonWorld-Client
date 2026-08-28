@@ -38,7 +38,7 @@ func _build_ui() -> void:
 	map_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	map_view.set_content(GameState.content)
 	map_view.set_authoritative_state(true)
-	map_view.set_input_enabled(false)
+	map_view.set_input_enabled(true)
 	map_view.interaction_requested.connect(_on_interaction_requested)
 	map_view.sound_requested.connect(_on_sound_requested)
 	add_child(map_view)
@@ -149,6 +149,12 @@ func _on_entity_update(value: Dictionary) -> void:
 	if player is Dictionary:
 		var entity: Dictionary = player
 		var key := str(entity.get("entity_id", entity.get("character_id", entity.get("user_id", 0))))
+		var is_local: bool = bool(value.get("local", false)) or int(entity.get("character_id", 0)) == selected_character_id
+		var incoming_map_id: String = str(entity.get("map_id", ""))
+		if is_local and not incoming_map_id.is_empty() and map_view != null and incoming_map_id != map_view.map_id:
+			if _load_map_texture(incoming_map_id):
+				snapshot["map_id"] = incoming_map_id
+				title_label.text = "Map: %s" % incoming_map_id
 		var merged: Dictionary = {}
 		var existing: Variant = entities.get(key, {})
 		if existing is Dictionary:
@@ -178,6 +184,8 @@ func _process(delta: float) -> void:
 	if map_view == null or snapshot.is_empty():
 		return
 	if not map_has_animation:
+		return
+	if map_view.movement_active:
 		return
 	animation_elapsed += delta
 	if animation_elapsed < 0.125:

@@ -95,12 +95,13 @@ func use_content(value: MonWorldContent) -> Dictionary:
 	content = value
 	return {"ok": true}
 
-func login(username: String, password: String, stay_logged_in: bool = false) -> Dictionary:
+func login(username: String, password: String, stay_logged_in: bool = false, saved_token: String = "") -> Dictionary:
 	if login_flow != "idle" or game_flow != "idle":
 		return {"ok": false, "error": "another connection is already in progress"}
 	if root_public_key_path.is_empty() or not FileAccess.file_exists(root_public_key_path):
 		return {"ok": false, "error": "The OpenMMO server key is unavailable; restore the bundled key or choose a custom key in Settings"}
-	user = {"username": username, "password": password, "stay_logged_in": stay_logged_in}
+	var token: String = saved_token.strip_edges()
+	user = {"username": username, "password": password, "stay_logged_in": stay_logged_in, "saved_key": token, "login_method": "token" if not token.is_empty() else "password"}
 	game_access.clear()
 	login_flow = "connecting"
 	flow_deadline_msec = Time.get_ticks_msec() + FLOW_TIMEOUT_MSEC
@@ -110,6 +111,8 @@ func login(username: String, password: String, stay_logged_in: bool = false) -> 
 		flow_deadline_msec = 0
 		return {"ok": false, "error": "could not connect to OpenMMO login server (%s)" % error_string(error)}
 	var result: Dictionary = await login_completed
+	if bool(result.get("ok", false)):
+		result["remember_token"] = str(user.get("saved_key", ""))
 	return result
 
 func connect_game() -> Dictionary:
@@ -178,7 +181,8 @@ func _on_login_established() -> void:
 	if login_flow != "connecting":
 		return
 	login_flow = "response"
-	var payload: PackedByteArray = LOGIN_PROTOCOL_SCRIPT.encode_password_login(str(user.get("username", "")), str(user.get("password", "")), bool(user.get("stay_logged_in", false)), hardware_id, _os_ordinal())
+	var saved_token: PackedByteArray = Marshalls.base64_to_raw(str(user.get("saved_key", "")))
+	var payload: PackedByteArray = LOGIN_PROTOCOL_SCRIPT.encode_token_login(str(user.get("username", "")), saved_token, hardware_id, _os_ordinal()) if user.get("login_method", "password") == "token" and not saved_token.is_empty() else LOGIN_PROTOCOL_SCRIPT.encode_password_login(str(user.get("username", "")), str(user.get("password", "")), bool(user.get("stay_logged_in", false)), hardware_id, _os_ordinal())
 	if payload.is_empty() or not login_session.send_packet(LOGIN_PROTOCOL_SCRIPT.LOGIN_REQUEST, payload):
 		_finish_login({"ok": false, "error": "OpenMMO login request could not be sent"})
 
@@ -186,6 +190,11 @@ func _on_login_packet(opcode: int, payload: PackedByteArray) -> void:
 	if login_flow == "response" and opcode == LOGIN_PROTOCOL_SCRIPT.LOGIN_RESPONSE:
 		var response: Dictionary = LOGIN_PROTOCOL_SCRIPT.decode_login_response(payload)
 		if not response.ok or not bool(response.get("authenticated", false)):
+			if int(response.get("state", -1)) == 30 and user.get("login_method", "password") == "token" and not str(user.get("password", "")).is_empty():
+				user["login_method"] = "password"
+				var password_payload: PackedByteArray = LOGIN_PROTOCOL_SCRIPT.encode_password_login(str(user.get("username", "")), str(user.get("password", "")), bool(user.get("stay_logged_in", false)), hardware_id, _os_ordinal())
+				if not password_payload.is_empty() and login_session.send_packet(LOGIN_PROTOCOL_SCRIPT.LOGIN_REQUEST, password_payload):
+					return
 			_finish_login({"ok": false, "error": str(response.get("message", "OpenMMO login failed"))})
 			return
 		login_flow = "server_list"

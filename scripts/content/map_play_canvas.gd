@@ -125,6 +125,15 @@ func set_map(texture: Texture2D, map_width: int, map_height: int, map_objects: A
 func set_player_state(x: int, y: int, elevation: int = 3, facing: int = 1) -> void:
 	var next_position: Vector2i = Vector2i(x, y)
 	if authoritative_state and has_spawn and next_position == pending_position and movement_active:
+		pending_elevation = elevation
+		return
+	if authoritative_state and has_spawn and next_position == player_position:
+		player_elevation = elevation
+		if not movement_active:
+			player_facing = facing
+		else:
+			pending_elevation = elevation
+		queue_redraw()
 		return
 	if authoritative_state and has_spawn and absi(next_position.x - player_position.x) + absi(next_position.y - player_position.y) == 1:
 		player_facing = _direction_between(player_position, next_position)
