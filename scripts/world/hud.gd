@@ -20,9 +20,9 @@ var stats_open: bool = true
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-    _build_ui()
-    _refresh()
-    _refresh_stats()
+	_build_ui()
+	_refresh()
+	_refresh_stats()
 
 func set_state(content, map_id: String, state: Dictionary = {}, party: Array = []) -> void:
 	current_content = content
@@ -59,8 +59,8 @@ func _build_ui() -> void:
 	party_box.offset_right = 64.0
 	party_box.add_theme_constant_override("separation", 5)
 	add_child(party_box)
-    for index in range(PARTY_COUNT):
-        var slot: PanelContainer = PanelContainer.new()
+	for index in range(PARTY_COUNT):
+		var slot: PanelContainer = PanelContainer.new()
 		slot.custom_minimum_size = Vector2(48.0, 48.0)
 		slot.add_theme_stylebox_override("panel", _panel_style(Color("10151eb8"), Color("5f7185")))
 		var label: Label = Label.new()
@@ -68,21 +68,21 @@ func _build_ui() -> void:
 		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		label.add_theme_font_size_override("font_size", 12)
 		slot.add_child(label)
-        party_labels.append(label)
-        party_box.add_child(slot)
-    stats_panel = PanelContainer.new()
-    stats_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-    stats_panel.offset_left = -196.0
-    stats_panel.offset_top = 16.0
-    stats_panel.offset_right = -16.0
-    stats_panel.offset_bottom = 88.0
-    stats_panel.add_theme_stylebox_override("panel", _panel_style(Color("10151ed9"), Color("5f7185")))
-    add_child(stats_panel)
-    stats_label = Label.new()
-    stats_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-    stats_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-    stats_label.add_theme_font_size_override("font_size", 13)
-    stats_panel.add_child(stats_label)
+		party_labels.append(label)
+		party_box.add_child(slot)
+	stats_panel = PanelContainer.new()
+	stats_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
+	stats_panel.offset_left = -196.0
+	stats_panel.offset_top = 16.0
+	stats_panel.offset_right = -16.0
+	stats_panel.offset_bottom = 88.0
+	stats_panel.add_theme_stylebox_override("panel", _panel_style(Color("10151ed9"), Color("5f7185")))
+	add_child(stats_panel)
+	stats_label = Label.new()
+	stats_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	stats_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	stats_label.add_theme_font_size_override("font_size", 13)
+	stats_panel.add_child(stats_label)
 
 func _panel_style(background: Color, border: Color) -> StyleBoxFlat:
 	var style: StyleBoxFlat = StyleBoxFlat.new()
@@ -97,26 +97,26 @@ func _panel_style(background: Color, border: Color) -> StyleBoxFlat:
 	return style
 
 func _process(delta: float) -> void:
-    clock_elapsed += delta
-    stats_elapsed += delta
-    if clock_elapsed >= 1.0:
-        clock_elapsed = 0.0
-        _refresh_time()
-    if stats_elapsed >= STATS_UPDATE_INTERVAL:
-        stats_elapsed = 0.0
-        _refresh_stats()
+	clock_elapsed += delta
+	stats_elapsed += delta
+	if clock_elapsed >= 1.0:
+		clock_elapsed = 0.0
+		_refresh_time()
+	if stats_elapsed >= STATS_UPDATE_INTERVAL:
+		stats_elapsed = 0.0
+		_refresh_stats()
 
 func toggle_stats() -> void:
-    stats_open = not stats_open
-    if stats_panel != null:
-        stats_panel.visible = stats_open
+	stats_open = not stats_open
+	if stats_panel != null:
+		stats_panel.visible = stats_open
 
 func _refresh_stats() -> void:
-    if stats_label == null:
-        return
-    var fps: int = Engine.get_frames_per_second()
-    var process_ms: float = float(Performance.get_monitor(Performance.TIME_PROCESS)) * 1000.0
-    stats_label.text = "FPS %d\nFrame %.1f ms" % [fps, process_ms]
+	if stats_label == null:
+		return
+	var fps: int = Engine.get_frames_per_second()
+	var process_ms: float = float(Performance.get_monitor(Performance.TIME_PROCESS)) * 1000.0
+	stats_label.text = "FPS %d\nFrame %.1f ms" % [fps, process_ms]
 
 func _refresh() -> void:
 	if location_label == null:
