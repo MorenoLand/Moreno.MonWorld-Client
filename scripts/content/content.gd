@@ -392,6 +392,8 @@ func _build_map_cache(map_id: String, map_value: Dictionary) -> Dictionary:
 		return {"ok": false, "error": "could not read the FireRed map tilesets"}
 	primary["is_secondary"] = false
 	secondary["is_secondary"] = true
+	primary["animation_enabled"] = _tileset_animation_enabled(primary)
+	secondary["animation_enabled"] = false
 	var image: Image = Image.create(width * 16, height * 16, false, Image.FORMAT_RGBA8)
 	image.fill(Color.BLACK)
 	var background_image: Image = Image.create(width * 16, height * 16, false, Image.FORMAT_RGBA8)
@@ -414,7 +416,7 @@ func _build_map_cache(map_id: String, map_value: Dictionary) -> Dictionary:
 			_draw_metatile_layers(background_image, foreground_image, map_x * 16, map_y * 16, tileset, metatile_index, primary, secondary, animated_background_tiles, animated_foreground_tiles)
 	var objects: Array = _read_map_objects(header_offset, map_id)
 	objects.append_array(_read_map_background_events(header_offset, map_id))
-	return {"ok": true, "base_image": image, "base_background_image": background_image, "base_foreground_image": foreground_image, "primary": primary, "secondary": secondary, "primary_tiles": primary.get("tiles", PackedByteArray()), "animated_tiles": animated_tiles, "animated_background_tiles": animated_background_tiles, "animated_foreground_tiles": animated_foreground_tiles, "map_cells": map_cells, "objects": objects, "warps": _read_map_warps(header_offset), "connections": _read_map_connections(header_offset), "textures": {}, "images": {}, "background_textures": {}, "foreground_textures": {}, "width": width, "height": height, "header_offset": header_offset, "layout_offset": layout_offset, "map_group": int(map_value.get("map_group", -1)), "map_index": int(map_value.get("map_index", -1)), "music_id": int(map_value.get("music_id", 0))}
+	return {"ok": true, "base_image": image, "base_background_image": background_image, "base_foreground_image": foreground_image, "primary": primary, "secondary": secondary, "primary_tiles": primary.get("tiles", PackedByteArray()), "primary_animation_enabled": bool(primary.get("animation_enabled", false)), "animated_tiles": animated_tiles, "animated_background_tiles": animated_background_tiles, "animated_foreground_tiles": animated_foreground_tiles, "map_cells": map_cells, "objects": objects, "warps": _read_map_warps(header_offset), "connections": _read_map_connections(header_offset), "textures": {}, "images": {}, "background_textures": {}, "foreground_textures": {}, "width": width, "height": height, "header_offset": header_offset, "layout_offset": layout_offset, "map_group": int(map_value.get("map_group", -1)), "map_index": int(map_value.get("map_index", -1)), "music_id": int(map_value.get("music_id", 0))}
 
 func map_cell(map_id: String, x: int, y: int) -> Dictionary:
 	var cached_map: Dictionary = _get_or_build_map_cache(map_id)
@@ -743,7 +745,7 @@ func _render_cached_map(cached_map: Dictionary, animation_phase: int) -> Image:
 	var image: Image = (cached_map.get("base_image") as Image).duplicate()
 	var primary: Dictionary = cached_map.get("primary", {})
 	var secondary: Dictionary = cached_map.get("secondary", {})
-	var animated_primary: PackedByteArray = _animated_primary_tiles(cached_map.get("primary_tiles", PackedByteArray()), animation_phase)
+	var animated_primary: PackedByteArray = _animated_primary_tiles(cached_map.get("primary_tiles", PackedByteArray()), animation_phase, bool(cached_map.get("primary_animation_enabled", false)))
 	var ignored_animated_tiles: Array = []
 	for tile_value in animated_tiles:
 		if tile_value is Dictionary:
@@ -755,7 +757,7 @@ func _render_cached_layer(cached_map: Dictionary, animation_phase: int, foregrou
 	var image: Image = (cached_map.get("base_foreground_image" if foreground else "base_background_image") as Image).duplicate()
 	var primary: Dictionary = cached_map.get("primary", {})
 	var secondary: Dictionary = cached_map.get("secondary", {})
-	var animated_primary: PackedByteArray = _animated_primary_tiles(cached_map.get("primary_tiles", PackedByteArray()), animation_phase) if animation_phase != 0 else PackedByteArray()
+	var animated_primary: PackedByteArray = _animated_primary_tiles(cached_map.get("primary_tiles", PackedByteArray()), animation_phase, bool(cached_map.get("primary_animation_enabled", false))) if animation_phase != 0 else PackedByteArray()
 	var animated_tiles: Array = cached_map.get("animated_foreground_tiles" if foreground else "animated_background_tiles", [])
 	var ignored_animated_tiles: Array = []
 	for tile_value in animated_tiles:
@@ -764,8 +766,10 @@ func _render_cached_layer(cached_map: Dictionary, animation_phase: int, foregrou
 			_draw_tile(image, int(tile.get("x", 0)), int(tile.get("y", 0)), int(tile.get("entry", 0)), primary, secondary, ignored_animated_tiles, animated_primary)
 	return image
 
-func _animated_primary_tiles(base_tiles: PackedByteArray, animation_phase: int) -> PackedByteArray:
+func _animated_primary_tiles(base_tiles: PackedByteArray, animation_phase: int, enabled: bool) -> PackedByteArray:
 	var tiles: PackedByteArray = base_tiles.duplicate()
+	if not enabled:
+		return tiles
 	var tile_bytes: int = _format_int("tile_bytes", TILE_BYTES)
 	var water_offsets: Array = _animation_offsets("water")
 	var sand_offsets: Array = _animation_offsets("sand")
@@ -1147,7 +1151,7 @@ func _read_tileset(offset: int, tile_count: int, metatile_count: int, palette_co
 		return {}
 	for attribute_index in range(metatile_count):
 		attributes.append(_read_u32(attributes_offset + attribute_index * 4))
-	return {"tiles": tiles, "metatiles": metatile_words, "palettes": palettes, "attributes": attributes, "tile_count": effective_tile_count}
+	return {"tiles": tiles, "metatiles": metatile_words, "palettes": palettes, "attributes": attributes, "tile_count": effective_tile_count, "animation_callback": _read_rom_pointer(offset + 16)}
 
 func _draw_metatile(image: Image, destination_x: int, destination_y: int, tileset: Dictionary, metatile_index: int, primary: Dictionary, secondary: Dictionary, animated_tiles: Array, primary_override: PackedByteArray = PackedByteArray()) -> void:
 	var metatiles: PackedInt32Array = tileset.get("metatiles", PackedInt32Array())
@@ -1227,8 +1231,16 @@ func _draw_tile(image: Image, destination_x: int, destination_y: int, tile_entry
 				continue
 			var color: Color = palette_values[palette_bank * 16 + color_index]
 			image.set_pixel(destination_x + pixel_x, destination_y + pixel_y, color)
-	if animated_tiles != null and _is_animated_tile(global_tile_index):
+	if animated_tiles != null and bool(primary.get("animation_enabled", false)) and _is_animated_tile(global_tile_index):
 		animated_tiles.append({"x": destination_x, "y": destination_y, "entry": tile_entry})
+
+func _tileset_animation_enabled(tileset: Dictionary) -> bool:
+	if bool(tileset.get("is_secondary", true)):
+		return false
+	if int(tileset.get("animation_callback", -1)) < 0:
+		return false
+	var animations: Dictionary = source_profile.get("animations", {})
+	return not animations.is_empty()
 
 func _is_animated_tile(tile_index: int) -> bool:
 	var water_start: int = _format_int("water_tile_index", 416)

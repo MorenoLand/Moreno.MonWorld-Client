@@ -126,6 +126,17 @@ func _init() -> void:
 		quit(1)
 		return
 	var house_result: Dictionary = content.render_map("pallet-players-house-1f")
+	if content.has_animated_tiles("pallet-players-house-1f"):
+		push_error("indoor Building tileset was incorrectly marked as animated")
+		quit(1)
+		return
+	var house_phase_result: Dictionary = content.render_map("pallet-players-house-1f", 7)
+	var house_image: Image = house_result.get("image") as Image
+	var house_phase_image: Image = house_phase_result.get("image") as Image
+	if house_image == null or house_phase_image == null or house_image.get_data() != house_phase_image.get_data():
+		push_error("indoor Building tileset changed across animation phases")
+		quit(1)
+		return
 	var mom_found: bool = false
 	for object_value in house_result.get("objects", []):
 		if object_value is Dictionary and int(object_value.get("graphics_id", -1)) == 88:
