@@ -131,6 +131,7 @@ func _on_map_load(value: Dictionary) -> void:
 		hud.set_state(GameState.content, map_id, snapshot, snapshot.party)
 	if not _load_map_texture(map_id, int(value.get("width", 0)), int(value.get("height", 0))):
 		return
+	map_view.set_input_enabled(true)
 	_sync_map_entities()
 	GameState.call_deferred("complete_map_load", str(value.get("key", "")))
 	transition_map_ready = true

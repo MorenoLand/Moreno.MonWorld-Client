@@ -90,7 +90,11 @@ func set_content(value) -> void:
 
 func set_input_enabled(value: bool) -> void:
 	input_enabled = value
-	if value and is_inside_tree():
+	if value:
+		call_deferred("_restore_input_focus")
+
+func _restore_input_focus() -> void:
+	if input_enabled and is_inside_tree():
 		grab_focus()
 
 func set_dialogue_active(value: bool) -> void:
