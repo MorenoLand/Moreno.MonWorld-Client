@@ -7,9 +7,17 @@ const SELECT_CHARACTER: int = 0x04
 const REQUEST_PLAYER: int = 0x05
 const MOVEMENT: int = 0x06
 const FACE_DIRECTION: int = 0x07
+const DIALOG_STATE: int = 0x0E
 const LOAD_MAP: int = 0x10
+const NPC_UPDATE: int = 0x11
+const NPC_SPAWN: int = 0x12
+const DIALOG_ACTION: int = 0x21
+const ENTITY_INTERACT: int = 0x22
+const DIALOG_CHOICE: int = 0x25
+const TILE_INTERACT: int = 0x27
 const MAP_TRANSITION: int = 0x1B
 const RENDER_SCREEN: int = 0xB4
+const NPC_ANIMATION: int = 0xB2
 const ENTITY_MOVE_GBA: int = 0xEA
 const ENTITY_MOVE_NDS: int = 0xE4
 const ENTITY_FACE_TURN: int = 0x07
@@ -81,6 +89,18 @@ static func encode_movement(x: int, y: int, direction: String, running: bool = f
 static func encode_face_direction(direction: String) -> PackedByteArray:
 	var direction_ordinal: int = _direction_ordinal(direction)
 	return PackedByteArray() if direction_ordinal < 0 else PackedByteArray([direction_ordinal])
+
+static func encode_entity_interact(entity_id: int, token: int = 0) -> PackedByteArray:
+	var output: PackedByteArray = PackedByteArray()
+	OpenMMOCodec.append_s64_le(output, entity_id)
+	OpenMMOCodec.append_s64_le(output, token)
+	return output
+
+static func encode_tile_interact() -> PackedByteArray:
+	return PackedByteArray()
+
+static func encode_dialog_action_response(dialogue_id: int, value: int = 0) -> PackedByteArray:
+	return PackedByteArray([dialogue_id & 0xFF, value & 0xFF])
 
 static func decode_load_map(payload: PackedByteArray) -> Dictionary:
 	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
@@ -207,6 +227,84 @@ static func decode_entity_face_turn(payload: PackedByteArray) -> Dictionary:
 	else:
 		entity["facing"] = direction_ordinal + 1
 	return {"ok": not reader.failed and reader.remaining() == 0, "error": "OpenMMO face-turn packet is malformed" if reader.failed or reader.remaining() != 0 else "", "entity": entity}
+
+static func decode_npc_spawn(payload: PackedByteArray) -> Dictionary:
+	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
+	var entity: Dictionary = {"entity_id": reader.read_s64_le(), "sprite_region_id": reader.read_u8(), "graphics_id": reader.read_u16_le(), "unk3": reader.read_u16_le(), "unk4": reader.read_u16_le(), "region_id": reader.read_u8(), "bank_id": reader.read_u8(), "wire_map_id": reader.read_u8(), "x": reader.read_u16_le(), "y": reader.read_u16_le()}
+	var raw_facing: int = reader.read_u8()
+	entity["unk5"] = reader.read_u8()
+	entity["facing"] = raw_facing + 1 if raw_facing <= 3 else 1
+	entity["unk6"] = reader.read_u16_le()
+	entity["npc"] = true
+	entity["blocks_movement"] = true
+	return {"ok": not reader.failed and reader.remaining() == 0, "error": "OpenMMO NPC spawn packet is malformed" if reader.failed or reader.remaining() != 0 else "", "entity": entity}
+
+static func decode_npc_update(payload: PackedByteArray) -> Dictionary:
+	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
+	var entity: Dictionary = {"entity_id": reader.read_s64_le(), "region_id": reader.read_u8(), "bank_id": reader.read_u8(), "wire_map_id": reader.read_u8(), "x": reader.read_u16_le(), "y": reader.read_u16_le()}
+	var raw_facing: int = reader.read_u8()
+	entity["facing"] = raw_facing + 1 if raw_facing <= 3 else 1
+	entity["unk"] = reader.read_u8()
+	entity["npc"] = true
+	entity["blocks_movement"] = true
+	return {"ok": not reader.failed and reader.remaining() == 0, "error": "OpenMMO NPC update packet is malformed" if reader.failed or reader.remaining() != 0 else "", "entity": entity}
+
+static func decode_npc_animation(payload: PackedByteArray) -> Dictionary:
+	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
+	var entity: Dictionary = {"entity_id": reader.read_s64_le(), "animation": reader.read_u8(), "npc": true}
+	return {"ok": not reader.failed and reader.remaining() == 0, "error": "OpenMMO NPC animation packet is malformed" if reader.failed or reader.remaining() != 0 else "", "entity": entity}
+
+static func decode_dialog_action(payload: PackedByteArray) -> Dictionary:
+	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
+	var action: Dictionary = {"flags": reader.read_s8(), "action_type": reader.read_s8(), "text_id": reader.read_s32_le(), "entity_id": reader.read_s64_le(), "context_value": reader.read_s32_le()}
+	var argument_count: int = reader.read_u8()
+	var message_args: Array = []
+	if argument_count > 32:
+		reader.failed = true
+	else:
+		for _index in argument_count:
+			message_args.append(_read_dialog_message_arg(reader))
+	action["message_args"] = message_args
+	action["detail"] = reader.read_bytes(reader.remaining())
+	return {"ok": not reader.failed and reader.remaining() == 0, "error": "OpenMMO dialog action packet is malformed" if reader.failed or reader.remaining() != 0 else "", "action": action}
+
+static func decode_dialog_state(payload: PackedByteArray) -> Dictionary:
+	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
+	var open: bool = reader.read_bool()
+	return {"ok": not reader.failed and reader.remaining() == 0, "open": open, "error": "OpenMMO dialog state packet is malformed" if reader.failed or reader.remaining() != 0 else ""}
+
+static func _read_dialog_message_arg(reader: OpenMMOCodec.Reader) -> Dictionary:
+	var tag: int = reader.read_s8()
+	match tag:
+		-1:
+			return {"tag": "null"}
+		0:
+			var value: int = reader.read_s32_le()
+			var count: int = reader.read_u8()
+			if count > 32:
+				reader.failed = true
+				return {}
+			var nested: Array = []
+			for _index in count:
+				nested.append(_read_dialog_message_arg(reader))
+			return {"tag": "creature_data", "value": value, "args": nested}
+		1:
+			var team: int = reader.read_s8()
+			var move_count: int = reader.read_u8()
+			if move_count > 32:
+				reader.failed = true
+				return {}
+			var move_ids: Array[int] = []
+			for _index in move_count:
+				move_ids.append(reader.read_s16_le())
+			return {"tag": "creature_moves", "team": team, "move_ids": move_ids}
+		2:
+			return {"tag": "pokemon_species", "party_slot": reader.read_s8(), "string_variable": reader.read_s8(), "species_id": reader.read_s16_le()}
+		3:
+			return {"tag": "creature", "slot": reader.read_s8(), "status_id": reader.read_s8(), "value1": reader.read_s16_le(), "value2": reader.read_s16_le()}
+		_:
+			reader.failed = true
+			return {}
 
 static func decode_render_screen(payload: PackedByteArray) -> Dictionary:
 	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)

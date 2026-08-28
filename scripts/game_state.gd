@@ -8,6 +8,8 @@ signal entity_update_received(update: Dictionary)
 signal chat_received(message: Dictionary)
 signal battle_event_received(event: Dictionary)
 signal map_load_received(map_load: Dictionary)
+signal dialog_action_received(action: Dictionary)
+signal dialog_state_received(open: bool)
 signal render_screen_changed(visible: bool)
 signal connection_error(message: String)
 signal login_completed(result: Dictionary)
@@ -167,6 +169,15 @@ func send_input(direction: String, source_x: int = -1, source_y: int = -1, runni
 	var payload: PackedByteArray = GAME_PROTOCOL_SCRIPT.encode_movement(x, y, direction, running)
 	return not payload.is_empty() and game_session.send_packet(GAME_PROTOCOL_SCRIPT.MOVEMENT, payload)
 
+func send_entity_interact(entity_id: int, token: int = 0) -> bool:
+	return game_session.send_packet(GAME_PROTOCOL_SCRIPT.ENTITY_INTERACT, GAME_PROTOCOL_SCRIPT.encode_entity_interact(entity_id, token))
+
+func send_tile_interact() -> bool:
+	return game_session.send_packet(GAME_PROTOCOL_SCRIPT.TILE_INTERACT, GAME_PROTOCOL_SCRIPT.encode_tile_interact())
+
+func send_dialogue_action_response(dialogue_id: int, value: int = 0) -> bool:
+	return game_session.send_packet(GAME_PROTOCOL_SCRIPT.DIALOG_ACTION, GAME_PROTOCOL_SCRIPT.encode_dialog_action_response(dialogue_id, value))
+
 func send_chat(_text: String) -> bool:
 	return false
 
@@ -291,6 +302,38 @@ func _on_game_packet(opcode: int, payload: PackedByteArray) -> void:
 			response["local_map_id"] = local_map_id
 			pending_map_load = response
 			map_load_received.emit(response)
+	elif opcode == GAME_PROTOCOL_SCRIPT.NPC_SPAWN:
+		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_npc_spawn(payload)
+		if not response.ok:
+			connection_error.emit(str(response.get("error", "OpenMMO NPC spawn packet is malformed")))
+			return
+		var npc: Dictionary = response.entity
+		npc["map_id"] = content.map_id_for_location(int(npc.get("bank_id", -1)), int(npc.get("wire_map_id", -1))) if content != null else ""
+		entity_update_received.emit({"player": npc, "local": false})
+	elif opcode == GAME_PROTOCOL_SCRIPT.NPC_UPDATE:
+		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_npc_update(payload)
+		if response.ok:
+			_emit_entity_update(response.entity)
+		else:
+			connection_error.emit(str(response.get("error", "OpenMMO NPC update packet is malformed")))
+	elif opcode == GAME_PROTOCOL_SCRIPT.NPC_ANIMATION:
+		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_npc_animation(payload)
+		if response.ok:
+			_emit_entity_update(response.entity)
+		else:
+			connection_error.emit(str(response.get("error", "OpenMMO NPC animation packet is malformed")))
+	elif opcode == GAME_PROTOCOL_SCRIPT.DIALOG_ACTION:
+		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_dialog_action(payload)
+		if response.ok:
+			dialog_action_received.emit(response.action)
+		else:
+			connection_error.emit(str(response.get("error", "OpenMMO dialog action packet is malformed")))
+	elif opcode == GAME_PROTOCOL_SCRIPT.DIALOG_STATE:
+		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_dialog_state(payload)
+		if response.ok:
+			dialog_state_received.emit(bool(response.open))
+		else:
+			connection_error.emit(str(response.get("error", "OpenMMO dialog state packet is malformed")))
 	elif opcode == GAME_PROTOCOL_SCRIPT.REQUEST_PLAYER:
 		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_load_entity(payload)
 		if not response.ok:

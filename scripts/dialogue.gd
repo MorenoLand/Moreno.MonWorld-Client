@@ -103,6 +103,9 @@ func show_pages(values: Array, suppress_action: bool = false, anchor: Vector2 = 
 func is_open() -> bool:
 	return open_state
 
+func text_complete() -> bool:
+	return open_state and visible_count >= current_text.length()
+
 func handle_action() -> bool:
 	if not open_state:
 		return false

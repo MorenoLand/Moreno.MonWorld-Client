@@ -51,6 +51,8 @@ var rom_header: Dictionary = {}
 var source_profile: Dictionary = {}
 var map_cache: Dictionary = {}
 var map_topology_cache: Dictionary = {}
+var server_border_cache: Dictionary = {}
+var local_border_cache: Dictionary = {}
 var sprite_cache: Dictionary = {}
 var string_catalog: Dictionary = {}
 
@@ -236,12 +238,15 @@ func _read_map_descriptor(map_value: Dictionary) -> Dictionary:
 	var map_offset: int = _read_rom_pointer(layout_offset + 12)
 	var primary_offset: int = _read_rom_pointer(layout_offset + 16)
 	var secondary_offset: int = _read_rom_pointer(layout_offset + 20)
+	var border_offset: int = _read_rom_pointer(layout_offset + 8)
+	var border_width: int = int(rom_data[layout_offset + 24])
+	var border_height: int = int(rom_data[layout_offset + 25])
 	if width <= 0 or height <= 0 or width > 512 or height > 512:
 		return {"ok": false, "error": "FireRed map dimensions are invalid"}
 	var floor_num: int = int(rom_data[header_offset + 0x1A])
 	if floor_num >= 0x80:
 		floor_num -= 0x100
-	return {"ok": true, "map_group": map_group, "map_index": map_index, "header_offset": header_offset, "layout_offset": layout_offset, "width": width, "height": height, "map_offset": map_offset, "primary_offset": primary_offset, "secondary_offset": secondary_offset, "music_id": _read_u16(header_offset + 0x10), "region_map_section_id": int(rom_data[header_offset + 0x14]), "map_type": int(rom_data[header_offset + 0x17]), "floor_num": floor_num}
+	return {"ok": true, "map_group": map_group, "map_index": map_index, "header_offset": header_offset, "layout_offset": layout_offset, "width": width, "height": height, "map_offset": map_offset, "primary_offset": primary_offset, "secondary_offset": secondary_offset, "border_offset": border_offset, "border_width": border_width, "border_height": border_height, "music_id": _read_u16(header_offset + 0x10), "region_map_section_id": int(rom_data[header_offset + 0x14]), "map_type": int(rom_data[header_offset + 0x17]), "floor_num": floor_num}
 
 func _map_id_for_location(map_group: int, map_index: int) -> String:
 	for map_value in manifest.get("maps", []):
@@ -357,7 +362,7 @@ func prepare_map(map_id: String, include_composite_texture: bool = true) -> Dict
 		cached_map["world_texture"] = world_texture
 	return {"ok": true, "texture": world_texture if world_texture != null else background_texture, "background_texture": background_texture, "foreground_texture": foreground_texture, "world_texture": world_texture, "width": int(cached_map.get("width", 0)), "height": int(cached_map.get("height", 0)), "header_offset": int(cached_map.get("header_offset", -1)), "layout_offset": int(cached_map.get("layout_offset", -1)), "objects": cached_map.get("objects", []), "warps": cached_map.get("warps", []), "connections": cached_map.get("connections", []), "animated_background_tiles": cached_map.get("animated_background_tiles", []), "animated_foreground_tiles": cached_map.get("animated_foreground_tiles", []), "map_cells": cached_map.get("map_cells", PackedInt32Array()), "music_id": int(cached_map.get("music_id", 0)), "map_type": int(cached_map.get("map_type", 0)), "animation_phase": 0}
 
-func prepare_connected_world(root_map_id: String, max_maps: int = 96, preload_depth: int = 1) -> Dictionary:
+func prepare_connected_world(root_map_id: String, max_maps: int = 96, preload_depth: int = 1, server_maps: Dictionary = {}) -> Dictionary:
 	if root_map_id.is_empty() or max_maps <= 0 or preload_depth < 0:
 		return {"ok": false, "error": "invalid connected-world root"}
 	var regions: Array = []
@@ -386,7 +391,8 @@ func prepare_connected_world(root_map_id: String, max_maps: int = 96, preload_de
 			prepared = prepare_map(map_id, false)
 		if map_id == root_map_id and not bool(prepared.get("ok", false)):
 			return prepared
-		var region: Dictionary = {"map_id": map_id, "origin": origin, "width": width, "height": height, "background_texture": prepared.get("background_texture"), "foreground_texture": prepared.get("foreground_texture"), "objects": prepared.get("objects", []), "warps": prepared.get("warps", []), "connections": topology.get("connections", []), "animated_background_tiles": prepared.get("animated_background_tiles", []), "animated_foreground_tiles": prepared.get("animated_foreground_tiles", []), "music_id": int(topology.get("music_id", 0)), "map_type": int(topology.get("map_type", 0)), "ready": bool(prepared.get("ok", false))}
+		var server_map: Dictionary = _server_map_for_local_map(map_id, server_maps)
+		var region: Dictionary = {"map_id": map_id, "origin": origin, "width": width, "height": height, "background_texture": prepared.get("background_texture"), "foreground_texture": prepared.get("foreground_texture"), "objects": prepared.get("objects", []), "warps": prepared.get("warps", []), "connections": topology.get("connections", []), "animated_background_tiles": prepared.get("animated_background_tiles", []), "animated_foreground_tiles": prepared.get("animated_foreground_tiles", []), "border_texture": server_border_texture(map_id, server_map), "music_id": int(topology.get("music_id", 0)), "map_type": int(topology.get("map_type", 0)), "ready": bool(prepared.get("ok", false))}
 		regions.append(region)
 		placed[map_id] = origin
 		for connection_value in topology.get("connections", []):
@@ -410,6 +416,92 @@ func prepare_connected_world(root_map_id: String, max_maps: int = 96, preload_de
 	if regions.is_empty():
 		return {"ok": false, "error": "connected-world root map is not renderable"}
 	return {"ok": true, "root_map_id": root_map_id, "regions": regions, "map_origins": placed}
+
+func _server_map_for_local_map(map_id: String, server_maps: Dictionary) -> Dictionary:
+	var direct: Variant = server_maps.get(map_id, {})
+	if direct is Dictionary and not (direct as Dictionary).is_empty():
+		return direct
+	var local_map: Dictionary = map_data(map_id)
+	var local_bank: int = int(local_map.get("map_group", -1))
+	var local_wire_map: int = int(local_map.get("map_index", -1))
+	for value in server_maps.values():
+		if not value is Dictionary:
+			continue
+		var candidate: Dictionary = value
+		if str(candidate.get("local_map_id", "")) == map_id:
+			return candidate
+		if int(candidate.get("bank_id", -1)) == local_bank and int(candidate.get("map_id", -1)) == local_wire_map:
+			return candidate
+	return {}
+
+func server_border_texture(map_id: String, server_map: Dictionary) -> Texture2D:
+	var local_texture: Texture2D = _local_border_texture(map_id)
+	if local_texture != null:
+		return local_texture
+	var border_width: int = int(server_map.get("border_width", 0))
+	var border_height: int = int(server_map.get("border_height", 0))
+	var border_tiles: Array = server_map.get("border_tiles", [])
+	if border_width <= 0 or border_height <= 0 or border_tiles.size() != border_width * border_height:
+		return _local_border_texture(map_id)
+	var cache_key: String = "%s:%d:%d" % [map_id, border_width, border_height]
+	var cached_texture: Texture2D = server_border_cache.get(cache_key) as Texture2D
+	if cached_texture != null:
+		return cached_texture
+	var cached_map: Dictionary = _get_or_build_map_cache(map_id)
+	if not bool(cached_map.get("ok", false)):
+		return null
+	var image: Image = Image.create(border_width * 16, border_height * 16, false, Image.FORMAT_RGBA8)
+	image.fill(Color.BLACK)
+	var primary: Dictionary = cached_map.get("primary", {})
+	var secondary: Dictionary = cached_map.get("secondary", {})
+	var primary_metatile_count: int = _format_int("primary_metatile_count", PRIMARY_METATILE_COUNT)
+	var metatile_id_mask: int = _format_int("map_grid_metatile_id_mask", MAPGRID_METATILE_ID_MASK)
+	for border_y in range(border_height):
+		for border_x in range(border_width):
+			var border_value: Variant = border_tiles[border_y * border_width + border_x]
+			if not border_value is Dictionary:
+				continue
+			var material: int = int((border_value as Dictionary).get("material", 0)) & metatile_id_mask
+			var tileset: Dictionary = primary
+			var metatile_index: int = material
+			if material >= primary_metatile_count:
+				tileset = secondary
+				metatile_index = material - primary_metatile_count
+			_draw_metatile(image, border_x * 16, border_y * 16, tileset, metatile_index, primary, secondary, [])
+	var texture: ImageTexture = ImageTexture.create_from_image(image)
+	server_border_cache[cache_key] = texture
+	return texture
+
+func _local_border_texture(map_id: String) -> Texture2D:
+	var cached_texture: Texture2D = local_border_cache.get(map_id) as Texture2D
+	if cached_texture != null:
+		return cached_texture
+	var cached_map: Dictionary = _get_or_build_map_cache(map_id)
+	if not bool(cached_map.get("ok", false)):
+		return null
+	var border_width: int = int(cached_map.get("border_width", 0))
+	var border_height: int = int(cached_map.get("border_height", 0))
+	var border_offset: int = int(cached_map.get("border_offset", -1))
+	if border_width <= 0 or border_height <= 0 or not _valid_range(border_offset, border_width * border_height * 2):
+		return null
+	var image: Image = Image.create(border_width * 16, border_height * 16, false, Image.FORMAT_RGBA8)
+	image.fill(Color.BLACK)
+	var primary: Dictionary = cached_map.get("primary", {})
+	var secondary: Dictionary = cached_map.get("secondary", {})
+	var primary_metatile_count: int = _format_int("primary_metatile_count", PRIMARY_METATILE_COUNT)
+	var metatile_id_mask: int = _format_int("map_grid_metatile_id_mask", MAPGRID_METATILE_ID_MASK)
+	for border_y in range(border_height):
+		for border_x in range(border_width):
+			var material: int = _read_u16(border_offset + (border_y * border_width + border_x) * 2) & metatile_id_mask
+			var tileset: Dictionary = primary
+			var metatile_index: int = material
+			if material >= primary_metatile_count:
+				tileset = secondary
+				metatile_index = material - primary_metatile_count
+			_draw_metatile(image, border_x * 16, border_y * 16, tileset, metatile_index, primary, secondary, [])
+	var texture: ImageTexture = ImageTexture.create_from_image(image)
+	local_border_cache[map_id] = texture
+	return texture
 
 func animated_tile_texture(map_id: String, tile_entry: int, animation_tick_value: int) -> Texture2D:
 	var cached_map: Dictionary = _get_or_build_map_cache(map_id)
@@ -525,7 +617,7 @@ func _build_map_cache(map_id: String, map_value: Dictionary) -> Dictionary:
 			_draw_metatile_layers(background_image, foreground_image, map_x * 16, map_y * 16, tileset, metatile_index, primary, secondary, animated_background_tiles, animated_foreground_tiles)
 	var objects: Array = _read_map_objects(header_offset, map_id)
 	objects.append_array(_read_map_background_events(header_offset, map_id))
-	return {"ok": true, "base_image": image, "base_background_image": background_image, "base_foreground_image": foreground_image, "primary": primary, "secondary": secondary, "primary_tiles": primary.get("tiles", PackedByteArray()), "primary_animation_enabled": bool(primary.get("animation_enabled", false)), "animated_tiles": animated_tiles, "animated_background_tiles": animated_background_tiles, "animated_foreground_tiles": animated_foreground_tiles, "map_cells": map_cells, "objects": objects, "warps": _read_map_warps(header_offset), "connections": _read_map_connections(header_offset), "textures": {}, "images": {}, "background_textures": {}, "foreground_textures": {}, "width": width, "height": height, "header_offset": header_offset, "layout_offset": layout_offset, "map_group": int(map_value.get("map_group", -1)), "map_index": int(map_value.get("map_index", -1)), "music_id": int(map_value.get("music_id", 0))}
+	return {"ok": true, "base_image": image, "base_background_image": background_image, "base_foreground_image": foreground_image, "primary": primary, "secondary": secondary, "primary_tiles": primary.get("tiles", PackedByteArray()), "primary_animation_enabled": bool(primary.get("animation_enabled", false)), "animated_tiles": animated_tiles, "animated_background_tiles": animated_background_tiles, "animated_foreground_tiles": animated_foreground_tiles, "map_cells": map_cells, "objects": objects, "warps": _read_map_warps(header_offset), "connections": _read_map_connections(header_offset), "textures": {}, "images": {}, "background_textures": {}, "foreground_textures": {}, "width": width, "height": height, "header_offset": header_offset, "layout_offset": layout_offset, "border_offset": int(descriptor.get("border_offset", -1)), "border_width": int(descriptor.get("border_width", 0)), "border_height": int(descriptor.get("border_height", 0)), "map_group": int(map_value.get("map_group", -1)), "map_index": int(map_value.get("map_index", -1)), "music_id": int(map_value.get("music_id", 0))}
 
 func map_cell(map_id: String, x: int, y: int) -> Dictionary:
 	var cached_map: Dictionary = _get_or_build_map_cache(map_id)
@@ -1064,6 +1156,20 @@ func _decode_rom_text(text_offset: int) -> Dictionary:
 	if pages.is_empty():
 		return {}
 	return {"text_offset": text_offset, "raw": raw.hex_encode(), "pages": pages}
+
+func dialogue_for_text_id(text_id: int) -> Dictionary:
+	var candidates: Array[int] = [text_id]
+	var packed_offset: int = text_id & 0x0FFFFFFF
+	if packed_offset != text_id:
+		candidates.append(packed_offset)
+	for candidate_value in candidates:
+		var candidate: int = int(candidate_value)
+		if not _valid_range(candidate, 1):
+			continue
+		var dialogue: Dictionary = _decode_rom_text(candidate)
+		if not dialogue.is_empty():
+			return dialogue
+	return {}
 
 func _decode_rom_character(value: int) -> String:
 	if value == 0x00:

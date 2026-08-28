@@ -18,6 +18,8 @@ var animation_elapsed: float = 0.0
 var held_input: String = ""
 var held_input_elapsed: float = 0.0
 var map_has_animation: bool = false
+var server_dialogue_active: bool = false
+var server_dialogue_sequence: int = 0
 
 func _ready() -> void:
 	set_process_unhandled_input(true)
@@ -28,6 +30,8 @@ func _ready() -> void:
 	GameState.entity_update_received.connect(_on_entity_update)
 	GameState.chat_received.connect(_on_chat)
 	GameState.connection_error.connect(_on_connection_error)
+	GameState.dialog_action_received.connect(_on_dialog_action_received)
+	GameState.dialog_state_received.connect(_on_dialog_state_received)
 	_build_ui()
 	if not GameState.pending_map_load.is_empty():
 		call_deferred("_consume_pending_map_load")
@@ -136,7 +140,7 @@ func _on_map_load(value: Dictionary) -> void:
 func _load_map_texture(map_id: String, expected_width: int = 0, expected_height: int = 0) -> bool:
 	if GameState.content == null or map_id.is_empty():
 		return false
-	var connected_world: Dictionary = GameState.content.prepare_connected_world(map_id)
+	var connected_world: Dictionary = GameState.content.prepare_connected_world(map_id, 96, 1, GameState.server_maps)
 	if not bool(connected_world.get("ok", false)):
 		status_label.text = "Map renderer: %s" % str(connected_world.get("error", "map rendering failed"))
 		return false
@@ -194,18 +198,7 @@ func _sync_map_entities() -> void:
 	map_view.set_world_entities(players, selected_character_id)
 
 func _process(delta: float) -> void:
-	if map_view == null or snapshot.is_empty():
-		return
-	if not map_has_animation:
-		return
-	if map_view.movement_active:
-		return
-	animation_elapsed += delta
-	if animation_elapsed < 0.125:
-		return
-	animation_elapsed = 0.0
-	animation_tick += 1
-	map_view.set_animation_tick(animation_tick)
+	pass
 
 func _on_chat(value: Dictionary) -> void:
 	chat_log.append_text("%s: %s\n" % [value.get("name", "Player"), value.get("text", "")])
@@ -228,10 +221,55 @@ func _on_interaction_requested(dialogue: Dictionary) -> void:
 	map_view.set_dialogue_active(true)
 	audio.play_effect("dialogue")
 
+func _on_dialog_action_received(action: Dictionary) -> void:
+	if dialogue_overlay == null or map_view == null:
+		return
+	var action_type: int = int(action.get("action_type", -1))
+	if action_type == 0x64:
+		server_dialogue_active = false
+		dialogue_overlay.close_dialogue()
+		map_view.set_dialogue_active(false)
+		map_view.restore_interaction_facing()
+		return
+	var text_id: int = int(action.get("text_id", 0))
+	var dialogue: Dictionary = GameState.content.dialogue_for_text_id(text_id) if GameState.content != null else {}
+	var pages: Array = dialogue.get("pages", []) if not dialogue.is_empty() else []
+	if pages.is_empty():
+		pages = ["Dialogue text 0x%08X is unavailable in the selected ROM." % text_id]
+	var actor: Dictionary = {}
+	var entity_id: int = int(action.get("entity_id", -1))
+	var entity_value: Variant = entities.get(str(entity_id), {})
+	if entity_value is Dictionary:
+		actor = (entity_value as Dictionary).duplicate()
+	if actor.is_empty():
+		actor = {"map_id": map_view.map_id, "x": map_view.player_position.x, "y": map_view.player_position.y, "elevation": map_view.player_elevation}
+	server_dialogue_active = true
+	server_dialogue_sequence = int(action.get("flags", 0)) & 0xFF
+	map_view.set_dialogue_active(true)
+	dialogue_overlay.show_pages(pages, false, map_view.dialogue_anchor_screen({"object": actor}))
+	audio.play_effect("dialogue")
+
+func _on_dialog_state_received(open: bool) -> void:
+	server_dialogue_active = open
+	map_view.set_dialogue_active(open)
+	if not open:
+		dialogue_overlay.close_dialogue()
+		map_view.restore_interaction_facing()
+
 func _on_dialogue_action() -> void:
 	audio.play_effect("dialogue")
+	if server_dialogue_active:
+		if dialogue_overlay != null and not dialogue_overlay.text_complete():
+			dialogue_overlay.handle_action()
+			return
+		GameState.send_dialogue_action_response(server_dialogue_sequence, 0)
+		if dialogue_overlay != null:
+			dialogue_overlay.close_dialogue()
+		map_view.restore_interaction_facing()
+		return
 	if dialogue_overlay != null and dialogue_overlay.handle_action() and not dialogue_overlay.is_open():
 		map_view.set_dialogue_active(false)
+		map_view.restore_interaction_facing()
 
 func _on_sound_requested(effect: String) -> void:
 	audio.play_effect(effect)
