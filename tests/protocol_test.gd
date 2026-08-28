@@ -120,6 +120,43 @@ func _test_game_codec() -> bool:
 	if int(character.id) != 42 or str(character.name) != "Hero" or int(character.money) != 123 or int(character.bank_id) != 3 or int(character.map_id) != 4 or int(character.x) != 5 or int(character.y) != 6:
 		push_error("OpenMMO character fields are misaligned")
 		return false
+	var normal_chat: PackedByteArray = OpenMMOGameProtocol.encode_chat_message("hello")
+	var normal_chat_reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(normal_chat)
+	if normal_chat_reader.read_u8() != 0 or normal_chat_reader.read_s64_le() != 0 or normal_chat_reader.read_utf16_le_null() != "" or normal_chat_reader.read_u8() != 0 or normal_chat_reader.read_u8() != 255 or normal_chat_reader.read_utf16_le_null() != "hello" or normal_chat_reader.failed or normal_chat_reader.remaining() != 0:
+		push_error("OpenMMO normal chat packet shape is incorrect")
+		return false
+	var decoded_chat: Dictionary = OpenMMOGameProtocol.decode_chat_message(normal_chat)
+	if not decoded_chat.ok or str(decoded_chat.message.get("text", "")) != "hello" or str(decoded_chat.message.get("channel", "")) != "Local":
+		push_error("OpenMMO normal chat message did not decode")
+		return false
+	var team_chat: PackedByteArray = PackedByteArray([8])
+	OpenMMOCodec.append_utf16_le_null(team_chat, "team hello")
+	var decoded_team_chat: Dictionary = OpenMMOGameProtocol.decode_chat_message(team_chat)
+	if not decoded_team_chat.ok or int(decoded_team_chat.message.get("type", -1)) != 8 or str(decoded_team_chat.message.get("text", "")) != "team hello":
+		push_error("OpenMMO team chat message did not decode")
+		return false
+	var typed_chat: PackedByteArray = OpenMMOGameProtocol.encode_chat_send(0, "hello")
+	var typed_reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(typed_chat)
+	if typed_reader.read_s8() != 0 or typed_reader.read_utf16_le_null() != "hello" or typed_reader.failed or typed_reader.remaining() != 0:
+		push_error("OpenMMO mode-0 chat packet shape is incorrect")
+		return false
+	var command_chat: PackedByteArray = OpenMMOGameProtocol.encode_chat_send(4, "", "/warp")
+	var command_reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(command_chat)
+	if command_reader.read_s8() != 4 or command_reader.read_utf16_le_null() != "" or command_reader.read_utf16_le_null() != "/warp" or command_reader.failed or command_reader.remaining() != 0:
+		push_error("OpenMMO mode-4 command packet shape is incorrect")
+		return false
+	var notice: PackedByteArray = PackedByteArray()
+	OpenMMOCodec.append_s16_le(notice, 2)
+	OpenMMOCodec.append_s32_le(notice, 99)
+	OpenMMOCodec.append_utf16_le_null(notice, "Welcome")
+	var decoded_notice: Dictionary = OpenMMOGameProtocol.decode_server_notice(notice)
+	if not decoded_notice.ok or str(decoded_notice.notice.get("text", "")) != "Welcome" or int(decoded_notice.notice.get("id", -1)) != 99:
+		push_error("OpenMMO server notice did not decode")
+		return false
+	var truncated_chat: Dictionary = OpenMMOGameProtocol.decode_chat_message(normal_chat.slice(0, normal_chat.size() - 1))
+	if truncated_chat.ok:
+		push_error("OpenMMO truncated chat packet was accepted")
+		return false
 	return true
 
 func _character_list_fixture() -> PackedByteArray:

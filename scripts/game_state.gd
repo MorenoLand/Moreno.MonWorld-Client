@@ -178,8 +178,17 @@ func send_tile_interact() -> bool:
 func send_dialogue_action_response(dialogue_id: int, value: int = 0) -> bool:
 	return game_session.send_packet(GAME_PROTOCOL_SCRIPT.DIALOG_ACTION, GAME_PROTOCOL_SCRIPT.encode_dialog_action_response(dialogue_id, value))
 
-func send_chat(_text: String) -> bool:
-	return false
+func send_chat(text: String, channel: String = "Normal") -> bool:
+	if channel != "Normal":
+		return false
+	var trimmed: String = text.strip_edges()
+	if trimmed.is_empty():
+		return false
+	if trimmed.begins_with("/"):
+		var command_payload: PackedByteArray = GAME_PROTOCOL_SCRIPT.encode_chat_send(4, "", trimmed)
+		return not command_payload.is_empty() and game_session.send_packet(GAME_PROTOCOL_SCRIPT.CHAT_SEND, command_payload)
+	var payload: PackedByteArray = GAME_PROTOCOL_SCRIPT.encode_chat_message(trimmed, 0, 0)
+	return not payload.is_empty() and game_session.send_packet(GAME_PROTOCOL_SCRIPT.CHAT_MESSAGE, payload)
 
 func send_battle_action(_battle_id: String, _action: String) -> bool:
 	return false
@@ -276,6 +285,21 @@ func _on_game_packet(opcode: int, payload: PackedByteArray) -> void:
 				_finish_game_connection({"ok": false, "error": message})
 			else:
 				connection_error.emit(message)
+	elif opcode == GAME_PROTOCOL_SCRIPT.CHAT_MESSAGE:
+		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_chat_message(payload)
+		if response.ok:
+			chat_received.emit(response.message)
+		else:
+			connection_error.emit(str(response.get("error", "OpenMMO chat message is malformed")))
+	elif opcode == GAME_PROTOCOL_SCRIPT.SERVER_NOTICE:
+		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_server_notice(payload)
+		if response.ok:
+			var notice: Dictionary = response.notice
+			notice["channel"] = "Local"
+			notice["system"] = true
+			chat_received.emit(notice)
+		else:
+			connection_error.emit(str(response.get("error", "OpenMMO server notice is malformed")))
 	elif opcode == GAME_PROTOCOL_SCRIPT.MAP_TRANSITION:
 		map_transition_pending = true
 		pending_map_load.clear()

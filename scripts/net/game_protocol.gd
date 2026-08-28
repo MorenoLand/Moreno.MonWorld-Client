@@ -7,7 +7,10 @@ const SELECT_CHARACTER: int = 0x04
 const REQUEST_PLAYER: int = 0x05
 const MOVEMENT: int = 0x06
 const FACE_DIRECTION: int = 0x07
+const CHAT_SEND: int = 0x08
+const CHAT_MESSAGE: int = 0x09
 const DIALOG_STATE: int = 0x0E
+const SERVER_NOTICE: int = 0x74
 const LOAD_MAP: int = 0x10
 const NPC_UPDATE: int = 0x11
 const NPC_SPAWN: int = 0x12
@@ -89,6 +92,28 @@ static func encode_movement(x: int, y: int, direction: String, running: bool = f
 static func encode_face_direction(direction: String) -> PackedByteArray:
 	var direction_ordinal: int = _direction_ordinal(direction)
 	return PackedByteArray() if direction_ordinal < 0 else PackedByteArray([direction_ordinal])
+
+static func encode_chat_send(mode: int, target: String, message: String = "") -> PackedByteArray:
+	if mode < 0 or mode > 127:
+		return PackedByteArray()
+	var output: PackedByteArray = PackedByteArray()
+	OpenMMOCodec.append_u8(output, mode)
+	OpenMMOCodec.append_utf16_le_null(output, target)
+	if mode == 4:
+		OpenMMOCodec.append_utf16_le_null(output, message)
+	return output
+
+static func encode_chat_message(text: String, chat_type: int = 0, language: int = 0) -> PackedByteArray:
+	if chat_type < 0 or chat_type > 255 or language < 0 or language > 255:
+		return PackedByteArray()
+	var output: PackedByteArray = PackedByteArray()
+	OpenMMOCodec.append_u8(output, chat_type)
+	OpenMMOCodec.append_s64_le(output, 0)
+	OpenMMOCodec.append_utf16_le_null(output, "")
+	OpenMMOCodec.append_u8(output, language)
+	OpenMMOCodec.append_u8(output, 255)
+	OpenMMOCodec.append_utf16_le_null(output, text)
+	return output
 
 static func encode_entity_interact(entity_id: int, token: int = 0) -> PackedByteArray:
 	var output: PackedByteArray = PackedByteArray()
@@ -273,6 +298,35 @@ static func decode_dialog_state(payload: PackedByteArray) -> Dictionary:
 	var open: bool = reader.read_bool()
 	return {"ok": not reader.failed and reader.remaining() == 0, "open": open, "error": "OpenMMO dialog state packet is malformed" if reader.failed or reader.remaining() != 0 else ""}
 
+static func decode_chat_message(payload: PackedByteArray) -> Dictionary:
+	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
+	var chat_type: int = reader.read_u8()
+	var message: Dictionary = {"type": chat_type, "channel": _chat_channel(chat_type), "text": "", "message": "", "sender": "", "name": "", "system": chat_type >= 16}
+	if chat_type == 8 or chat_type == 11:
+		message["text"] = reader.read_utf16_le_null()
+		message["message"] = message["text"]
+	else:
+		reader.read_s64_le()
+		var sender: String = reader.read_utf16_le_null()
+		message["sender"] = sender
+		message["name"] = sender
+		message["language"] = reader.read_u8()
+		reader.read_s8()
+		message["text"] = reader.read_utf16_le_null()
+		message["message"] = message["text"]
+	var result: Dictionary = {"ok": not reader.failed and reader.remaining() == 0, "message": message}
+	if not result.ok:
+		result["error"] = "OpenMMO chat message is malformed"
+	return result
+
+static func decode_server_notice(payload: PackedByteArray) -> Dictionary:
+	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
+	var notice: Dictionary = {"type": reader.read_s16_le(), "id": reader.read_s32_le(), "text": reader.read_utf16_le_null()}
+	var result: Dictionary = {"ok": not reader.failed and reader.remaining() == 0, "notice": notice}
+	if not result.ok:
+		result["error"] = "OpenMMO server notice is malformed"
+	return result
+
 static func _read_dialog_message_arg(reader: OpenMMOCodec.Reader) -> Dictionary:
 	var tag: int = reader.read_s8()
 	match tag:
@@ -325,6 +379,18 @@ static func _direction_ordinal(direction: String) -> int:
 		"right":
 			return 3
 	return -1
+
+static func _chat_channel(chat_type: int) -> String:
+	match chat_type:
+		4:
+			return "Whispers"
+		5:
+			return "Trade"
+		6:
+			return "Global"
+		18:
+			return "Battle"
+	return "Local"
 
 static func decode_characters(payload: PackedByteArray) -> Dictionary:
 	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)

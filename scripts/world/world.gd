@@ -4,8 +4,7 @@ signal battle_requested
 
 var title_label: Label
 var status_label: Label
-var chat_log: RichTextLabel
-var chat_input: LineEdit
+var chat_box: OpenMMOChat
 var snapshot: Dictionary = {}
 var entities: Dictionary = {}
 var selected_character_id := 0
@@ -56,6 +55,9 @@ func _build_ui() -> void:
 	hud = OpenMMOHud.new()
 	hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(hud)
+	chat_box = OpenMMOChat.new()
+	chat_box.message_submitted.connect(_send_chat)
+	add_child(chat_box)
 	dialogue_overlay = OpenMMODialogue.new()
 	dialogue_overlay.action_requested.connect(_on_dialogue_action)
 	add_child(dialogue_overlay)
@@ -68,33 +70,6 @@ func _build_ui() -> void:
 	status_label.position = Vector2(24, 47)
 	add_child(status_label)
 	status_label.visible = false
-	chat_log = RichTextLabel.new()
-	chat_log.bbcode_enabled = false
-	chat_log.scroll_active = true
-	chat_log.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	chat_log.offset_left = 24
-	chat_log.offset_top = -142
-	chat_log.offset_right = -344
-	chat_log.offset_bottom = -58
-	add_child(chat_log)
-	chat_input = LineEdit.new()
-	chat_input.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	chat_input.offset_left = 24
-	chat_input.offset_top = -50
-	chat_input.offset_right = -424
-	chat_input.offset_bottom = -18
-	chat_input.placeholder_text = "Chat"
-	chat_input.text_submitted.connect(_send_chat)
-	add_child(chat_input)
-	var send_button := Button.new()
-	send_button.text = "Send"
-	send_button.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	send_button.offset_left = -392
-	send_button.offset_top = -50
-	send_button.offset_right = -344
-	send_button.offset_bottom = -18
-	send_button.pressed.connect(func(): _send_chat(chat_input.text))
-	add_child(send_button)
 	transition_overlay = ColorRect.new()
 	transition_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	transition_overlay.color = Color(0.0, 0.0, 0.0, 0.0)
@@ -106,6 +81,11 @@ func _build_ui() -> void:
 
 func _layout_ui() -> void:
 	map_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	chat_box.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
+	chat_box.offset_left = 24
+	chat_box.offset_top = -214
+	chat_box.offset_right = 444
+	chat_box.offset_bottom = -24
 
 func _consume_pending_map_load() -> void:
 	if not GameState.pending_map_load.is_empty():
@@ -290,12 +270,13 @@ func _process(delta: float) -> void:
 	pass
 
 func _on_chat(value: Dictionary) -> void:
-	chat_log.append_text("%s: %s\n" % [value.get("name", "Player"), value.get("text", "")])
+	if chat_box != null:
+		chat_box.add_message(value)
 
-func _send_chat(text: String) -> void:
+func _send_chat(text: String, channel: String = "Normal") -> void:
 	var trimmed := text.strip_edges()
-	if not trimmed.is_empty() and GameState.send_chat(trimmed):
-		chat_input.clear()
+	if not trimmed.is_empty() and GameState.send_chat(trimmed, channel):
+		chat_box.clear_input()
 
 func _on_connection_error(message: String) -> void:
 	status_label.text = message
@@ -377,6 +358,10 @@ func _unhandled_input(event: InputEvent) -> void:
 		if dialogue_overlay == null or not dialogue_overlay.is_open():
 			map_view.interact()
 		return
+	if key_event.pressed and not key_event.echo and chat_box != null and not chat_box.input_focused() and key_event.keycode in [KEY_ENTER, KEY_T, KEY_SLASH]:
+		chat_box.focus_input("/" if key_event.keycode == KEY_SLASH else "")
+		get_viewport().set_input_as_handled()
+		return
 	if dialogue_overlay != null and dialogue_overlay.is_open():
 		return
 	var direction: String = ""
@@ -396,7 +381,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			held_input = ""
 			held_input_elapsed = 0.0
 		return
-	if key_event.echo or get_viewport().gui_get_focus_owner() == chat_input:
+	if key_event.echo or (chat_box != null and chat_box.input_focused()):
 		return
 	held_input = direction
 	held_input_elapsed = 0.0
