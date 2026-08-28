@@ -16,6 +16,7 @@ const NORMAL_STEP_DURATION: float = 0.17
 const ANIMATION_FRAME_INTERVAL: float = 0.125
 const DOOR_ANIMATION_DURATION: float = 16.0 / 60.0
 const DOOR_FRAME_COUNT: int = 4
+const AUTHORITATIVE_PROBE_INTERVAL: float = 0.2
 
 var content
 var map_id: String = ""
@@ -55,6 +56,8 @@ var movement_retry_elapsed: float = 0.0
 var move_request_pending: bool = false
 var move_request_elapsed: float = 0.0
 var movement_prediction_pending: bool = false
+var authoritative_probe_pending: bool = false
+var authoritative_probe_elapsed: float = 0.0
 var world_entities: Array = []
 var authoritative_state: bool = false
 var dialogue_active: bool = false
@@ -95,6 +98,8 @@ func set_input_enabled(value: bool) -> void:
 	else:
 		held_direction = 0
 		movement_retry_elapsed = 0.0
+		authoritative_probe_pending = false
+		authoritative_probe_elapsed = 0.0
 
 func _restore_input_focus() -> void:
 	if input_enabled and is_inside_tree():
@@ -117,6 +122,8 @@ func set_authoritative_state(value: bool) -> void:
 	held_direction = 0
 	move_request_pending = false
 	move_request_elapsed = 0.0
+	authoritative_probe_pending = false
+	authoritative_probe_elapsed = 0.0
 
 func set_animation_tick(value: int) -> void:
 	animation_tick = value
@@ -301,6 +308,8 @@ func set_player_state(x: int, y: int, elevation: int = 3, facing: int = 1) -> vo
 	if authoritative_state:
 		move_request_pending = false
 		move_request_elapsed = 0.0
+		authoritative_probe_pending = false
+		authoritative_probe_elapsed = 0.0
 	if authoritative_state and has_spawn and next_position == pending_position and movement_active:
 		movement_prediction_pending = false
 		pending_elevation = elevation
@@ -519,7 +528,13 @@ func _request_move(direction: int) -> bool:
 	var result: Dictionary = content.movement_result(map_id, player_position.x, player_position.y, direction, player_elevation, occupied)
 	if authoritative_state:
 		if not bool(result.get("ok", false)):
-			return false
+			if authoritative_probe_pending:
+				return false
+			if not GameState.send_input(_direction_name(direction), player_position.x, player_position.y):
+				return false
+			authoritative_probe_pending = true
+			authoritative_probe_elapsed = 0.0
+			return true
 		if not GameState.send_input(_direction_name(direction), player_position.x, player_position.y):
 			return false
 		pending_map_id = str(result.get("map_id", map_id))
@@ -568,6 +583,11 @@ func _process(delta: float) -> void:
 		movement_retry_elapsed = 0.0
 	else:
 		held_direction = _physical_direction()
+	if authoritative_probe_pending:
+		authoritative_probe_elapsed += delta
+		if authoritative_probe_elapsed >= AUTHORITATIVE_PROBE_INTERVAL:
+			authoritative_probe_pending = false
+			authoritative_probe_elapsed = 0.0
 	if warp_cooldown > 0.0:
 		warp_cooldown = maxf(warp_cooldown - delta, 0.0)
 	animation_elapsed += delta
@@ -576,7 +596,7 @@ func _process(delta: float) -> void:
 		animation_tick += 1
 		queue_redraw()
 	if not movement_active:
-		if held_direction != 0:
+		if held_direction != 0 and not authoritative_probe_pending:
 			movement_retry_elapsed += delta
 			if movement_retry_elapsed >= 0.05:
 				movement_retry_elapsed = 0.0
