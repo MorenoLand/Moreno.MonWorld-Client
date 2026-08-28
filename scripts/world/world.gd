@@ -380,6 +380,12 @@ func _unhandled_input(event: InputEvent) -> void:
 			hud.toggle_menu()
 		get_viewport().set_input_as_handled()
 		return
+	var hotkey_slot: int = _hotkey_slot_for_key(key_event.keycode)
+	if hotkey_slot >= 0 and key_event.pressed and not key_event.echo:
+		if hud != null:
+			hud.activate_hotkey(hotkey_slot)
+		get_viewport().set_input_as_handled()
+		return
 	if key_event.keycode == KEY_F and key_event.pressed and not key_event.echo:
 		get_viewport().set_input_as_handled()
 		if dialogue_overlay == null or not dialogue_overlay.is_open():
@@ -413,3 +419,16 @@ func _unhandled_input(event: InputEvent) -> void:
 	held_input = direction
 	held_input_elapsed = 0.0
 	map_view.request_move(direction)
+
+func _hotkey_slot_for_key(keycode: int) -> int:
+	match keycode:
+		KEY_1: return 0
+		KEY_2: return 1
+		KEY_3: return 2
+		KEY_4: return 3
+		KEY_5: return 4
+		KEY_6: return 5
+		KEY_7: return 6
+		KEY_8: return 7
+		KEY_9: return 8
+	return -1

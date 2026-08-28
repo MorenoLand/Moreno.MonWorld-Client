@@ -11,9 +11,15 @@ var stats_label: Label
 var party_box: VBoxContainer
 var party_labels: Array = []
 var action_bar: HBoxContainer
+var action_panel: PanelContainer
+var hotbar_panel: PanelContainer
+var hotkey_slots: Array = []
+var hotkey_selected: int = -1
 var bag_panel: PanelContainer
 var menu_panel: PanelContainer
 var bag_label: Label
+var bag_tab_buttons: Array = []
+var bag_category: String = "Items"
 var current_content
 var current_map_id: String = ""
 var current_state: Dictionary = {}
@@ -64,12 +70,18 @@ func _build_ui() -> void:
 	party_box.offset_left = -136.0
 	party_box.offset_top = 100.0
 	party_box.offset_right = -16.0
+	party_box.custom_minimum_size = Vector2(112.0, 0.0)
 	party_box.add_theme_constant_override("separation", 5)
 	party_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(party_box)
+	var party_title: Label = Label.new()
+	party_title.text = "PARTY"
+	party_title.add_theme_font_size_override("font_size", 11)
+	party_title.add_theme_color_override("font_color", Color("b8cbe0"))
+	party_box.add_child(party_title)
 	for index in range(PARTY_COUNT):
 		var slot: PanelContainer = PanelContainer.new()
-		slot.custom_minimum_size = Vector2(120.0, 44.0)
+		slot.custom_minimum_size = Vector2(112.0, 44.0)
 		slot.add_theme_stylebox_override("panel", _panel_style(Color("10151eb8"), Color("5f7185")))
 		var label: Label = Label.new()
 		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -91,29 +103,68 @@ func _build_ui() -> void:
 	stats_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	stats_label.add_theme_font_size_override("font_size", 13)
 	stats_panel.add_child(stats_label)
+	action_panel = PanelContainer.new()
+	action_panel.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	action_panel.offset_left = -286.0
+	action_panel.offset_top = -64.0
+	action_panel.offset_right = -16.0
+	action_panel.offset_bottom = -16.0
+	action_panel.z_index = 5
+	action_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	action_panel.add_theme_stylebox_override("panel", _panel_style(Color("0b1420e8"), Color("5d7288")))
+	add_child(action_panel)
 	action_bar = HBoxContainer.new()
-	action_bar.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	action_bar.offset_left = -176.0
-	action_bar.offset_top = -58.0
-	action_bar.offset_right = -16.0
-	action_bar.offset_bottom = -16.0
-	action_bar.add_theme_constant_override("separation", 6)
-	action_bar.mouse_filter = Control.MOUSE_FILTER_STOP
-	add_child(action_bar)
+	action_bar.add_theme_constant_override("separation", 5)
+	action_panel.add_child(action_bar)
 	var bag_button: Button = _make_button("Bag")
+	bag_button.custom_minimum_size = Vector2(78.0, 42.0)
 	bag_button.pressed.connect(toggle_bag)
 	action_bar.add_child(bag_button)
+	var party_action_button: Button = _make_button("Party")
+	party_action_button.custom_minimum_size = Vector2(78.0, 42.0)
+	party_action_button.pressed.connect(_on_party_pressed)
+	action_bar.add_child(party_action_button)
 	var menu_button: Button = _make_button("Menu")
+	menu_button.custom_minimum_size = Vector2(78.0, 42.0)
 	menu_button.pressed.connect(toggle_menu)
 	action_bar.add_child(menu_button)
+	hotbar_panel = PanelContainer.new()
+	hotbar_panel.set_anchors_preset(Control.PRESET_CENTER_TOP)
+	hotbar_panel.offset_left = -224.0
+	hotbar_panel.offset_top = 12.0
+	hotbar_panel.offset_right = 224.0
+	hotbar_panel.offset_bottom = 64.0
+	hotbar_panel.z_index = 5
+	hotbar_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	hotbar_panel.add_theme_stylebox_override("panel", _panel_style(Color("0b1420e8"), Color("5d7288")))
+	add_child(hotbar_panel)
+	var hotbar: HBoxContainer = HBoxContainer.new()
+	hotbar.add_theme_constant_override("separation", 4)
+	hotbar_panel.add_child(hotbar)
+	for index in range(9):
+		var hotkey_button: Button = _make_hotkey_button(index)
+		hotkey_slots.append(hotkey_button)
+		hotbar.add_child(hotkey_button)
 	bag_panel = _make_popup_panel("Bag")
 	bag_panel.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
 	bag_panel.offset_left = -300.0
-	bag_panel.offset_top = -360.0
+	bag_panel.offset_top = -410.0
 	bag_panel.offset_right = -16.0
 	bag_panel.offset_bottom = -72.0
 	add_child(bag_panel)
 	var bag_box: VBoxContainer = bag_panel.get_child(0) as VBoxContainer
+	var bag_tabs: HBoxContainer = HBoxContainer.new()
+	bag_tabs.add_theme_constant_override("separation", 3)
+	bag_box.add_child(bag_tabs)
+	for category in ["Items", "Key", "Balls", "TMs", "Berries"]:
+		var tab: Button = _make_button(category)
+		tab.custom_minimum_size = Vector2(0.0, 30.0)
+		tab.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		tab.add_theme_font_size_override("font_size", 11)
+		tab.set_meta("bag_category", category)
+		tab.pressed.connect(_select_bag_category.bind(category))
+		bag_tab_buttons.append(tab)
+		bag_tabs.add_child(tab)
 	bag_label = Label.new()
 	bag_label.custom_minimum_size = Vector2(260.0, 190.0)
 	bag_label.vertical_alignment = VERTICAL_ALIGNMENT_TOP
@@ -153,6 +204,46 @@ func _make_button(text_value: String) -> Button:
 	button.add_theme_stylebox_override("hover", _panel_style(Color("26364ce8"), Color("82a8d3")))
 	button.add_theme_stylebox_override("pressed", _panel_style(Color("314b6be8"), Color("a7c8ed")))
 	return button
+
+func _select_bag_category(category: String) -> void:
+	bag_category = category
+	_refresh_bag()
+
+func _make_hotkey_button(index: int) -> Button:
+	var button: Button = _make_button("%d\n—" % (index + 1))
+	button.custom_minimum_size = Vector2(44.0, 42.0)
+	button.add_theme_font_size_override("font_size", 11)
+	button.pressed.connect(_on_hotkey_pressed.bind(index))
+	return button
+
+func _on_hotkey_pressed(index: int) -> void:
+	if index < 0 or index >= hotkey_slots.size():
+		return
+	hotkey_selected = index
+	_refresh_hotbar()
+
+func activate_hotkey(index: int) -> void:
+	_on_hotkey_pressed(index)
+
+func _refresh_hotbar() -> void:
+	if hotkey_slots.is_empty():
+		return
+	var values: Variant = current_state.get("hotbar", current_state.get("hotkeys", []))
+	if not values is Array:
+		values = []
+	for index in range(hotkey_slots.size()):
+		var item_name: String = ""
+		if index < (values as Array).size():
+			var slot_value: Variant = (values as Array)[index]
+			if slot_value is Dictionary:
+				var slot: Dictionary = slot_value
+				item_name = str(slot.get("name", slot.get("item_name", ""))).strip_edges()
+			elif slot_value is String:
+				item_name = str(slot_value).strip_edges()
+		var display_name: String = item_name.left(5) if not item_name.is_empty() else "—"
+		var button: Button = hotkey_slots[index] as Button
+		button.text = "%d\n%s" % [index + 1, display_name]
+		button.modulate = Color("9fc3ff") if index == hotkey_selected else Color.WHITE
 
 func _make_popup_panel(title_value: String) -> PanelContainer:
 	var panel: PanelContainer = PanelContainer.new()
@@ -222,13 +313,26 @@ func _refresh_panels() -> void:
 func _refresh_bag() -> void:
 	if bag_label == null:
 		return
+	for tab_value in bag_tab_buttons:
+		var tab: Button = tab_value as Button
+		tab.modulate = Color("9fc3ff") if str(tab.get_meta("bag_category", "")) == bag_category else Color.WHITE
 	var items: Variant = current_state.get("bag", current_state.get("inventory", current_state.get("items", [])))
+	var category_container: bool = false
+	if items is Dictionary:
+		var item_groups: Dictionary = items
+		for category_key in _bag_category_keys():
+			if item_groups.has(category_key):
+				items = item_groups[category_key]
+				category_container = true
+				break
 	var lines: Array[String] = []
 	if items is Array:
 		for item_value in items:
 			if not item_value is Dictionary:
 				continue
 			var item: Dictionary = item_value
+			if not _bag_item_matches_category(item, category_container):
+				continue
 			var item_name: String = str(item.get("name", item.get("item_name", "Item"))).strip_edges()
 			var quantity: int = int(item.get("quantity", item.get("count", 1)))
 			lines.append("%s  x%d" % [item_name if not item_name.is_empty() else "Item", quantity])
@@ -237,12 +341,35 @@ func _refresh_bag() -> void:
 			var item_value: Variant = items[item_key]
 			if item_value is Dictionary:
 				var item: Dictionary = item_value
+				if not _bag_item_matches_category(item, category_container):
+					continue
 				var item_name: String = str(item.get("name", item.get("item_name", item_key))).strip_edges()
 				var quantity: int = int(item.get("quantity", item.get("count", 1)))
 				lines.append("%s  x%d" % [item_name if not item_name.is_empty() else str(item_key), quantity])
-			else:
+			elif bag_category == "Items":
 				lines.append("%s  x%d" % [str(item_key), int(item_value)])
 	bag_label.text = "\n".join(lines) if not lines.is_empty() else "No items available."
+
+func _bag_category_keys() -> Array:
+	match bag_category:
+		"Key": return ["key", "key_items", "keyitems"]
+		"Balls": return ["balls", "pokeballs", "poke_balls"]
+		"TMs": return ["tms", "tm_hm", "tmhm"]
+		"Berries": return ["berries", "berry"]
+	return ["items", "item"]
+
+func _bag_item_matches_category(item: Dictionary, category_container: bool) -> bool:
+	if category_container:
+		return true
+	var raw_category: String = str(item.get("category", item.get("tab", ""))).strip_edges().to_lower()
+	if raw_category.is_empty():
+		return bag_category == "Items"
+	match bag_category:
+		"Key": return raw_category in ["key", "key_item", "key_items"]
+		"Balls": return raw_category in ["ball", "balls", "pokeball", "pokeballs"]
+		"TMs": return raw_category in ["tm", "tms", "hm", "tm_hm"]
+		"Berries": return raw_category in ["berry", "berries"]
+	return raw_category in ["item", "items", "medicine", "held"]
 
 func _refresh_stats() -> void:
 	if stats_label == null:
@@ -268,6 +395,7 @@ func _refresh() -> void:
 		var member: Variant = current_party[index] if index < current_party.size() else {}
 		party_label.text = _party_slot_text(member as Dictionary) if member is Dictionary else ""
 	_refresh_bag()
+	_refresh_hotbar()
 
 func _refresh_time() -> void:
 	if time_label == null:

@@ -54,6 +54,7 @@ var held_direction: int = 0
 var movement_retry_elapsed: float = 0.0
 var move_request_pending: bool = false
 var move_request_elapsed: float = 0.0
+var movement_prediction_pending: bool = false
 var world_entities: Array = []
 var authoritative_state: bool = false
 var dialogue_active: bool = false
@@ -290,7 +291,10 @@ func set_player_state(x: int, y: int, elevation: int = 3, facing: int = 1) -> vo
 		move_request_pending = false
 		move_request_elapsed = 0.0
 	if authoritative_state and has_spawn and next_position == pending_position and movement_active:
+		movement_prediction_pending = false
 		pending_elevation = elevation
+		return
+	if authoritative_state and has_spawn and next_position == player_position and movement_active and movement_prediction_pending:
 		return
 	if authoritative_state and has_spawn and next_position == player_position:
 		player_elevation = elevation
@@ -489,6 +493,23 @@ func _request_move(direction: int) -> bool:
 			return false
 		if not GameState.send_input(_direction_name(direction), player_position.x, player_position.y):
 			return false
+		pending_map_id = str(result.get("map_id", map_id))
+		pending_position = Vector2i(int(result.get("x", player_position.x)), int(result.get("y", player_position.y)))
+		pending_elevation = int(result.get("elevation", player_elevation))
+		movement_stair = bool(result.get("stair", false))
+		movement_stair_behavior = int(result.get("stair_behavior", 0))
+		movement_door = bool(result.get("door", false)) and not movement_stair
+		pending_warp = result.get("warp", {}) if movement_stair or movement_door else {}
+		movement_start = Vector2(player_position)
+		movement_target = movement_start + _direction_vector(direction) if pending_map_id != map_id else Vector2(pending_position)
+		movement_jump = bool(result.get("jump", false))
+		movement_elapsed = 0.0
+		movement_duration = 0.24 if movement_stair else DOOR_ANIMATION_DURATION if movement_door else 0.32 if movement_jump else NORMAL_STEP_DURATION
+		door_progress = 0.0
+		movement_prediction_pending = true
+		movement_active = true
+		sound_requested.emit("door" if movement_door else "step")
+		queue_redraw()
 		move_request_pending = true
 		move_request_elapsed = 0.0
 		return true
@@ -525,6 +546,13 @@ func _process(delta: float) -> void:
 		if move_request_elapsed >= 0.35:
 			move_request_pending = false
 			move_request_elapsed = 0.0
+			if movement_prediction_pending and movement_active:
+				movement_active = false
+				movement_prediction_pending = false
+				player_position = Vector2i(movement_start)
+				pending_map_id = ""
+				pending_warp = {}
+				queue_redraw()
 	if not movement_active:
 		if held_direction != 0:
 			movement_retry_elapsed += delta
