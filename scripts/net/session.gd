@@ -39,7 +39,6 @@ func connect_openmmo(host: String, port: int, public_key_path: String, use_compr
 	root_public_key_path = public_key_path
 	compressed_inbound = use_compression
 	peer = StreamPeerTCP.new()
-	peer.set_no_delay(true)
 	var error: Error = peer.connect_to_host(host.strip_edges(), port)
 	if error != OK:
 		return error
@@ -92,6 +91,7 @@ func _process(_delta: float) -> void:
 	var status: StreamPeerTCP.Status = peer.get_status()
 	if state == State.CONNECTING:
 		if status == StreamPeerTCP.STATUS_CONNECTED:
+			peer.set_no_delay(true)
 			connection_changed.emit(true)
 			if not _write_frame(_client_hello()):
 				_fail("OpenMMO ClientHello could not be sent")
@@ -145,19 +145,21 @@ func _handle_server_hello(frame: PackedByteArray) -> void:
 	if reader.failed or reader.remaining() != 0 or server_public.size() != 65 or not _valid_checksum_size(checksum_size):
 		_fail("OpenMMO ServerHello is malformed")
 		return
-	if not _verify_server_key(server_public, signature):
-		_fail("OpenMMO server signature is invalid")
+	var root_public: PackedByteArray = _load_root_public_point()
+	var raw_signature: PackedByteArray = _ecdsa_der_to_raw(signature)
+	if root_public.is_empty() or raw_signature.size() != 64:
+		_fail("OpenMMO root public key or server signature is malformed")
 		return
 	pending_checksum_size = checksum_size
 	state = State.DERIVING_KEYS
 	derivation_thread = Thread.new()
-	var error: Error = derivation_thread.start(Callable(self, "_derive_handshake").bind(server_public))
+	var error: Error = derivation_thread.start(Callable(self, "_derive_handshake").bind(server_public, root_public, _sha256(server_public), raw_signature))
 	if error != OK:
 		derivation_thread = null
 		_fail("OpenMMO P-256 worker could not start")
 
-func _derive_handshake(server_public: PackedByteArray) -> Dictionary:
-	return P256_SCRIPT.new().generate_handshake(server_public)
+func _derive_handshake(server_public: PackedByteArray, root_public: PackedByteArray, digest: PackedByteArray, signature: PackedByteArray) -> Dictionary:
+	return P256_SCRIPT.new().generate_verified_handshake(server_public, root_public, digest, signature)
 
 func _finish_key_derivation(result: Dictionary) -> void:
 	if not bool(result.get("ok", false)):
@@ -241,14 +243,22 @@ func _client_hello() -> PackedByteArray:
 	CODEC_SCRIPT.append_s64_le(payload, timestamp ^ XOR_KEY_TIMESTAMP ^ random_value)
 	return payload
 
-func _verify_server_key(server_public: PackedByteArray, signature_der: PackedByteArray) -> bool:
-	var key: CryptoKey = CryptoKey.new()
-	if key.load(root_public_key_path, true) != OK:
-		return false
-	var signature: PackedByteArray = _ecdsa_der_to_raw(signature_der)
-	if signature.size() != 64:
-		return false
-	return Crypto.new().verify(HashingContext.HASH_SHA256, _sha256(server_public), signature, key)
+func _load_root_public_point() -> PackedByteArray:
+	var file: FileAccess = FileAccess.open(root_public_key_path, FileAccess.READ)
+	if file == null:
+		return PackedByteArray()
+	var encoded: String = ""
+	for line in file.get_as_text().split("\n"):
+		var value: String = line.strip_edges()
+		if not value.is_empty() and not value.begins_with("-----"):
+			encoded += value
+	var der: PackedByteArray = Marshalls.base64_to_raw(encoded)
+	if der.size() < 68:
+		return PackedByteArray()
+	var marker: int = der.size() - 68
+	if der[marker] != 0x03 or der[marker + 1] != 0x42 or der[marker + 2] != 0 or der[marker + 3] != 0x04:
+		return PackedByteArray()
+	return der.slice(der.size() - 65)
 
 func _ecdsa_der_to_raw(value: PackedByteArray) -> PackedByteArray:
 	if value.size() < 8 or value[0] != 0x30:

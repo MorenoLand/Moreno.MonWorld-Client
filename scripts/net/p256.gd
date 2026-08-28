@@ -8,6 +8,7 @@ const FIELD_BYTES: int = 32
 var modulus: PackedInt64Array
 var order: PackedInt64Array
 var modulus_minus_two: PackedInt64Array
+var order_minus_two: PackedInt64Array
 var r_squared: PackedInt64Array
 var one_montgomery: PackedInt64Array
 var curve_b: PackedInt64Array
@@ -18,6 +19,7 @@ func _init() -> void:
 	modulus = _from_hex("FFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFF")
 	order = _from_hex("FFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551")
 	modulus_minus_two = _from_hex("FFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFD")
+	order_minus_two = _from_hex("FFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC63254F")
 	r_squared = _from_hex("00000004FFFFFFFDFFFFFFFFFFFFFFFEFFFFFFFBFFFFFFFF0000000000000003")
 	one_montgomery = _from_hex("00000000FFFFFFFEFFFFFFFFFFFFFFFFFFFFFFFF000000000000000000000001")
 	curve_b = _to_montgomery(_from_hex("5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B"))
@@ -45,6 +47,40 @@ func generate_handshake(peer_public: PackedByteArray) -> Dictionary:
 	encoded_public.append_array(_to_bytes(public_affine.get("x") as PackedInt64Array))
 	encoded_public.append_array(_to_bytes(public_affine.get("y") as PackedInt64Array))
 	return {"ok": true, "public": encoded_public, "secret": _to_bytes(shared_affine.get("x") as PackedInt64Array)}
+
+func generate_verified_handshake(peer_public: PackedByteArray, root_public: PackedByteArray, digest: PackedByteArray, signature: PackedByteArray) -> Dictionary:
+	if not verify_signature(root_public, digest, signature):
+		return {"ok": false, "error": "OpenMMO server signature is invalid"}
+	return generate_handshake(peer_public)
+
+func verify_signature(public_key: PackedByteArray, digest: PackedByteArray, signature: PackedByteArray) -> bool:
+	if digest.size() != FIELD_BYTES or signature.size() != FIELD_BYTES * 2:
+		return false
+	var public_result: Dictionary = _decode_point(public_key)
+	if not bool(public_result.get("ok", false)):
+		return false
+	var r: PackedInt64Array = _from_bytes(signature.slice(0, FIELD_BYTES))
+	var s: PackedInt64Array = _from_bytes(signature.slice(FIELD_BYTES))
+	if _is_zero(r) or _is_zero(s) or _compare(r, order) >= 0 or _compare(s, order) >= 0:
+		return false
+	var z: PackedInt64Array = _from_bytes(digest)
+	if _compare(z, order) >= 0:
+		z = _subtract_with_high(z, order, 0)
+	var inverse_s: PackedInt64Array = _scalar_pow(s, order_minus_two)
+	var u1: PackedInt64Array = _scalar_multiply_mod(z, inverse_s)
+	var u2: PackedInt64Array = _scalar_multiply_mod(r, inverse_s)
+	var first: Dictionary = _scalar_multiply(u1, generator_x, generator_y)
+	var second: Dictionary = _scalar_multiply(u2, public_result.get("x") as PackedInt64Array, public_result.get("y") as PackedInt64Array)
+	if _is_infinity(second):
+		return false
+	var second_affine: Dictionary = _to_affine(second)
+	var sum: Dictionary = _add_mixed(first, _to_montgomery(second_affine.get("x") as PackedInt64Array), _to_montgomery(second_affine.get("y") as PackedInt64Array))
+	if _is_infinity(sum):
+		return false
+	var x: PackedInt64Array = _to_affine(sum).get("x") as PackedInt64Array
+	if _compare(x, order) >= 0:
+		x = _subtract_with_high(x, order, 0)
+	return _compare(x, r) == 0
 
 func scalar_multiply_for_test(scalar_hex: String, point: PackedByteArray) -> Dictionary:
 	var scalar: PackedInt64Array = _from_hex(scalar_hex)
@@ -149,6 +185,35 @@ func _inverse(value: PackedInt64Array) -> PackedInt64Array:
 		result = _multiply(result, result)
 		if _bit(modulus_minus_two, bit_index):
 			result = _multiply(result, value)
+	return result
+
+func _scalar_pow(value: PackedInt64Array, exponent: PackedInt64Array) -> PackedInt64Array:
+	var result: PackedInt64Array = _zero()
+	result[0] = 1
+	for bit_index in range(255, -1, -1):
+		result = _scalar_multiply_mod(result, result)
+		if _bit(exponent, bit_index):
+			result = _scalar_multiply_mod(result, value)
+	return result
+
+func _scalar_multiply_mod(left: PackedInt64Array, right: PackedInt64Array) -> PackedInt64Array:
+	var result: PackedInt64Array = _zero()
+	var addend: PackedInt64Array = left.duplicate()
+	for bit_index in 256:
+		if _bit(right, bit_index):
+			result = _scalar_add_mod(result, addend)
+		addend = _scalar_add_mod(addend, addend)
+	return result
+
+func _scalar_add_mod(left: PackedInt64Array, right: PackedInt64Array) -> PackedInt64Array:
+	var result: PackedInt64Array = _zero()
+	var carry: int = 0
+	for index in LIMBS:
+		var sum: int = left[index] + right[index] + carry
+		result[index] = sum & MASK
+		carry = sum >> 16
+	if carry > 0 or _compare(result, order) >= 0:
+		result = _subtract_with_high(result, order, carry)
 	return result
 
 func _multiply_small(value: PackedInt64Array, multiplier: int) -> PackedInt64Array:

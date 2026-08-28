@@ -224,6 +224,9 @@ func _map_id_for_location(map_group: int, map_index: int) -> String:
 			return str(map_value.get("id", ""))
 	return "rom-map-%d-%d" % [map_group, map_index]
 
+func map_id_for_location(map_group: int, map_index: int) -> String:
+	return _map_id_for_location(map_group, map_index)
+
 func content_id() -> String:
 	return str(manifest.get("content_id", ""))
 

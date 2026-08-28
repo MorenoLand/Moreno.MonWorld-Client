@@ -4,7 +4,10 @@ extends RefCounted
 const JOIN: int = 0x01
 const REQUEST_CHARACTERS: int = 0x02
 const SELECT_CHARACTER: int = 0x04
+const REQUEST_PLAYER: int = 0x05
 const LOAD_MAP: int = 0x10
+const RENDER_SCREEN: int = 0xB4
+const SPECIAL_MAP_ROM_TYPES: Array[int] = [2, 3, 4, 10]
 
 static func encode_join(user_id: int, session_token: PackedByteArray, hardware_id: PackedByteArray) -> PackedByteArray:
 	if session_token.is_empty() or session_token.size() > 0xFF:
@@ -55,6 +58,113 @@ static func encode_select_character(character_id: int, character_id_hash: int = 
 	OpenMMOCodec.append_s64_le(output, character_id)
 	OpenMMOCodec.append_s64_le(output, character_id_hash)
 	return output
+
+static func encode_request_player() -> PackedByteArray:
+	return PackedByteArray()
+
+static func decode_load_map(payload: PackedByteArray) -> Dictionary:
+	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
+	var flags: int = reader.read_u8()
+	var rom_type: int = reader.read_u8()
+	var bank_id: int = reader.read_u8()
+	var map_id: int = reader.read_u8()
+	var region_id: int = reader.read_u8()
+	var result: Dictionary = {"delete_cache": flags & 1 != 0, "reload_player": flags & 2 != 0, "rom_type": rom_type, "bank_id": bank_id, "map_id": map_id, "region_id": region_id, "key": map_key(rom_type, region_id, bank_id, map_id)}
+	if rom_type in SPECIAL_MAP_ROM_TYPES:
+		result["special"] = true
+		result["map_matrix_id"] = reader.read_u16_le()
+		var borders: Dictionary = {}
+		for _index in reader.read_u8():
+			var border_key: int = reader.read_u16_le()
+			var border_value: int = reader.read_u16_le()
+			borders[border_key] = border_value
+		result["border_connections"] = borders
+		result["lighting"] = reader.read_u8()
+		result["weather"] = reader.read_u8()
+		result["map_type"] = reader.read_u8()
+	else:
+		result["special"] = false
+		result["width"] = reader.read_s32_le()
+		result["height"] = reader.read_s32_le()
+		result["palette_index_1"] = reader.read_s32_le()
+		result["palette_index_2"] = reader.read_s32_le()
+		var border_width: int = reader.read_u8()
+		var border_height: int = reader.read_u8()
+		result["border_width"] = border_width
+		result["border_height"] = border_height
+		result["unknown_short"] = reader.read_s16_le()
+		result["unknown_byte"] = reader.read_u8()
+		result["lighting"] = reader.read_u8()
+		result["weather"] = reader.read_u8()
+		result["map_type"] = reader.read_u8()
+		result["encounter_type"] = reader.read_u8()
+		var border_tiles: Array = []
+		var border_count: int = border_width * border_height
+		if border_count < 0 or border_count > reader.remaining() / 2:
+			reader.failed = true
+		else:
+			for _index in border_count:
+				var packed: int = reader.read_u16_le()
+				border_tiles.append({"material": packed & 0x3FF, "collision": packed >> 10 & 0x3F})
+		result["border_tiles"] = border_tiles
+		var custom_map_gzip: PackedByteArray = PackedByteArray()
+		if reader.read_bool():
+			var compressed_size: int = reader.read_s32_le()
+			if compressed_size < 0:
+				reader.failed = true
+			else:
+				custom_map_gzip = reader.read_bytes(compressed_size)
+		result["custom_map_gzip"] = custom_map_gzip
+		var connections: Array = []
+		for _index in reader.read_u8():
+			connections.append({"direction": reader.read_u8(), "offset": reader.read_s32_le(), "bank_id": reader.read_u8(), "map_id": reader.read_u8()})
+		result["connections"] = connections
+		if reader.read_bool():
+			result["trailer_value"] = reader.read_s64_le()
+			result["trailer_text"] = reader.read_utf16_le_null()
+	result["ok"] = not reader.failed and reader.remaining() == 0
+	if not result.ok:
+		result["error"] = "OpenMMO map packet is malformed"
+	return result
+
+static func decode_load_entity(payload: PackedByteArray) -> Dictionary:
+	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
+	var entity: Dictionary = {"entity_id": reader.read_s64_le()}
+	reader.read_u8()
+	entity["skin"] = _read_skin_set(reader, true)
+	entity["name"] = reader.read_utf16_le_null()
+	entity["region_id"] = reader.read_u8()
+	entity["bank_id"] = reader.read_u8()
+	entity["wire_map_id"] = reader.read_u8()
+	entity["x"] = reader.read_s16_le()
+	entity["y"] = reader.read_s16_le()
+	entity["elevation"] = reader.read_u8()
+	entity["facing"] = reader.read_u8()
+	entity["transportation"] = reader.read_u8()
+	entity["nameplate_type"] = reader.read_u8()
+	var flags: int = reader.read_u8()
+	entity["flags"] = flags
+	if flags & 0x01:
+		reader.read_s8()
+	if flags & 0x02:
+		reader.read_s8()
+		reader.read_u16_le()
+	if flags & 0x04:
+		entity["follower_dex_id"] = reader.read_s16_le()
+	if flags & 0x08:
+		reader.read_s8()
+	if flags & 0x10:
+		reader.read_s32_le()
+		reader.read_utf16_le_null()
+	return {"ok": not reader.failed and reader.remaining() == 0, "error": "OpenMMO entity packet is malformed" if reader.failed or reader.remaining() != 0 else "", "entity": entity}
+
+static func decode_render_screen(payload: PackedByteArray) -> Dictionary:
+	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
+	var visible: bool = reader.read_bool()
+	return {"ok": not reader.failed and reader.remaining() == 0, "visible": visible, "error": "OpenMMO render-screen packet is malformed" if reader.failed or reader.remaining() != 0 else ""}
+
+static func map_key(rom_type: int, region_id: int, bank_id: int, map_id: int) -> String:
+	return "%d:%d:%d:%d" % [rom_type, region_id, bank_id, map_id]
 
 static func decode_characters(payload: PackedByteArray) -> Dictionary:
 	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
