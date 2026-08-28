@@ -136,6 +136,11 @@ func _on_map_load(value: Dictionary) -> void:
 func _load_map_texture(map_id: String, expected_width: int = 0, expected_height: int = 0) -> bool:
 	if GameState.content == null or map_id.is_empty():
 		return false
+	var connected_world: Dictionary = GameState.content.prepare_connected_world(map_id)
+	if not bool(connected_world.get("ok", false)):
+		status_label.text = "Map renderer: %s" % str(connected_world.get("error", "map rendering failed"))
+		return false
+	var regions: Array = connected_world.get("regions", [])
 	var result: Dictionary = GameState.content.prepare_map(map_id)
 	if not bool(result.get("ok", false)):
 		status_label.text = "Map renderer: %s" % str(result.get("error", "map rendering failed"))
@@ -143,10 +148,12 @@ func _load_map_texture(map_id: String, expected_width: int = 0, expected_height:
 	if expected_width > 0 and expected_height > 0 and (int(result.get("width", 0)) != expected_width or int(result.get("height", 0)) != expected_height):
 		status_label.text = "The local ROM map dimensions do not match the OpenMMO map"
 		return false
-	var background_texture: Texture2D = result.get("background_texture") as Texture2D
-	var foreground_texture: Texture2D = result.get("foreground_texture") as Texture2D
-	map_has_animation = GameState.content.has_animated_tiles(map_id)
-	map_view.set_map(background_texture, int(result.get("width", 0)), int(result.get("height", 0)), result.get("objects", []), map_id, foreground_texture)
+	map_has_animation = false
+	for region_value in regions:
+		if region_value is Dictionary and GameState.content.has_animated_tiles(str(region_value.get("map_id", ""))):
+			map_has_animation = true
+			break
+	map_view.set_world(connected_world, map_id)
 	audio.play_map_music(GameState.content, map_id)
 	return true
 
@@ -158,7 +165,7 @@ func _on_entity_update(value: Dictionary) -> void:
 		var is_local: bool = bool(value.get("local", false)) or int(entity.get("character_id", 0)) == selected_character_id
 		var incoming_map_id: String = str(entity.get("map_id", ""))
 		if is_local and not incoming_map_id.is_empty() and map_view != null and incoming_map_id != map_view.map_id:
-			if _load_map_texture(incoming_map_id):
+			if map_view.set_active_map(incoming_map_id) or _load_map_texture(incoming_map_id):
 				snapshot["map_id"] = incoming_map_id
 				title_label.text = "Map: %s" % incoming_map_id
 		var merged: Dictionary = {}

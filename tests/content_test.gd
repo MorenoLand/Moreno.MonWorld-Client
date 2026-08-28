@@ -125,6 +125,29 @@ func _init() -> void:
 		push_error("world renderer did not prepare cached ROM compositor layers")
 		quit(1)
 		return
+	var connected_world: Dictionary = content.prepare_connected_world("pallet-town")
+	var connected_regions: Array = connected_world.get("regions", [])
+	if not bool(connected_world.get("ok", false)) or connected_regions.size() < 3:
+		push_error("Pallet Town connected overworld was not assembled")
+		quit(1)
+		return
+	var connected_origins: Dictionary = connected_world.get("map_origins", {})
+	for connection_value in pallet_result.get("connections", []):
+		if not connection_value is Dictionary:
+			continue
+		var connection: Dictionary = connection_value
+		var target_map_id: String = str(connection.get("map_id", ""))
+		var target_map: Dictionary = content.map_data(target_map_id)
+		var target_origin: Variant = connected_origins.get(target_map_id)
+		if target_map.is_empty() or target_origin == null:
+			push_error("connected overworld omitted %s" % target_map_id)
+			quit(1)
+			return
+		var expected_origin: Vector2i = content._connected_map_origin(Vector2i.ZERO, int(pallet_result.get("width", 0)), int(pallet_result.get("height", 0)), int(target_map.get("width", 0)), int(target_map.get("height", 0)), int(connection.get("direction", 0)), int(connection.get("offset", 0)))
+		if Vector2i(target_origin) != expected_origin:
+			push_error("connected overworld placed %s at the wrong offset" % target_map_id)
+			quit(1)
+			return
 	var house_result: Dictionary = content.render_map("pallet-players-house-1f")
 	if content.has_animated_tiles("pallet-players-house-1f"):
 		push_error("indoor Building tileset was incorrectly marked as animated")

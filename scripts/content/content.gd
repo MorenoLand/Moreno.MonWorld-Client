@@ -341,6 +341,66 @@ func prepare_map(map_id: String) -> Dictionary:
 		cached_map["world_foreground_texture"] = foreground_texture
 	return {"ok": true, "texture": world_texture, "background_texture": background_texture, "foreground_texture": foreground_texture, "world_texture": world_texture, "width": int(cached_map.get("width", 0)), "height": int(cached_map.get("height", 0)), "header_offset": int(cached_map.get("header_offset", -1)), "layout_offset": int(cached_map.get("layout_offset", -1)), "objects": cached_map.get("objects", []), "warps": cached_map.get("warps", []), "connections": cached_map.get("connections", []), "map_cells": cached_map.get("map_cells", PackedInt32Array()), "music_id": int(cached_map.get("music_id", 0)), "map_type": int(cached_map.get("map_type", 0)), "animation_phase": 0}
 
+func prepare_connected_world(root_map_id: String, max_maps: int = 96) -> Dictionary:
+	if root_map_id.is_empty() or max_maps <= 0:
+		return {"ok": false, "error": "invalid connected-world root"}
+	var regions: Array = []
+	var placed: Dictionary = {}
+	var queued: Dictionary = {root_map_id: true}
+	var pending: Array = [{"map_id": root_map_id, "origin": Vector2i.ZERO}]
+	while not pending.is_empty() and regions.size() < max_maps:
+		var pending_value: Variant = pending.pop_front()
+		if not pending_value is Dictionary:
+			continue
+		var pending_map: Dictionary = pending_value
+		var map_id: String = str(pending_map.get("map_id", ""))
+		if map_id.is_empty() or placed.has(map_id):
+			continue
+		var prepared: Dictionary = prepare_map(map_id)
+		if not bool(prepared.get("ok", false)):
+			continue
+		var origin: Vector2i = pending_map.get("origin", Vector2i.ZERO)
+		var width: int = int(prepared.get("width", 0))
+		var height: int = int(prepared.get("height", 0))
+		if width <= 0 or height <= 0:
+			continue
+		var region: Dictionary = {"map_id": map_id, "origin": origin, "width": width, "height": height, "background_texture": prepared.get("background_texture"), "foreground_texture": prepared.get("foreground_texture"), "objects": prepared.get("objects", []), "warps": prepared.get("warps", []), "connections": prepared.get("connections", []), "music_id": int(prepared.get("music_id", 0)), "map_type": int(prepared.get("map_type", 0))}
+		regions.append(region)
+		placed[map_id] = origin
+		for connection_value in prepared.get("connections", []):
+			if not connection_value is Dictionary:
+				continue
+			var connection: Dictionary = connection_value
+			var direction: int = int(connection.get("direction", 0))
+			if direction < CONNECTION_SOUTH or direction > CONNECTION_EAST:
+				continue
+			var target_map_id: String = str(connection.get("map_id", ""))
+			if target_map_id.is_empty() or placed.has(target_map_id) or queued.has(target_map_id):
+				continue
+			var target_cache: Dictionary = _get_or_build_map_cache(target_map_id)
+			if not bool(target_cache.get("ok", false)):
+				continue
+			var target_width: int = int(target_cache.get("width", 0))
+			var target_height: int = int(target_cache.get("height", 0))
+			var target_origin: Vector2i = _connected_map_origin(origin, width, height, target_width, target_height, direction, int(connection.get("offset", 0)))
+			queued[target_map_id] = true
+			pending.append({"map_id": target_map_id, "origin": target_origin})
+	if regions.is_empty():
+		return {"ok": false, "error": "connected-world root map is not renderable"}
+	return {"ok": true, "root_map_id": root_map_id, "regions": regions, "map_origins": placed}
+
+func _connected_map_origin(origin: Vector2i, width: int, height: int, target_width: int, target_height: int, direction: int, offset: int) -> Vector2i:
+	match direction:
+		CONNECTION_SOUTH:
+			return Vector2i(origin.x + offset, origin.y + height)
+		CONNECTION_NORTH:
+			return Vector2i(origin.x + offset, origin.y - target_height)
+		CONNECTION_WEST:
+			return Vector2i(origin.x - target_width, origin.y + offset)
+		CONNECTION_EAST:
+			return Vector2i(origin.x + width, origin.y + offset)
+	return origin
+
 func has_animated_tiles(map_id: String) -> bool:
 	var cached_map: Dictionary = _get_or_build_map_cache(map_id)
 	return bool(cached_map.get("ok", false)) and not (cached_map.get("animated_tiles", []) as Array).is_empty()
