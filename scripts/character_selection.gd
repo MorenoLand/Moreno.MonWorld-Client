@@ -8,6 +8,7 @@ var status_label: Label
 var play_buttons: Array[Button] = []
 var selecting: bool = false
 var warmed_map_ids: Dictionary = {}
+var warming_map_ids: Dictionary = {}
 
 func _ready() -> void:
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
@@ -122,13 +123,19 @@ func _warm_character_maps(values: Array) -> void:
 			continue
 		var character: Dictionary = character_value
 		var map_id: String = GameState.content.map_id_for_location(int(character.get("bank_id", -1)), int(character.get("map_id", -1)))
-		if map_id.is_empty() or warmed_map_ids.has(map_id):
+		if map_id.is_empty() or warmed_map_ids.has(map_id) or warming_map_ids.has(map_id):
+			continue
+		warming_map_ids[map_id] = true
+		await get_tree().process_frame
+		if not is_inside_tree() or selecting or GameState.content == null:
+			warming_map_ids.erase(map_id)
+			return
+		var prepared: Dictionary = GameState.content.prepare_map(map_id, false)
+		warming_map_ids.erase(map_id)
+		if not bool(prepared.get("ok", false)):
 			continue
 		warmed_map_ids[map_id] = true
-		await get_tree().process_frame
-		if selecting or GameState.content == null:
-			return
-		GameState.content.prepare_map(map_id, false)
+		_set_map_ready(map_id)
 
 func _add_character_card(character: Dictionary) -> void:
 	var card := PanelContainer.new()
@@ -200,10 +207,18 @@ func _add_character_card(character: Dictionary) -> void:
 		party_box.add_child(slot)
 	var play_button := Button.new()
 	play_button.text = "PLAY"
+	var local_map_id: String = GameState.content.map_id_for_location(int(character.get("bank_id", -1)), int(character.get("map_id", -1))) if GameState.content != null else ""
+	play_button.set_meta("map_id", local_map_id)
+	play_button.disabled = not local_map_id.is_empty() and not warmed_map_ids.has(local_map_id)
 	play_button.pressed.connect(_select_character.bind(int(character.get("id", 0))))
 	_style_button(play_button, true)
 	box.add_child(play_button)
 	play_buttons.append(play_button)
+
+func _set_map_ready(map_id: String) -> void:
+	for button in play_buttons:
+		if str(button.get_meta("map_id", "")) == map_id:
+			button.disabled = false
 
 func _character_texture() -> Texture2D:
 	if GameState.content == null:
@@ -249,7 +264,8 @@ func _logout() -> void:
 func _on_connection_error(message: String) -> void:
 	selecting = false
 	for button in play_buttons:
-		button.disabled = false
+		var map_id: String = str(button.get_meta("map_id", ""))
+		button.disabled = not map_id.is_empty() and not warmed_map_ids.has(map_id)
 	if status_label != null:
 		status_label.modulate = Color("ff9a9a")
 		status_label.text = message

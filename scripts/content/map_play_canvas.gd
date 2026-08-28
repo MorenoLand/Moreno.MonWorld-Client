@@ -92,10 +92,17 @@ func set_input_enabled(value: bool) -> void:
 	input_enabled = value
 	if value:
 		call_deferred("_restore_input_focus")
+	else:
+		held_direction = 0
+		movement_retry_elapsed = 0.0
 
 func _restore_input_focus() -> void:
 	if input_enabled and is_inside_tree():
 		grab_focus()
+
+func _text_input_has_focus() -> bool:
+	var focus_owner: Control = get_viewport().gui_get_focus_owner() as Control
+	return focus_owner is LineEdit or focus_owner is TextEdit
 
 func set_dialogue_active(value: bool) -> void:
 	dialogue_active = value
@@ -409,6 +416,10 @@ func _input(event: InputEvent) -> void:
 	if not event is InputEventKey:
 		return
 	var key_event: InputEventKey = event as InputEventKey
+	if _text_input_has_focus():
+		held_direction = 0
+		movement_retry_elapsed = 0.0
+		return
 	if key_event.keycode == KEY_ESCAPE and key_event.pressed and not key_event.echo:
 		get_viewport().set_input_as_handled()
 		back_requested.emit()
@@ -538,6 +549,9 @@ func _request_move(direction: int) -> bool:
 	return true
 
 func _process(delta: float) -> void:
+	if _text_input_has_focus():
+		held_direction = 0
+		movement_retry_elapsed = 0.0
 	if warp_cooldown > 0.0:
 		warp_cooldown = maxf(warp_cooldown - delta, 0.0)
 	animation_elapsed += delta
