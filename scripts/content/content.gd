@@ -50,6 +50,7 @@ var rom_sha1: String = ""
 var rom_header: Dictionary = {}
 var source_profile: Dictionary = {}
 var map_cache: Dictionary = {}
+var map_topology_cache: Dictionary = {}
 var sprite_cache: Dictionary = {}
 var string_catalog: Dictionary = {}
 
@@ -268,6 +269,20 @@ func map_data(map_id: String) -> Dictionary:
 			return {"id": map_id, "name": name, "map_group": int(reference.get("map_group", -1)), "map_index": int(reference.get("map_index", -1)), "width": int(descriptor.get("width", 0)), "height": int(descriptor.get("height", 0)), "music_id": int(descriptor.get("music_id", 0)), "map_type": int(descriptor.get("map_type", 0)), "region_map_section_id": int(descriptor.get("region_map_section_id", -1)), "floor_num": int(descriptor.get("floor_num", 0))}
 	return {}
 
+func _get_or_build_map_topology(map_id: String) -> Dictionary:
+	var cached_topology: Dictionary = map_topology_cache.get(map_id, {})
+	if not cached_topology.is_empty():
+		return cached_topology
+	var map_value: Dictionary = map_data(map_id)
+	if map_value.is_empty():
+		return {"ok": false, "error": "unknown map"}
+	var descriptor: Dictionary = _read_map_descriptor(map_value)
+	if not bool(descriptor.get("ok", false)):
+		return descriptor
+	var topology: Dictionary = {"ok": true, "map_id": map_id, "width": int(descriptor.get("width", 0)), "height": int(descriptor.get("height", 0)), "header_offset": int(descriptor.get("header_offset", -1)), "music_id": int(descriptor.get("music_id", 0)), "map_type": int(descriptor.get("map_type", 0)), "connections": _read_map_connections(int(descriptor.get("header_offset", -1)))}
+	map_topology_cache[map_id] = topology
+	return topology
+
 func render_map(map_id: String, animation_tick: int = 0) -> Dictionary:
 	var map_value: Dictionary = map_data(map_id)
 	if map_value.is_empty():
@@ -322,32 +337,33 @@ func render_map(map_id: String, animation_tick: int = 0) -> Dictionary:
 	map_cache[map_id] = cached_map
 	return {"ok": true, "texture": texture, "image": image, "background_texture": background_texture, "foreground_texture": foreground_texture, "width": int(cached_map.get("width", 0)), "height": int(cached_map.get("height", 0)), "header_offset": int(cached_map.get("header_offset", -1)), "layout_offset": int(cached_map.get("layout_offset", -1)), "objects": cached_map.get("objects", []), "warps": cached_map.get("warps", []), "connections": cached_map.get("connections", []), "map_cells": cached_map.get("map_cells", PackedInt32Array()), "music_id": int(cached_map.get("music_id", 0)), "map_type": int(cached_map.get("map_type", 0)), "animation_phase": animation_phase}
 
-func prepare_map(map_id: String) -> Dictionary:
+func prepare_map(map_id: String, include_composite_texture: bool = true) -> Dictionary:
 	var cached_map: Dictionary = _get_or_build_map_cache(map_id)
 	if not bool(cached_map.get("ok", false)):
 		return cached_map
 	var world_texture: Texture2D = cached_map.get("world_texture") as Texture2D
 	var background_texture: Texture2D = cached_map.get("world_background_texture") as Texture2D
 	var foreground_texture: Texture2D = cached_map.get("world_foreground_texture") as Texture2D
-	if world_texture == null or background_texture == null or foreground_texture == null:
-		var world_image: Image = (cached_map.get("base_background_image") as Image).duplicate()
+	if background_texture == null or foreground_texture == null:
 		var background_image: Image = (cached_map.get("base_background_image") as Image).duplicate()
 		var foreground_image: Image = (cached_map.get("base_foreground_image") as Image).duplicate()
-		world_texture = ImageTexture.create_from_image(world_image)
 		background_texture = ImageTexture.create_from_image(background_image)
 		foreground_texture = ImageTexture.create_from_image(foreground_image)
 		cached_map["world_texture"] = world_texture
 		cached_map["world_background_texture"] = background_texture
 		cached_map["world_foreground_texture"] = foreground_texture
-	return {"ok": true, "texture": world_texture, "background_texture": background_texture, "foreground_texture": foreground_texture, "world_texture": world_texture, "width": int(cached_map.get("width", 0)), "height": int(cached_map.get("height", 0)), "header_offset": int(cached_map.get("header_offset", -1)), "layout_offset": int(cached_map.get("layout_offset", -1)), "objects": cached_map.get("objects", []), "warps": cached_map.get("warps", []), "connections": cached_map.get("connections", []), "map_cells": cached_map.get("map_cells", PackedInt32Array()), "music_id": int(cached_map.get("music_id", 0)), "map_type": int(cached_map.get("map_type", 0)), "animation_phase": 0}
+	if include_composite_texture and world_texture == null:
+		world_texture = ImageTexture.create_from_image((cached_map.get("base_background_image") as Image).duplicate())
+		cached_map["world_texture"] = world_texture
+	return {"ok": true, "texture": world_texture if world_texture != null else background_texture, "background_texture": background_texture, "foreground_texture": foreground_texture, "world_texture": world_texture, "width": int(cached_map.get("width", 0)), "height": int(cached_map.get("height", 0)), "header_offset": int(cached_map.get("header_offset", -1)), "layout_offset": int(cached_map.get("layout_offset", -1)), "objects": cached_map.get("objects", []), "warps": cached_map.get("warps", []), "connections": cached_map.get("connections", []), "animated_background_tiles": cached_map.get("animated_background_tiles", []), "animated_foreground_tiles": cached_map.get("animated_foreground_tiles", []), "map_cells": cached_map.get("map_cells", PackedInt32Array()), "music_id": int(cached_map.get("music_id", 0)), "map_type": int(cached_map.get("map_type", 0)), "animation_phase": 0}
 
-func prepare_connected_world(root_map_id: String, max_maps: int = 96) -> Dictionary:
-	if root_map_id.is_empty() or max_maps <= 0:
+func prepare_connected_world(root_map_id: String, max_maps: int = 96, preload_depth: int = 1) -> Dictionary:
+	if root_map_id.is_empty() or max_maps <= 0 or preload_depth < 0:
 		return {"ok": false, "error": "invalid connected-world root"}
 	var regions: Array = []
 	var placed: Dictionary = {}
 	var queued: Dictionary = {root_map_id: true}
-	var pending: Array = [{"map_id": root_map_id, "origin": Vector2i.ZERO}]
+	var pending: Array = [{"map_id": root_map_id, "origin": Vector2i.ZERO, "depth": 0}]
 	while not pending.is_empty() and regions.size() < max_maps:
 		var pending_value: Variant = pending.pop_front()
 		if not pending_value is Dictionary:
@@ -356,18 +372,24 @@ func prepare_connected_world(root_map_id: String, max_maps: int = 96) -> Diction
 		var map_id: String = str(pending_map.get("map_id", ""))
 		if map_id.is_empty() or placed.has(map_id):
 			continue
-		var prepared: Dictionary = prepare_map(map_id)
-		if not bool(prepared.get("ok", false)):
+		var topology: Dictionary = _get_or_build_map_topology(map_id)
+		if not bool(topology.get("ok", false)):
 			continue
 		var origin: Vector2i = pending_map.get("origin", Vector2i.ZERO)
-		var width: int = int(prepared.get("width", 0))
-		var height: int = int(prepared.get("height", 0))
+		var depth: int = int(pending_map.get("depth", 0))
+		var width: int = int(topology.get("width", 0))
+		var height: int = int(topology.get("height", 0))
 		if width <= 0 or height <= 0:
 			continue
-		var region: Dictionary = {"map_id": map_id, "origin": origin, "width": width, "height": height, "background_texture": prepared.get("background_texture"), "foreground_texture": prepared.get("foreground_texture"), "objects": prepared.get("objects", []), "warps": prepared.get("warps", []), "connections": prepared.get("connections", []), "music_id": int(prepared.get("music_id", 0)), "map_type": int(prepared.get("map_type", 0))}
+		var prepared: Dictionary = {}
+		if depth <= preload_depth:
+			prepared = prepare_map(map_id, false)
+		if map_id == root_map_id and not bool(prepared.get("ok", false)):
+			return prepared
+		var region: Dictionary = {"map_id": map_id, "origin": origin, "width": width, "height": height, "background_texture": prepared.get("background_texture"), "foreground_texture": prepared.get("foreground_texture"), "objects": prepared.get("objects", []), "warps": prepared.get("warps", []), "connections": topology.get("connections", []), "animated_background_tiles": prepared.get("animated_background_tiles", []), "animated_foreground_tiles": prepared.get("animated_foreground_tiles", []), "music_id": int(topology.get("music_id", 0)), "map_type": int(topology.get("map_type", 0)), "ready": bool(prepared.get("ok", false))}
 		regions.append(region)
 		placed[map_id] = origin
-		for connection_value in prepared.get("connections", []):
+		for connection_value in topology.get("connections", []):
 			if not connection_value is Dictionary:
 				continue
 			var connection: Dictionary = connection_value
@@ -377,17 +399,44 @@ func prepare_connected_world(root_map_id: String, max_maps: int = 96) -> Diction
 			var target_map_id: String = str(connection.get("map_id", ""))
 			if target_map_id.is_empty() or placed.has(target_map_id) or queued.has(target_map_id):
 				continue
-			var target_cache: Dictionary = _get_or_build_map_cache(target_map_id)
-			if not bool(target_cache.get("ok", false)):
+			var target_topology: Dictionary = _get_or_build_map_topology(target_map_id)
+			if not bool(target_topology.get("ok", false)):
 				continue
-			var target_width: int = int(target_cache.get("width", 0))
-			var target_height: int = int(target_cache.get("height", 0))
+			var target_width: int = int(target_topology.get("width", 0))
+			var target_height: int = int(target_topology.get("height", 0))
 			var target_origin: Vector2i = _connected_map_origin(origin, width, height, target_width, target_height, direction, int(connection.get("offset", 0)))
 			queued[target_map_id] = true
-			pending.append({"map_id": target_map_id, "origin": target_origin})
+			pending.append({"map_id": target_map_id, "origin": target_origin, "depth": depth + 1})
 	if regions.is_empty():
 		return {"ok": false, "error": "connected-world root map is not renderable"}
 	return {"ok": true, "root_map_id": root_map_id, "regions": regions, "map_origins": placed}
+
+func animated_tile_texture(map_id: String, tile_entry: int, animation_tick_value: int) -> Texture2D:
+	var cached_map: Dictionary = _get_or_build_map_cache(map_id)
+	if not bool(cached_map.get("ok", false)) or not bool(cached_map.get("primary_animation_enabled", false)):
+		return null
+	var phase: int = posmod(animation_tick_value, ANIMATION_PHASE_COUNT)
+	if phase == 0:
+		return null
+	var tile_cache: Dictionary = cached_map.get("animated_tile_textures", {})
+	var cached_phase: int = int(cached_map.get("animated_tile_phase", -1))
+	if cached_phase != phase:
+		tile_cache.clear()
+		cached_map["animated_primary_tiles"] = _animated_primary_tiles(cached_map.get("primary_tiles", PackedByteArray()), phase, true)
+		cached_map["animated_tile_phase"] = phase
+	var cache_key: String = "%d:%d" % [phase, tile_entry]
+	var cached_texture: Texture2D = tile_cache.get(cache_key) as Texture2D
+	if cached_texture != null:
+		return cached_texture
+	var image: Image = Image.create(8, 8, false, Image.FORMAT_RGBA8)
+	image.fill(Color(0.0, 0.0, 0.0, 0.0))
+	var ignored_animated_tiles: Array = []
+	_draw_tile(image, 0, 0, tile_entry, cached_map.get("primary", {}), cached_map.get("secondary", {}), ignored_animated_tiles, cached_map.get("animated_primary_tiles", PackedByteArray()))
+	var texture: ImageTexture = ImageTexture.create_from_image(image)
+	tile_cache[cache_key] = texture
+	cached_map["animated_tile_textures"] = tile_cache
+	map_cache[map_id] = cached_map
+	return texture
 
 func _connected_map_origin(origin: Vector2i, width: int, height: int, target_width: int, target_height: int, direction: int, offset: int) -> Vector2i:
 	match direction:

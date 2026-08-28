@@ -125,10 +125,25 @@ func _init() -> void:
 		push_error("world renderer did not prepare cached ROM compositor layers")
 		quit(1)
 		return
+	var animated_layer_tiles: Array = prepared_result.get("animated_background_tiles", [])
+	animated_layer_tiles.append_array(prepared_result.get("animated_foreground_tiles", []))
+	if animated_layer_tiles.is_empty() or not animated_layer_tiles[0] is Dictionary or content.animated_tile_texture("pallet-town", int(animated_layer_tiles[0].get("entry", 0)), 7) == null:
+		push_error("world renderer did not prepare a ROM-backed animated tile overlay")
+		quit(1)
+		return
 	var connected_world: Dictionary = content.prepare_connected_world("pallet-town")
 	var connected_regions: Array = connected_world.get("regions", [])
 	if not bool(connected_world.get("ok", false)) or connected_regions.size() < 3:
 		push_error("Pallet Town connected overworld was not assembled")
+		quit(1)
+		return
+	var connected_root_ready: bool = false
+	for region_value in connected_regions:
+		if region_value is Dictionary and str(region_value.get("map_id", "")) == "pallet-town" and bool(region_value.get("ready", false)) and region_value.get("background_texture") != null:
+			connected_root_ready = true
+			break
+	if not connected_root_ready:
+		push_error("connected overworld root was not render-ready")
 		quit(1)
 		return
 	var connected_origins: Dictionary = connected_world.get("map_origins", {})

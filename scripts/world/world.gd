@@ -141,7 +141,7 @@ func _load_map_texture(map_id: String, expected_width: int = 0, expected_height:
 		status_label.text = "Map renderer: %s" % str(connected_world.get("error", "map rendering failed"))
 		return false
 	var regions: Array = connected_world.get("regions", [])
-	var result: Dictionary = GameState.content.prepare_map(map_id)
+	var result: Dictionary = GameState.content.prepare_map(map_id, false)
 	if not bool(result.get("ok", false)):
 		status_label.text = "Map renderer: %s" % str(result.get("error", "map rendering failed"))
 		return false
@@ -150,7 +150,7 @@ func _load_map_texture(map_id: String, expected_width: int = 0, expected_height:
 		return false
 	map_has_animation = false
 	for region_value in regions:
-		if region_value is Dictionary and GameState.content.has_animated_tiles(str(region_value.get("map_id", ""))):
+		if region_value is Dictionary and (not (region_value.get("animated_background_tiles", []) as Array).is_empty() or not (region_value.get("animated_foreground_tiles", []) as Array).is_empty()):
 			map_has_animation = true
 			break
 	map_view.set_world(connected_world, map_id)
