@@ -177,11 +177,6 @@ func _sync_map_entities() -> void:
 func _process(delta: float) -> void:
 	if map_view == null or snapshot.is_empty():
 		return
-	if not held_input.is_empty():
-		held_input_elapsed += delta
-		if held_input_elapsed >= MonWorldMapPlayCanvas.NORMAL_STEP_DURATION:
-			held_input_elapsed = 0.0
-			map_view.request_move(held_input)
 	if not map_has_animation:
 		return
 	animation_elapsed += delta

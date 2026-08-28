@@ -457,7 +457,7 @@ func _direction_name(direction: int) -> String:
 	return ""
 
 func _draw() -> void:
-	draw_rect(Rect2(Vector2.ZERO, size), Color("080B10"), true)
+	draw_rect(Rect2(Vector2.ZERO, size), Color.BLACK, true)
 	if map_texture == null or map_pixel_size.x <= 0.0 or map_pixel_size.y <= 0.0 or not has_spawn:
 		return
 	var maximum_camera_size: Vector2 = Vector2(minf(map_pixel_size.x, CAMERA_MAX_CELLS_X * TILE_PIXELS), minf(map_pixel_size.y, CAMERA_MAX_CELLS_Y * TILE_PIXELS))
@@ -501,8 +501,6 @@ func _draw() -> void:
 	if player_texture != null:
 		var player_size: Vector2 = Vector2(player_texture.get_width(), player_texture.get_height())
 		var player_anchor: Vector2 = (world_player + Vector2(0.5, 1.0)) * TILE_PIXELS
-		if movement_active and movement_stair:
-			player_anchor += _stair_offset(clampf(movement_elapsed / movement_duration, 0.0, 1.0), movement_stair_behavior)
 		drawables.append({"kind": "sprite", "texture": player_texture, "width": player_size.x, "height": player_size.y, "world_anchor": player_anchor, "sort_y": world_player.y + 1.0, "sort_order": 1})
 	drawables.sort_custom(_sort_drawables)
 	for drawable_value in drawables:
@@ -526,10 +524,3 @@ func _sort_drawables(left: Dictionary, right: Dictionary) -> bool:
 	if not is_equal_approx(left_y, right_y):
 		return left_y < right_y
 	return int(left.get("sort_order", 0)) < int(right.get("sort_order", 0))
-
-func _stair_offset(progress: float, behavior: int) -> Vector2:
-	var frame: float = progress * 12.0
-	var horizontal_sign: float = 1.0 if behavior == 0x6C or behavior == 0x6E else -1.0
-	var horizontal: float = horizontal_sign * frame * 0.5
-	var vertical: float = -frame * 0.3125 if behavior == 0x6C or behavior == 0x6D else maxf(frame - 6.0, 0.0) * 0.09375
-	return Vector2(horizontal, vertical)

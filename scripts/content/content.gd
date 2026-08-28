@@ -38,6 +38,8 @@ const CONNECTION_SOUTH: int = 1
 const CONNECTION_NORTH: int = 2
 const CONNECTION_WEST: int = 3
 const CONNECTION_EAST: int = 4
+const ROCK_STAIRS_BEHAVIOR: int = 0x2A
+const FLOOR_ROOFTOP: int = 127
 const MAP_GROUP_DUNGEONS: int = 1
 const MAP_GROUP_TOWNS_AND_ROUTES: int = 3
 const MAP_GROUP_INDOOR_PALLET: int = 4
@@ -158,6 +160,22 @@ static func _pretty_map_name(raw_name: String) -> String:
 		value = "Route " + route_value
 	return value
 
+func _map_name_from_descriptor(descriptor: Dictionary) -> String:
+	var section_id: int = int(descriptor.get("region_map_section_id", -1))
+	var section_start: int = int(source_profile.get("region_map_section_start", -1))
+	var section_names: Array = source_profile.get("region_map_section_names", [])
+	if section_start < 0 or section_id < section_start or section_id - section_start >= section_names.size():
+		return ""
+	var name: String = str(section_names[section_id - section_start])
+	if name.is_empty():
+		return ""
+	var floor_num: int = int(descriptor.get("floor_num", 0))
+	if floor_num == 0:
+		return name
+	if floor_num == FLOOR_ROOFTOP:
+		return "%s Rooftop" % name
+	return "%s %s%dF" % [name, "B" if floor_num < 0 else "", absi(floor_num)]
+
 func _format_int(key: String, fallback: int) -> int:
 	var format: Dictionary = source_profile.get("format", {})
 	return int(format.get(key, fallback))
@@ -181,6 +199,9 @@ func _hydrate_manifest() -> void:
 			map_value["height"] = int(descriptor.get("height", 0))
 			map_value["music_id"] = int(descriptor.get("music_id", 0))
 			map_value["map_type"] = int(descriptor.get("map_type", 0))
+			var source_name: String = _map_name_from_descriptor(descriptor)
+			if not source_name.is_empty() and str(map_value.get("name", "")).begins_with("ROM map "):
+				map_value["name"] = source_name
 		maps[map_index] = map_value
 	manifest["maps"] = maps
 
@@ -216,7 +237,10 @@ func _read_map_descriptor(map_value: Dictionary) -> Dictionary:
 	var secondary_offset: int = _read_rom_pointer(layout_offset + 20)
 	if width <= 0 or height <= 0 or width > 512 or height > 512:
 		return {"ok": false, "error": "FireRed map dimensions are invalid"}
-	return {"ok": true, "map_group": map_group, "map_index": map_index, "header_offset": header_offset, "layout_offset": layout_offset, "width": width, "height": height, "map_offset": map_offset, "primary_offset": primary_offset, "secondary_offset": secondary_offset, "music_id": _read_u16(header_offset + 0x10), "map_type": int(rom_data[header_offset + 0x17])}
+	var floor_num: int = int(rom_data[header_offset + 0x1A])
+	if floor_num >= 0x80:
+		floor_num -= 0x100
+	return {"ok": true, "map_group": map_group, "map_index": map_index, "header_offset": header_offset, "layout_offset": layout_offset, "width": width, "height": height, "map_offset": map_offset, "primary_offset": primary_offset, "secondary_offset": secondary_offset, "music_id": _read_u16(header_offset + 0x10), "region_map_section_id": int(rom_data[header_offset + 0x14]), "map_type": int(rom_data[header_offset + 0x17]), "floor_num": floor_num}
 
 func _map_id_for_location(map_group: int, map_index: int) -> String:
 	for map_value in manifest.get("maps", []):
@@ -238,7 +262,10 @@ func map_data(map_id: String) -> Dictionary:
 	if not reference.is_empty():
 		var descriptor: Dictionary = _read_map_descriptor(reference)
 		if bool(descriptor.get("ok", false)):
-			return {"id": map_id, "name": "ROM map %d/%d" % [int(reference.get("map_group", -1)), int(reference.get("map_index", -1))], "map_group": int(reference.get("map_group", -1)), "map_index": int(reference.get("map_index", -1)), "width": int(descriptor.get("width", 0)), "height": int(descriptor.get("height", 0)), "music_id": int(descriptor.get("music_id", 0)), "map_type": int(descriptor.get("map_type", 0))}
+			var name: String = _map_name_from_descriptor(descriptor)
+			if name.is_empty():
+				name = "Unlisted area"
+			return {"id": map_id, "name": name, "map_group": int(reference.get("map_group", -1)), "map_index": int(reference.get("map_index", -1)), "width": int(descriptor.get("width", 0)), "height": int(descriptor.get("height", 0)), "music_id": int(descriptor.get("music_id", 0)), "map_type": int(descriptor.get("map_type", 0)), "region_map_section_id": int(descriptor.get("region_map_section_id", -1)), "floor_num": int(descriptor.get("floor_num", 0))}
 	return {}
 
 func render_map(map_id: String, animation_tick: int = 0) -> Dictionary:
@@ -298,7 +325,7 @@ func prepare_map(map_id: String) -> Dictionary:
 	var background_texture: Texture2D = cached_map.get("world_background_texture") as Texture2D
 	var foreground_texture: Texture2D = cached_map.get("world_foreground_texture") as Texture2D
 	if world_texture == null or background_texture == null or foreground_texture == null:
-		var world_image: Image = (cached_map.get("base_image") as Image).duplicate()
+		var world_image: Image = (cached_map.get("base_background_image") as Image).duplicate()
 		var background_image: Image = (cached_map.get("base_background_image") as Image).duplicate()
 		var foreground_image: Image = (cached_map.get("base_foreground_image") as Image).duplicate()
 		world_texture = ImageTexture.create_from_image(world_image)
@@ -361,9 +388,9 @@ func _build_map_cache(map_id: String, map_value: Dictionary) -> Dictionary:
 	primary["is_secondary"] = false
 	secondary["is_secondary"] = true
 	var image: Image = Image.create(width * 16, height * 16, false, Image.FORMAT_RGBA8)
-	image.fill(Color("101721"))
+	image.fill(Color.BLACK)
 	var background_image: Image = Image.create(width * 16, height * 16, false, Image.FORMAT_RGBA8)
-	background_image.fill(Color("101721"))
+	background_image.fill(Color.BLACK)
 	var foreground_image: Image = Image.create(width * 16, height * 16, false, Image.FORMAT_RGBA8)
 	foreground_image.fill(Color(0.0, 0.0, 0.0, 0.0))
 	var animated_tiles: Array = []
@@ -453,7 +480,7 @@ func can_walk(map_id: String, from_x: int, from_y: int, to_x: int, to_y: int, el
 	if not bool(destination.get("ok", false)) or bool(destination.get("undefined", false)):
 		return false
 	var destination_warp: Dictionary = _warp_record_at(cached_map, to_x, to_y, elevation)
-	if not _cell_can_stand(destination) and destination_warp.is_empty():
+	if not _cell_can_stand_for_direction(destination, direction) and destination_warp.is_empty():
 		return false
 	if _position_occupied(cached_map.get("objects", []) if occupied.is_empty() else occupied, to_x, to_y):
 		return false
@@ -617,6 +644,11 @@ func _warp_record_at(cached_map: Dictionary, x: int, y: int, elevation: int = -1
 func _cell_can_stand(cell: Dictionary) -> bool:
 	return bool(cell.get("ok", false)) and not bool(cell.get("undefined", false)) and int(cell.get("collision", 1)) == 0
 
+func _cell_can_stand_for_direction(cell: Dictionary, direction: int) -> bool:
+	if _cell_can_stand(cell):
+		return true
+	return (direction == CONNECTION_NORTH or direction == CONNECTION_SOUTH) and int(cell.get("behavior", 0)) == _format_int("rock_stairs_behavior", ROCK_STAIRS_BEHAVIOR)
+
 func _position_occupied(objects: Array, x: int, y: int) -> bool:
 	for object_value in objects:
 		if object_value is Dictionary and bool(object_value.get("blocks_movement", true)) and int(object_value.get("x", -1)) == x and int(object_value.get("y", -1)) == y:
@@ -710,7 +742,7 @@ func _render_cached_map(cached_map: Dictionary, animation_phase: int) -> Image:
 	var metatile_id_mask: int = _format_int("map_grid_metatile_id_mask", MAPGRID_METATILE_ID_MASK)
 	var primary_metatile_count: int = _format_int("primary_metatile_count", PRIMARY_METATILE_COUNT)
 	var image: Image = Image.create(width * 16, height * 16, false, Image.FORMAT_RGBA8)
-	image.fill(Color("101721"))
+	image.fill(Color.BLACK)
 	for map_y in range(height):
 		for map_x in range(width):
 			var cell_index: int = map_y * width + map_x
@@ -729,14 +761,13 @@ func _render_cached_layer(cached_map: Dictionary, animation_phase: int, foregrou
 	var width: int = int(cached_map.get("width", 0))
 	var height: int = int(cached_map.get("height", 0))
 	var image: Image = Image.create(width * 16, height * 16, false, Image.FORMAT_RGBA8)
-	image.fill(Color(0.0, 0.0, 0.0, 0.0) if foreground else Color("101721"))
+	image.fill(Color(0.0, 0.0, 0.0, 0.0) if foreground else Color.BLACK)
 	var primary: Dictionary = cached_map.get("primary", {})
 	var secondary: Dictionary = cached_map.get("secondary", {})
 	var map_cells: PackedInt32Array = cached_map.get("map_cells", PackedInt32Array())
 	var animated_primary: PackedByteArray = _animated_primary_tiles(cached_map.get("primary_tiles", PackedByteArray()), animation_phase) if animation_phase != 0 else PackedByteArray()
 	var metatile_id_mask: int = _format_int("map_grid_metatile_id_mask", MAPGRID_METATILE_ID_MASK)
 	var primary_metatile_count: int = _format_int("primary_metatile_count", PRIMARY_METATILE_COUNT)
-	var layer_start: int = 4 if foreground else 0
 	for map_y in range(height):
 		for map_x in range(width):
 			var cell_index: int = map_y * width + map_x
@@ -750,8 +781,15 @@ func _render_cached_layer(cached_map: Dictionary, animation_phase: int, foregrou
 				metatile_index = metatile_id - primary_metatile_count
 			var metatiles: PackedInt32Array = tileset.get("metatiles", PackedInt32Array())
 			var base: int = metatile_index * _format_int("tiles_per_metatile", TILES_PER_METATILE)
-			if metatile_index >= 0 and base + layer_start + 4 <= metatiles.size():
-				_draw_metatile_layer(image, map_x * 16, map_y * 16, metatiles, base, layer_start, primary, secondary, [], animated_primary)
+			if metatile_index < 0 or base + 4 > metatiles.size():
+				continue
+			var layer_type: int = 0
+			var attributes: PackedInt32Array = tileset.get("attributes", PackedInt32Array())
+			if metatile_index < attributes.size():
+				layer_type = (int(attributes[metatile_index]) & _format_int("map_grid_layer_type_mask", MAPGRID_LAYER_TYPE_MASK)) >> _format_int("map_grid_layer_type_shift", MAPGRID_LAYER_TYPE_SHIFT)
+			_draw_metatile_layer(image, map_x * 16, map_y * 16, metatiles, base, 0, primary, secondary, [], animated_primary)
+			if (foreground and layer_type != 1) or (not foreground and layer_type == 1):
+				_draw_metatile_layer(image, map_x * 16, map_y * 16, metatiles, base, 4, primary, secondary, [], animated_primary)
 	return image
 
 func _animated_primary_tiles(base_tiles: PackedByteArray, animation_phase: int) -> PackedByteArray:
@@ -856,33 +894,46 @@ func _read_dialogue_for_script(script_offset: int) -> Dictionary:
 		return {}
 	var cursor: int = script_offset
 	var limit: int = mini(rom_data.size(), script_offset + 512)
-	var text_offset: int = -1
 	var data_slot_zero: int = -1
 	while cursor < limit:
 		var opcode: int = int(rom_data[cursor])
-		if opcode == 0x0F and cursor + 6 <= limit:
-			if int(rom_data[cursor + 1]) == 0:
-				var loadword_offset: int = _read_rom_pointer(cursor + 2)
-				if loadword_offset >= 0 and data_slot_zero < 0:
-					data_slot_zero = loadword_offset
-			cursor += 6
-			continue
-		if opcode == 0x67 and cursor + 5 <= limit:
+		if opcode == 0x02 or opcode == 0x03:
+			break
+		var command_size: int = 1
+		match opcode:
+			0x04, 0x05:
+				command_size = 5
+			0x06, 0x07:
+				command_size = 6
+			0x08, 0x09, 0x0A, 0x0B:
+				command_size = 2
+			0x0F:
+				command_size = 6
+			0x4F:
+				command_size = 7
+			0x50:
+				command_size = 9
+			0x67:
+				command_size = 5
+			0x00, 0x01, 0x0C, 0x0D, 0x0E, 0x5A, 0x66, 0x68, 0x69, 0x6A, 0x6B, 0x6C, 0x6D:
+				command_size = 1
+			_:
+				return {}
+		if cursor + command_size > limit:
+			return {}
+		if opcode == 0x0F and int(rom_data[cursor + 1]) == 0:
+			var loadword_offset: int = _read_rom_pointer(cursor + 2)
+			if loadword_offset >= 0:
+				data_slot_zero = loadword_offset
+		if opcode == 0x67:
 			var message_offset: int = _read_rom_pointer(cursor + 1)
-			if message_offset >= 0:
-				text_offset = message_offset
-			elif data_slot_zero >= 0:
-				text_offset = data_slot_zero
-			cursor += 5
-			if text_offset >= 0:
-				break
-			continue
-		cursor += 1
-	if text_offset < 0:
-		text_offset = data_slot_zero
-	if text_offset < 0:
-		return {}
-	return _decode_rom_text(text_offset)
+			if message_offset < 0:
+				message_offset = data_slot_zero
+			if message_offset < 0:
+				return {}
+			return _decode_rom_text(message_offset)
+		cursor += command_size
+	return {}
 
 func _decode_rom_text(text_offset: int) -> Dictionary:
 	if not _valid_range(text_offset, 1):
