@@ -12,7 +12,8 @@ const CAMERA_MAX_CELLS_X: int = 30
 const CAMERA_MAX_CELLS_Y: int = 20
 const MAX_TILE_SCALE: float = 4.0
 const REFERENCE_VIEWPORT_SIZE: Vector2 = Vector2(1280.0, 720.0)
-const NORMAL_STEP_DURATION: float = 0.20
+const NORMAL_STEP_DURATION: float = 0.17
+const ANIMATION_FRAME_INTERVAL: float = 0.125
 const DOOR_ANIMATION_DURATION: float = 16.0 / 60.0
 const DOOR_FRAME_COUNT: int = 4
 
@@ -503,8 +504,8 @@ func _process(delta: float) -> void:
 	if warp_cooldown > 0.0:
 		warp_cooldown = maxf(warp_cooldown - delta, 0.0)
 	animation_elapsed += delta
-	if animation_elapsed >= 0.125:
-		animation_elapsed = fmod(animation_elapsed, 0.125)
+	if animation_elapsed >= ANIMATION_FRAME_INTERVAL:
+		animation_elapsed = fmod(animation_elapsed, ANIMATION_FRAME_INTERVAL)
 		animation_tick += 1
 		queue_redraw()
 	if move_request_pending:
