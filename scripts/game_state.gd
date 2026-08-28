@@ -151,10 +151,11 @@ func select_character(character_id: int) -> bool:
 func complete_map_load(load_key: String) -> bool:
 	if pending_map_load.is_empty() or str(pending_map_load.get("key", "")) != load_key:
 		return false
+	awaiting_local_entity = true
 	if not game_session.send_packet(GAME_PROTOCOL_SCRIPT.REQUEST_PLAYER, GAME_PROTOCOL_SCRIPT.encode_request_player()):
+		awaiting_local_entity = false
 		return false
 	pending_map_load.clear()
-	awaiting_local_entity = true
 	return true
 
 func send_input(direction: String, source_x: int = -1, source_y: int = -1, running: bool = false) -> bool:

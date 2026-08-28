@@ -284,9 +284,12 @@ func _request_move(direction: int) -> bool:
 	_update_player_texture()
 	queue_redraw()
 	var result: Dictionary = content.movement_result(map_id, player_position.x, player_position.y, direction, player_elevation, objects)
-	if not bool(result.get("ok", false)):
-		return false
-	if authoritative_state and not GameState.send_input(_direction_name(direction), player_position.x, player_position.y):
+	if authoritative_state:
+		if not GameState.send_input(_direction_name(direction), player_position.x, player_position.y):
+			return false
+		if not bool(result.get("ok", false)):
+			return true
+	elif not bool(result.get("ok", false)):
 		return false
 	pending_map_id = str(result.get("map_id", map_id))
 	pending_position = Vector2i(int(result.get("x", player_position.x)), int(result.get("y", player_position.y)))

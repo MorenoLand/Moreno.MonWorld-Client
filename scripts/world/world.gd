@@ -117,9 +117,6 @@ func _on_map_load(value: Dictionary) -> void:
 		return
 	snapshot = {"map_id": map_id, "server_map": value, "party": GameState.current_character.get("party", []), "players": []}
 	entities.clear()
-	if not GameState.current_character.is_empty():
-		var player: Dictionary = {"character_id": int(GameState.current_character.get("id", 0)), "user_id": int(GameState.current_character.get("user_id", 0)), "x": int(GameState.current_character.get("x", 0)), "y": int(GameState.current_character.get("y", 0)), "elevation": 3, "facing": 1}
-		entities[str(player.character_id)] = player
 	if hud != null:
 		hud.set_state(GameState.content, map_id, snapshot, snapshot.party)
 	if not _load_map_texture(map_id, int(value.get("width", 0)), int(value.get("height", 0))):
