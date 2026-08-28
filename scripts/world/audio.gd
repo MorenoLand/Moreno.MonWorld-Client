@@ -2,11 +2,12 @@ class_name MonWorldAudio
 extends Node
 
 const MUSIC_SAMPLE_RATE: int = MonWorldRomAudio.SAMPLE_RATE
-const MUSIC_BUFFER_LENGTH: float = 4.0
+const MUSIC_BUFFER_LENGTH: float = 2.0
 const MUSIC_RENDER_CHUNK_FRAMES: int = 2048
 const WEB_RENDER_CHUNK_FRAMES: int = 512
 const MUSIC_PREBUFFER_FRAMES: int = 16384
 const MUSIC_CACHE_LIMIT: int = 4
+const MUSIC_RENDER_WAIT_MSEC: int = 4
 var music_player: AudioStreamPlayer
 var sfx_player: AudioStreamPlayer
 var rom_audio: MonWorldRomAudio
@@ -23,9 +24,13 @@ var requested_music_generation: int = 0
 var rendered_chunks: Array = []
 var render_complete: bool = false
 var render_error: String = ""
+var music_render_target_frames: int = 0
+var music_rendered_frames: int = 0
+var music_render_total_frames: int = 0
 var playback_chunks: Array = []
 var playback_source_complete: bool = false
 var playback_chunk_index: int = 0
+var playback_pushed_frames: int = 0
 var music_generator: AudioStreamGenerator
 var music_playback: AudioStreamGeneratorPlayback
 var queued_music_key: String = ""
@@ -92,6 +97,7 @@ func _process(_delta: float) -> void:
 	_sync_rendered_chunks()
 	_maybe_queue_music_start()
 	_pump_music_buffer()
+	_update_music_render_target()
 
 func _cancel_current_music() -> void:
 	music_start_generation += 1
@@ -105,6 +111,7 @@ func _cancel_current_music() -> void:
 	playback_chunks = []
 	playback_source_complete = false
 	playback_chunk_index = 0
+	playback_pushed_frames = 0
 	music_playback = null
 	music_generator = null
 	cooperative_prepared = {}
@@ -117,10 +124,14 @@ func _begin_render_state(key: String) -> void:
 	playback_chunks = []
 	playback_source_complete = false
 	playback_chunk_index = 0
+	playback_pushed_frames = 0
 	music_render_mutex.lock()
 	rendered_chunks = []
 	render_complete = false
 	render_error = ""
+	music_render_target_frames = MUSIC_PREBUFFER_FRAMES
+	music_rendered_frames = 0
+	music_render_total_frames = 0
 	music_render_mutex.unlock()
 
 func _start_music_render_if_idle() -> void:
@@ -156,19 +167,28 @@ func _render_music_worker(content: MonWorldContent, song_id: int, key: String, g
 		music_render_mutex.unlock()
 		return {"ok": false, "key": key, "generation": generation}
 	var total_frames: int = int(prepared.get("loop_frames", prepared.get("duration_frames", 0)))
+	music_render_mutex.lock()
+	music_render_total_frames = total_frames
+	music_render_target_frames = mini(music_render_target_frames, total_frames)
+	music_render_mutex.unlock()
 	var frame: int = 0
 	while frame < total_frames:
 		music_render_mutex.lock()
 		var cancelled: bool = generation != music_render_generation
+		var target_frames: int = music_render_target_frames
 		music_render_mutex.unlock()
 		if cancelled:
 			return {"ok": false, "key": key, "generation": generation, "cancelled": true}
-		var chunk_frames: int = mini(MUSIC_RENDER_CHUNK_FRAMES, total_frames - frame)
+		if frame >= target_frames:
+			OS.delay_msec(MUSIC_RENDER_WAIT_MSEC)
+			continue
+		var chunk_frames: int = mini(MUSIC_RENDER_CHUNK_FRAMES, mini(total_frames - frame, target_frames - frame))
 		var chunk: PackedVector2Array = decoder.render_song_frames(prepared, frame, chunk_frames)
 		if chunk.size() != chunk_frames:
 			return {"ok": false, "key": key, "generation": generation}
 		music_render_mutex.lock()
 		rendered_chunks.append(chunk)
+		music_rendered_frames = frame + chunk_frames
 		music_render_mutex.unlock()
 		frame += chunk_frames
 	music_render_mutex.lock()
@@ -212,6 +232,11 @@ func _begin_requested_cooperative_render() -> void:
 	_begin_render_state(key)
 	cooperative_prepared = prepared
 	cooperative_frame = 0
+	var total_frames: int = int(prepared.get("loop_frames", prepared.get("duration_frames", 0)))
+	music_render_mutex.lock()
+	music_render_total_frames = total_frames
+	music_render_target_frames = mini(music_render_target_frames, total_frames)
+	music_render_mutex.unlock()
 
 func _advance_cooperative_render() -> void:
 	if cooperative_prepared.is_empty() or rendering_music_key != current_music_key:
@@ -222,7 +247,12 @@ func _advance_cooperative_render() -> void:
 		playback_source_complete = true
 		_cache_music_chunks(rendering_music_key, playback_chunks)
 		return
-	var chunk_frames: int = mini(WEB_RENDER_CHUNK_FRAMES, total_frames - cooperative_frame)
+	music_render_mutex.lock()
+	var target_frames: int = music_render_target_frames
+	music_render_mutex.unlock()
+	if cooperative_frame >= target_frames:
+		return
+	var chunk_frames: int = mini(WEB_RENDER_CHUNK_FRAMES, mini(total_frames - cooperative_frame, target_frames - cooperative_frame))
 	var chunk: PackedVector2Array = rom_audio.render_song_frames(cooperative_prepared, cooperative_frame, chunk_frames)
 	if chunk.size() != chunk_frames:
 		cooperative_prepared = {}
@@ -231,6 +261,7 @@ func _advance_cooperative_render() -> void:
 		return
 	music_render_mutex.lock()
 	rendered_chunks.append(chunk)
+	music_rendered_frames = cooperative_frame + chunk_frames
 	music_render_mutex.unlock()
 	cooperative_frame += chunk_frames
 	if cooperative_frame >= total_frames:
@@ -266,6 +297,18 @@ func _prebuffered_frame_count() -> int:
 		frame_count += chunk.size()
 	return frame_count
 
+func _update_music_render_target() -> void:
+	if current_music_key.is_empty() or playback_source_complete:
+		return
+	var desired_frames: int = MUSIC_PREBUFFER_FRAMES
+	if music_playback != null and music_player.playing:
+		desired_frames = playback_pushed_frames + music_playback.get_frames_available() + MUSIC_RENDER_CHUNK_FRAMES
+	music_render_mutex.lock()
+	if music_render_total_frames > 0:
+		desired_frames = mini(desired_frames, music_render_total_frames)
+	music_render_target_frames = maxi(music_render_target_frames, desired_frames)
+	music_render_mutex.unlock()
+
 func _start_music_after_presented_frame(key: String, generation: int) -> void:
 	if DisplayServer.get_name() == "headless":
 		await get_tree().process_frame
@@ -297,6 +340,7 @@ func _pump_music_buffer() -> void:
 			break
 		music_playback.push_buffer(chunk)
 		playback_chunk_index += 1
+		playback_pushed_frames += chunk.size()
 		available = music_playback.get_frames_available()
 
 func _cache_music_chunks(key: String, chunks: Array) -> void:

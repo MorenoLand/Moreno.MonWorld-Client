@@ -18,6 +18,7 @@ var open_state: bool = false
 var ignore_next_action: bool = false
 var screen_anchor: Vector2 = Vector2(-1.0, -1.0)
 var actor_anchored: bool = false
+var layout_in_progress: bool = false
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -51,10 +52,12 @@ func _ready() -> void:
 	set_process(false)
 
 func _layout_panel() -> void:
-	var viewport_width: float = size.x
-	if viewport_width <= 0.0:
-		viewport_width = get_viewport_rect().size.x
-	var viewport_height: float = size.y if size.y > 0.0 else get_viewport_rect().size.y
+	if layout_in_progress:
+		return
+	layout_in_progress = true
+	var viewport_size: Vector2 = get_viewport_rect().size
+	var viewport_width: float = viewport_size.x
+	var viewport_height: float = viewport_size.y
 	if actor_anchored and screen_anchor.x >= 0.0:
 		var panel_width: float = minf(PANEL_WIDTH, maxf(viewport_width - 24.0, 240.0))
 		var left: float = clampf(screen_anchor.x - panel_width * 0.5, 12.0, maxf(viewport_width - panel_width - 12.0, 12.0))
@@ -66,13 +69,14 @@ func _layout_panel() -> void:
 		offset_top = top
 		offset_right = left + panel_width
 		offset_bottom = top + PANEL_HEIGHT
-		return
-	var bottom_panel_width: float = minf(PANEL_WIDTH, maxf(viewport_width - 24.0, 240.0))
-	set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
-	offset_left = -bottom_panel_width * 0.5
-	offset_right = bottom_panel_width * 0.5
-	offset_top = -170.0
-	offset_bottom = -28.0
+	else:
+		var bottom_panel_width: float = minf(PANEL_WIDTH, maxf(viewport_width - 24.0, 240.0))
+		set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
+		offset_left = -bottom_panel_width * 0.5
+		offset_right = bottom_panel_width * 0.5
+		offset_top = -170.0
+		offset_bottom = -28.0
+	layout_in_progress = false
 
 func show_text(value: String, suppress_action: bool = false) -> void:
 	show_pages([value], suppress_action)

@@ -35,11 +35,17 @@ func _process(delta: float) -> void:
 	if playback_started_at > 0:
 		playback_elapsed += delta
 		playback_max_frame_msec = maxf(playback_max_frame_msec, delta * 1000.0)
-	if playback_elapsed >= 3.0:
+	if playback_elapsed >= 6.0:
 		var skips: int = audio.music_playback.get_skips() if audio.music_playback != null else -1
-		print("ROM map music sustained for 3 seconds; skips=%d; playback_max_frame=%.2f ms" % [skips, playback_max_frame_msec])
+		audio.music_render_mutex.lock()
+		var rendered_frames: int = audio.music_rendered_frames
+		var total_frames: int = audio.music_render_total_frames
+		audio.music_render_mutex.unlock()
+		var maximum_buffered_frames: int = int((playback_elapsed + MonWorldAudio.MUSIC_BUFFER_LENGTH + 2.0) * MonWorldAudio.MUSIC_SAMPLE_RATE)
+		var bounded_render: bool = total_frames > 0 and rendered_frames <= maximum_buffered_frames
+		print("ROM map music sustained for 6 seconds; skips=%d; playback_max_frame=%.2f ms; rendered=%d/%d" % [skips, playback_max_frame_msec, rendered_frames, total_frames])
 		audio.stop_music()
-		get_tree().quit(0 if skips == 0 else 1)
+		get_tree().quit(0 if skips == 0 and bounded_render else 1)
 		return
 	if elapsed >= 15.0:
 		var thread_started: bool = audio.music_render_thread != null and audio.music_render_thread.is_started()

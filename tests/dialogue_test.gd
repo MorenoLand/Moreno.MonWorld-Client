@@ -11,6 +11,11 @@ func _run() -> void:
 	if not dialogue.is_open() or dialogue.arrow_label.visible or dialogue.visible_count != 0:
 		_fail("dialogue did not start in typing state")
 		return
+	dialogue.show_pages(["Anchored page"], false, Vector2(320.0, 240.0))
+	if not is_equal_approx(dialogue.size.x, MonWorldDialogue.PANEL_WIDTH) or dialogue.layout_in_progress:
+		_fail("actor-anchored dialogue layout recursed or changed its own viewport width")
+		return
+	dialogue.show_pages(["First page", "Second page"])
 	dialogue._process(0.1)
 	if dialogue.visible_count <= 0 or dialogue.arrow_label.visible:
 		_fail("dialogue typewriter did not advance correctly")
