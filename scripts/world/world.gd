@@ -12,9 +12,9 @@ var selected_character_id := 0
 var map_view: MonWorldMapPlayCanvas
 var hud: MonWorldHud
 var dialogue_overlay: MonWorldDialogue
-	var audio: MonWorldAudio
-	var animation_tick: int = 0
-	var animation_elapsed: float = 0.0
+var audio: MonWorldAudio
+var animation_tick: int = 0
+var animation_elapsed: float = 0.0
 var held_input: String = ""
 var held_input_elapsed: float = 0.0
 var map_has_animation: bool = false
