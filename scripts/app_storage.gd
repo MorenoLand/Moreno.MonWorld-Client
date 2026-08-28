@@ -1,4 +1,4 @@
-class_name MonWorldStorage
+class_name OpenMMOStorage
 extends RefCounted
 
 const APP_DIRECTORY: String = "OpenMMOGo"

@@ -1,4 +1,4 @@
-class_name MonWorldMapPreviewCanvas
+class_name OpenMMOMapPreviewCanvas
 extends Control
 
 var map_texture: Texture2D

@@ -1,6 +1,6 @@
 # Client development
 
-Keep gameplay presentation in scenes and scripts under `scripts/`. `GameState` coordinates login and game sessions, `MonWorldContentProvider` owns local ROM selection, and `scripts/net/` owns OpenMMO framing, cryptography, and packet codecs. Do not place credentials or content data in project settings.
+Keep gameplay presentation in scenes and scripts under `scripts/`. `GameState` coordinates login and game sessions, `OpenMMOContentProvider` owns local ROM selection, and `scripts/net/` owns OpenMMO framing, cryptography, and packet codecs. Do not place credentials or content data in project settings.
 
 ## Offline map tester
 

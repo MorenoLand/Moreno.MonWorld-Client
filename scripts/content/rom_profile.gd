@@ -1,4 +1,4 @@
-class_name MonWorldRomProfile
+class_name OpenMMORomProfile
 extends RefCounted
 
 static func from_header(header: Dictionary) -> Dictionary:

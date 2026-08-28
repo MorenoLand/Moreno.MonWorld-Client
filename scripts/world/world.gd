@@ -9,10 +9,10 @@ var chat_input: LineEdit
 var snapshot: Dictionary = {}
 var entities: Dictionary = {}
 var selected_character_id := 0
-var map_view: MonWorldMapPlayCanvas
-var hud: MonWorldHud
-var dialogue_overlay: MonWorldDialogue
-var audio: MonWorldAudio
+var map_view: OpenMMOMapPlayCanvas
+var hud: OpenMMOHud
+var dialogue_overlay: OpenMMODialogue
+var audio: OpenMMOAudio
 var transition_overlay: ColorRect
 var transition_tween: Tween
 var transition_reveal_pending: bool = false
@@ -43,7 +43,7 @@ func _ready() -> void:
 	queue_redraw()
 
 func _build_ui() -> void:
-	map_view = MonWorldMapPlayCanvas.new()
+	map_view = OpenMMOMapPlayCanvas.new()
 	map_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	map_view.set_content(GameState.content)
 	map_view.set_authoritative_state(true)
@@ -51,12 +51,12 @@ func _build_ui() -> void:
 	map_view.interaction_requested.connect(_on_interaction_requested)
 	map_view.sound_requested.connect(_on_sound_requested)
 	add_child(map_view)
-	audio = MonWorldAudio.new()
+	audio = OpenMMOAudio.new()
 	add_child(audio)
-	hud = MonWorldHud.new()
+	hud = OpenMMOHud.new()
 	hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(hud)
-	dialogue_overlay = MonWorldDialogue.new()
+	dialogue_overlay = OpenMMODialogue.new()
 	dialogue_overlay.action_requested.connect(_on_dialogue_action)
 	add_child(dialogue_overlay)
 	title_label = Label.new()

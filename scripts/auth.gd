@@ -3,7 +3,7 @@ extends Control
 signal authenticated
 signal local_preview_requested
 
-var provider: MonWorldContentProvider
+var provider: OpenMMOContentProvider
 var username_input: LineEdit
 var password_input: LineEdit
 var remember_input: CheckButton
@@ -25,7 +25,7 @@ var saved_password: String = ""
 var saved_token: String = ""
 
 func _ready() -> void:
-	provider = MonWorldContentProvider.new()
+	provider = OpenMMOContentProvider.new()
 	add_child(provider)
 	provider.content_loaded.connect(_on_content_loaded)
 	provider.content_failed.connect(_on_content_failed)
@@ -288,7 +288,7 @@ func _style_button(button: Button, accent: bool = false) -> void:
 	button.add_theme_color_override("font_disabled_color", Color("657286"))
 
 func _load_saved_credentials() -> void:
-	var saved: Dictionary = MonWorldAuthStore.load_saved()
+	var saved: Dictionary = OpenMMOAuthStore.load_saved()
 	if saved.is_empty():
 		return
 	username_input.text = str(saved.get("username", ""))
@@ -337,14 +337,14 @@ func _save_connection_settings() -> void:
 	if not bool(configured.get("ok", false)):
 		settings_status_label.text = str(configured.get("error", "Invalid connection settings"))
 		return
-	var settings: Dictionary = MonWorldStorage.read_json(MonWorldStorage.SETTINGS_FILE)
+	var settings: Dictionary = OpenMMOStorage.read_json(OpenMMOStorage.SETTINGS_FILE)
 	settings["login_host"] = GameState.login_host
 	settings["login_port"] = GameState.login_port
 	if custom_key_path.is_empty():
 		settings.erase("root_public_key_path")
 	else:
 		settings["root_public_key_path"] = custom_key_path
-	if not MonWorldStorage.write_json(MonWorldStorage.SETTINGS_FILE, settings):
+	if not OpenMMOStorage.write_json(OpenMMOStorage.SETTINGS_FILE, settings):
 		settings_status_label.text = "Could not save connection settings"
 		return
 	settings_window.hide()
@@ -353,7 +353,7 @@ func _save_connection_settings() -> void:
 func _choose_rom() -> void:
 	provider.choose(self)
 
-func _on_content_loaded(content: MonWorldContent) -> void:
+func _on_content_loaded(content: OpenMMOContent) -> void:
 	var result: Dictionary = GameState.use_content(content)
 	if result.ok:
 		content_status_label.text = "Kanto · FireRed/LeafGreen ready"
@@ -407,12 +407,12 @@ func _submit() -> void:
 		_finish_submit(str(result.error), true)
 		return
 	if remember_input.button_pressed:
-		MonWorldAuthStore.save(username, password, str(result.get("remember_token", "")))
+		OpenMMOAuthStore.save(username, password, str(result.get("remember_token", "")))
 		saved_username = username
 		saved_password = password
 		saved_token = str(result.get("remember_token", ""))
 	else:
-		MonWorldAuthStore.clear()
+		OpenMMOAuthStore.clear()
 	_set_status("Opening game connection…")
 	result = await GameState.connect_game()
 	if not result.ok:

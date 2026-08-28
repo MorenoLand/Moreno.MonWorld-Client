@@ -1,4 +1,4 @@
-class_name MonWorldRomAudio
+class_name OpenMMORomAudio
 extends RefCounted
 
 const SAMPLE_RATE: int = 13379
@@ -42,7 +42,7 @@ var stream_cache: Dictionary = {}
 var wave_cache: Dictionary = {}
 var last_error: String = ""
 
-func build_song_stream(content: MonWorldContent, song_id: int) -> AudioStream:
+func build_song_stream(content: OpenMMOContent, song_id: int) -> AudioStream:
 	var prepared: Dictionary = prepare_song(content, song_id)
 	if prepared.is_empty():
 		return null
@@ -56,7 +56,7 @@ func build_song_stream(content: MonWorldContent, song_id: int) -> AudioStream:
 		return null
 	stream_cache[cache_key] = stream
 	return stream
-func inspect_song(content: MonWorldContent, song_id: int) -> Dictionary:
+func inspect_song(content: OpenMMOContent, song_id: int) -> Dictionary:
 	var prepared: Dictionary = prepare_song(content, song_id)
 	if prepared.is_empty():
 		return {"ok": false, "error": last_error}
@@ -64,7 +64,7 @@ func inspect_song(content: MonWorldContent, song_id: int) -> Dictionary:
 	var parsed: Dictionary = prepared.get("parsed", {}) as Dictionary
 	return {"ok": true, "song_table_offset": int(song.get("song_table_offset", -1)), "song_id": song_id, "music_player": int(song.get("music_player", -1)), "track_count": int(song.get("track_count", 0)), "event_count": int(parsed.get("event_count", 0)), "duration": float(parsed.get("duration", 0.0)), "tempo": float(parsed.get("tempo", 150.0))}
 
-func prepare_song(content: MonWorldContent, song_id: int) -> Dictionary:
+func prepare_song(content: OpenMMOContent, song_id: int) -> Dictionary:
 	last_error = ""
 	if content == null or content.rom_data.is_empty() or song_id < 0:
 		last_error = "selected ROM has no audio data"
@@ -90,17 +90,17 @@ func prepare_song(content: MonWorldContent, song_id: int) -> Dictionary:
 	song_cache[cache_key] = prepared
 	return prepared
 
-func _content_key(content: MonWorldContent) -> String:
+func _content_key(content: OpenMMOContent) -> String:
 	var fingerprint: String = content.rom_sha1
 	if fingerprint.is_empty():
 		fingerprint = str(content.rom_data.size())
 	return str(content.source_profile.get("id", "gba")) + ":" + fingerprint
 
-func _audio_table_hint(content: MonWorldContent) -> int:
+func _audio_table_hint(content: OpenMMOContent) -> int:
 	var audio_profile: Dictionary = content.source_profile.get("audio", {})
 	return int(audio_profile.get("song_table_offset", -1))
 
-func _audio_anchor_ids(content: MonWorldContent) -> Array[int]:
+func _audio_anchor_ids(content: OpenMMOContent) -> Array[int]:
 	var audio_profile: Dictionary = content.source_profile.get("audio", {})
 	var values: Array[int] = []
 	for value in audio_profile.get("anchor_song_ids", []):

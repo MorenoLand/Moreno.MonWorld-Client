@@ -22,7 +22,7 @@ const FLOW_TIMEOUT_MSEC: int = 15000
 
 var login_session: Node
 var game_session: Node
-var content: MonWorldContent
+var content: OpenMMOContent
 var user: Dictionary = {}
 var characters: Array = []
 var current_snapshot: Dictionary = {}
@@ -54,7 +54,7 @@ func _ready() -> void:
 	game_session.established.connect(_on_game_established)
 	game_session.packet_received.connect(_on_game_packet)
 	game_session.failed.connect(_on_game_failed)
-	var settings: Dictionary = MonWorldStorage.read_json(MonWorldStorage.SETTINGS_FILE)
+	var settings: Dictionary = OpenMMOStorage.read_json(OpenMMOStorage.SETTINGS_FILE)
 	login_host = str(settings.get("login_host", ProjectSettings.get_setting("openmmo/login_host", "127.0.0.1")))
 	login_port = int(settings.get("login_port", ProjectSettings.get_setting("openmmo/login_port", 2106)))
 	custom_root_public_key_path = str(settings.get("root_public_key_path", "")).strip_edges()
@@ -94,7 +94,7 @@ func endpoint_text() -> String:
 func public_key_override() -> String:
 	return custom_root_public_key_path
 
-func use_content(value: MonWorldContent) -> Dictionary:
+func use_content(value: OpenMMOContent) -> Dictionary:
 	content = value
 	return {"ok": true}
 
@@ -455,7 +455,7 @@ func _load_hardware_id(settings: Dictionary) -> PackedByteArray:
 		return value
 	value = Crypto.new().generate_random_bytes(16)
 	settings["hardware_id"] = value.hex_encode()
-	MonWorldStorage.write_json(MonWorldStorage.SETTINGS_FILE, settings)
+	OpenMMOStorage.write_json(OpenMMOStorage.SETTINGS_FILE, settings)
 	return value
 
 func _decode_hex(value: String) -> PackedByteArray:

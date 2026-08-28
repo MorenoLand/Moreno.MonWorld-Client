@@ -1,4 +1,4 @@
-class_name MonWorldContent
+class_name OpenMMOContent
 extends RefCounted
 
 const ANIMATION_PHASE_COUNT: int = 40
@@ -69,7 +69,7 @@ static func from_rom_bytes(data: PackedByteArray) -> Dictionary:
 	var header: Dictionary = _read_gba_header(data)
 	if header.is_empty():
 		return {"ok": false, "error": "ROM is too small to contain a valid GBA header"}
-	var source_profile: Dictionary = MonWorldRomProfile.from_header(header)
+	var source_profile: Dictionary = OpenMMORomProfile.from_header(header)
 	if source_profile.is_empty():
 		return {"ok": false, "error": "unsupported GBA game code %s" % str(header.get("game_code", ""))}
 	if bool(source_profile.get("supports_map_rendering", false)) and not _has_map_layout(data, source_profile):
@@ -79,13 +79,13 @@ static func from_rom_bytes(data: PackedByteArray) -> Dictionary:
 	if context.start(HashingContext.HASH_SHA1) == OK:
 		context.update(data)
 		rom_sha1 = context.finish().hex_encode()
-	var content: MonWorldContent = MonWorldContent.new()
+	var content: OpenMMOContent = OpenMMOContent.new()
 	content.rom_data = data
 	content.rom_sha1 = rom_sha1
 	content.rom_header = header
 	content.source_profile = source_profile
 	content.manifest = _manifest_for_profile(source_profile, rom_sha1)
-	content.string_catalog = MonWorldStorage.read_strings(str(content.manifest.get("content_id", "")))
+	content.string_catalog = OpenMMOStorage.read_strings(str(content.manifest.get("content_id", "")))
 	content._hydrate_manifest()
 	return {"ok": true, "content": content}
 
@@ -1065,7 +1065,7 @@ func _register_dialogue(map_id: String, local_id: int, script_offset: int, dialo
 	string_catalog["content_id"] = content_id()
 	string_catalog["language"] = "en"
 	string_catalog["records"] = records
-	MonWorldStorage.write_strings(content_id(), string_catalog)
+	OpenMMOStorage.write_strings(content_id(), string_catalog)
 
 func _read_dialogue_for_script(script_offset: int) -> Dictionary:
 	if script_offset < 0 or not _valid_range(script_offset, 1):
@@ -1370,6 +1370,30 @@ func _read_tileset(offset: int, tile_count: int, metatile_count: int, palette_co
 	return {"tiles": tiles, "metatiles": metatile_words, "palettes": palettes, "attributes": attributes, "tile_count": effective_tile_count, "animation_callback": _read_rom_pointer(offset + 16)}
 
 func _draw_metatile(image: Image, destination_x: int, destination_y: int, tileset: Dictionary, metatile_index: int, primary: Dictionary, secondary: Dictionary, animated_tiles: Array, primary_override: PackedByteArray = PackedByteArray()) -> void:
+	if not primary_override.is_empty():
+		_draw_metatile_uncached(image, destination_x, destination_y, tileset, metatile_index, primary, secondary, animated_tiles, primary_override)
+		return
+	var cache: Dictionary = tileset.get("_metatile_cache", {})
+	var cache_key: String = str(metatile_index)
+	var cached: Dictionary = cache.get(cache_key, {})
+	if cached.is_empty():
+		var cached_image: Image = Image.create(16, 16, false, Image.FORMAT_RGBA8)
+		cached_image.fill(Color(0.0, 0.0, 0.0, 0.0))
+		var cached_animated_tiles: Array = []
+		_draw_metatile_uncached(cached_image, 0, 0, tileset, metatile_index, primary, secondary, cached_animated_tiles)
+		cached = {"image": cached_image, "animated_tiles": cached_animated_tiles}
+		cache[cache_key] = cached
+		tileset["_metatile_cache"] = cache
+	var cached_image_value: Image = cached.get("image") as Image
+	if cached_image_value == null:
+		return
+	image.blend_rect(cached_image_value, Rect2i(0, 0, 16, 16), Vector2i(destination_x, destination_y))
+	for tile_value in cached.get("animated_tiles", []):
+		if tile_value is Dictionary:
+			var tile: Dictionary = tile_value
+			animated_tiles.append({"x": destination_x + int(tile.get("x", 0)), "y": destination_y + int(tile.get("y", 0)), "entry": int(tile.get("entry", 0))})
+
+func _draw_metatile_uncached(image: Image, destination_x: int, destination_y: int, tileset: Dictionary, metatile_index: int, primary: Dictionary, secondary: Dictionary, animated_tiles: Array, primary_override: PackedByteArray = PackedByteArray()) -> void:
 	var metatiles: PackedInt32Array = tileset.get("metatiles", PackedInt32Array())
 	var tiles_per_metatile: int = _format_int("tiles_per_metatile", TILES_PER_METATILE)
 	var base: int = metatile_index * tiles_per_metatile
@@ -1391,6 +1415,39 @@ func _draw_metatile(image: Image, destination_x: int, destination_y: int, tilese
 			_draw_metatile_layer(image, destination_x, destination_y, metatiles, base, 4, primary, secondary, animated_tiles, primary_override)
 
 func _draw_metatile_layers(background_image: Image, foreground_image: Image, destination_x: int, destination_y: int, tileset: Dictionary, metatile_index: int, primary: Dictionary, secondary: Dictionary, animated_background_tiles: Array = [], animated_foreground_tiles: Array = [], primary_override: PackedByteArray = PackedByteArray()) -> void:
+	if not primary_override.is_empty():
+		_draw_metatile_layers_uncached(background_image, foreground_image, destination_x, destination_y, tileset, metatile_index, primary, secondary, animated_background_tiles, animated_foreground_tiles, primary_override)
+		return
+	var cache: Dictionary = tileset.get("_layer_cache", {})
+	var cache_key: String = str(metatile_index)
+	var cached: Dictionary = cache.get(cache_key, {})
+	if cached.is_empty():
+		var cached_background: Image = Image.create(16, 16, false, Image.FORMAT_RGBA8)
+		cached_background.fill(Color.BLACK)
+		var cached_foreground: Image = Image.create(16, 16, false, Image.FORMAT_RGBA8)
+		cached_foreground.fill(Color(0.0, 0.0, 0.0, 0.0))
+		var cached_background_tiles: Array = []
+		var cached_foreground_tiles: Array = []
+		_draw_metatile_layers_uncached(cached_background, cached_foreground, 0, 0, tileset, metatile_index, primary, secondary, cached_background_tiles, cached_foreground_tiles)
+		cached = {"background": cached_background, "foreground": cached_foreground, "background_tiles": cached_background_tiles, "foreground_tiles": cached_foreground_tiles}
+		cache[cache_key] = cached
+		tileset["_layer_cache"] = cache
+	var cached_background_value: Image = cached.get("background") as Image
+	var cached_foreground_value: Image = cached.get("foreground") as Image
+	if cached_background_value == null or cached_foreground_value == null:
+		return
+	background_image.blend_rect(cached_background_value, Rect2i(0, 0, 16, 16), Vector2i(destination_x, destination_y))
+	foreground_image.blend_rect(cached_foreground_value, Rect2i(0, 0, 16, 16), Vector2i(destination_x, destination_y))
+	for tile_value in cached.get("background_tiles", []):
+		if tile_value is Dictionary:
+			var background_tile: Dictionary = tile_value
+			animated_background_tiles.append({"x": destination_x + int(background_tile.get("x", 0)), "y": destination_y + int(background_tile.get("y", 0)), "entry": int(background_tile.get("entry", 0))})
+	for tile_value in cached.get("foreground_tiles", []):
+		if tile_value is Dictionary:
+			var foreground_tile: Dictionary = tile_value
+			animated_foreground_tiles.append({"x": destination_x + int(foreground_tile.get("x", 0)), "y": destination_y + int(foreground_tile.get("y", 0)), "entry": int(foreground_tile.get("entry", 0))})
+
+func _draw_metatile_layers_uncached(background_image: Image, foreground_image: Image, destination_x: int, destination_y: int, tileset: Dictionary, metatile_index: int, primary: Dictionary, secondary: Dictionary, animated_background_tiles: Array = [], animated_foreground_tiles: Array = [], primary_override: PackedByteArray = PackedByteArray()) -> void:
 	var metatiles: PackedInt32Array = tileset.get("metatiles", PackedInt32Array())
 	var tiles_per_metatile: int = _format_int("tiles_per_metatile", TILES_PER_METATILE)
 	var base: int = metatile_index * tiles_per_metatile

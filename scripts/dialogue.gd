@@ -1,4 +1,4 @@
-class_name MonWorldDialogue
+class_name OpenMMODialogue
 extends PanelContainer
 
 signal action_requested

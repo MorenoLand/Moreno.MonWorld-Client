@@ -2,19 +2,19 @@ extends Control
 
 signal exit_requested
 
-var content: MonWorldContent
+var content: OpenMMOContent
 var selected_map_id: String = ""
 var map_title: Label
 var map_details: Label
 var map_status: Label
-var map_view: MonWorldMapPreviewCanvas
-var play_view: MonWorldMapPlayCanvas
-var hud: MonWorldHud
+var map_view: OpenMMOMapPreviewCanvas
+var play_view: OpenMMOMapPlayCanvas
+var hud: OpenMMOHud
 var map_selector: OptionButton
 var play_button: Button
 var preview_button: Button
-var dialogue_overlay: MonWorldDialogue
-var audio: MonWorldAudio
+var dialogue_overlay: OpenMMODialogue
+var audio: OpenMMOAudio
 var preview_shell: Control
 var animation_tick: int = 0
 var animation_elapsed: float = 0.0
@@ -25,9 +25,9 @@ func _ready() -> void:
 	if content == null:
 		var rom_path: String = OS.get_environment("MONWORLD_ROM")
 		if not rom_path.is_empty():
-			var local_result: Dictionary = MonWorldContent.from_rom_path(rom_path)
+			var local_result: Dictionary = OpenMMOContent.from_rom_path(rom_path)
 			if bool(local_result.get("ok", false)):
-				content = local_result.get("content") as MonWorldContent
+				content = local_result.get("content") as OpenMMOContent
 	_build_ui()
 	if content == null:
 		return
@@ -111,12 +111,12 @@ func _build_ui() -> void:
 	var panel: PanelContainer = PanelContainer.new()
 	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	box.add_child(panel)
-	map_view = MonWorldMapPreviewCanvas.new()
+	map_view = OpenMMOMapPreviewCanvas.new()
 	map_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	map_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	map_view.custom_minimum_size = Vector2(0, 260)
 	panel.add_child(map_view)
-	play_view = MonWorldMapPlayCanvas.new()
+	play_view = OpenMMOMapPlayCanvas.new()
 	play_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	play_view.visible = false
 	play_view.set_content(content)
@@ -127,9 +127,9 @@ func _build_ui() -> void:
 	add_child(play_view)
 	play_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	play_view.z_index = 100
-	audio = MonWorldAudio.new()
+	audio = OpenMMOAudio.new()
 	add_child(audio)
-	hud = MonWorldHud.new()
+	hud = OpenMMOHud.new()
 	hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	hud.visible = false
 	play_view.add_child(hud)
@@ -193,7 +193,7 @@ func _on_back_pressed() -> void:
 	exit_requested.emit()
 
 func _build_dialogue_overlay() -> void:
-	dialogue_overlay = MonWorldDialogue.new()
+	dialogue_overlay = OpenMMODialogue.new()
 	dialogue_overlay.action_requested.connect(_on_dialogue_action)
 	play_view.add_child(dialogue_overlay)
 

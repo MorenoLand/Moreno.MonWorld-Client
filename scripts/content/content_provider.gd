@@ -1,4 +1,4 @@
-class_name MonWorldContentProvider
+class_name OpenMMOContentProvider
 extends Node
 
 const REGION_OPTIONS: Array = [
@@ -8,7 +8,7 @@ const REGION_OPTIONS: Array = [
 	{"region": "Sinnoh", "title": "Platinum ROM", "enabled": false, "description": "Unavailable until Sinnoh content is implemented."},
 	{"region": "Johto", "title": "HeartGold/SoulSilver ROM", "enabled": false, "description": "Unavailable until Johto content is implemented."}
 ]
-signal content_loaded(content: MonWorldContent)
+signal content_loaded(content: OpenMMOContent)
 signal content_failed(message: String)
 
 var manager: Window
@@ -130,7 +130,7 @@ func _on_rom_selected(path: String) -> void:
 	if extension != "gba":
 		content_failed.emit("unsupported file; select a .gba ROM")
 		return
-	var result: Dictionary = MonWorldContent.from_rom_path(path)
+	var result: Dictionary = OpenMMOContent.from_rom_path(path)
 	if bool(result.get("ok", false)):
 		_save_rom_path(path)
 		_close_manager()
@@ -139,7 +139,7 @@ func _on_rom_selected(path: String) -> void:
 		content_failed.emit(str(result.get("error", "could not load content")))
 
 func restore_saved_rom() -> bool:
-	var roms: Dictionary = MonWorldStorage.read_json(MonWorldStorage.SETTINGS_FILE).get("roms", {})
+	var roms: Dictionary = OpenMMOStorage.read_json(OpenMMOStorage.SETTINGS_FILE).get("roms", {})
 	if not roms is Dictionary:
 		_clear_saved_rom()
 		return false
@@ -150,7 +150,7 @@ func restore_saved_rom() -> bool:
 		_clear_saved_rom()
 		content_failed.emit("The saved Kanto ROM was moved or removed; select it again.")
 		return false
-	var result: Dictionary = MonWorldContent.from_rom_path(path)
+	var result: Dictionary = OpenMMOContent.from_rom_path(path)
 	if bool(result.get("ok", false)):
 		content_loaded.emit(result.get("content"))
 		return true
@@ -158,18 +158,18 @@ func restore_saved_rom() -> bool:
 	return false
 
 func _save_rom_path(path: String) -> void:
-	var settings: Dictionary = MonWorldStorage.read_json(MonWorldStorage.SETTINGS_FILE)
+	var settings: Dictionary = OpenMMOStorage.read_json(OpenMMOStorage.SETTINGS_FILE)
 	var roms: Dictionary = settings.get("roms", {})
 	roms["kanto"] = path
 	settings["roms"] = roms
-	MonWorldStorage.write_json(MonWorldStorage.SETTINGS_FILE, settings)
+	OpenMMOStorage.write_json(OpenMMOStorage.SETTINGS_FILE, settings)
 
 func _clear_saved_rom() -> void:
-	var settings: Dictionary = MonWorldStorage.read_json(MonWorldStorage.SETTINGS_FILE)
+	var settings: Dictionary = OpenMMOStorage.read_json(OpenMMOStorage.SETTINGS_FILE)
 	var roms: Dictionary = settings.get("roms", {})
 	roms.erase("kanto")
 	settings["roms"] = roms
-	MonWorldStorage.write_json(MonWorldStorage.SETTINGS_FILE, settings)
+	OpenMMOStorage.write_json(OpenMMOStorage.SETTINGS_FILE, settings)
 
 func _choose_web() -> void:
 	_web_callback = JavaScriptBridge.create_callback(_on_web_file)
@@ -208,7 +208,7 @@ func _on_web_file(args: Array) -> void:
 		content_failed.emit("unsupported file; select a .gba ROM")
 		return
 	var data: PackedByteArray = Marshalls.base64_to_raw(str(args[1]))
-	var path: String = MonWorldStorage.session_rom_path()
+	var path: String = OpenMMOStorage.session_rom_path()
 	var file: FileAccess = FileAccess.open(path, FileAccess.WRITE)
 	if file == null:
 		content_failed.emit("could not store the selected content locally")

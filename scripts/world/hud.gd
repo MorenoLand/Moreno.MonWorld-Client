@@ -1,4 +1,4 @@
-class_name MonWorldHud
+class_name OpenMMOHud
 extends Control
 
 const PARTY_COUNT: int = 6
@@ -9,7 +9,7 @@ var time_label: Label
 var stats_panel: PanelContainer
 var stats_label: Label
 var party_labels: Array = []
-var current_content: MonWorldContent
+var current_content: OpenMMOContent
 var current_map_id: String = ""
 var current_state: Dictionary = {}
 var current_party: Array = []
@@ -24,7 +24,7 @@ func _ready() -> void:
     _refresh()
     _refresh_stats()
 
-func set_state(content: MonWorldContent, map_id: String, state: Dictionary = {}, party: Array = []) -> void:
+func set_state(content: OpenMMOContent, map_id: String, state: Dictionary = {}, party: Array = []) -> void:
 	current_content = content
 	current_map_id = map_id
 	current_state = state
