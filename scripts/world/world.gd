@@ -35,6 +35,9 @@ var held_input_elapsed: float = 0.0
 var map_has_animation: bool = false
 var server_dialogue_active: bool = false
 var server_dialogue_sequence: int = 0
+var server_dialogue_action_type: int = -1
+var server_dialogue_detail: PackedByteArray = PackedByteArray()
+var dialogue_string_vars: Dictionary = {}
 var connected_world_generation: int = 0
 
 func _ready() -> void:
@@ -504,10 +507,15 @@ func _on_dialog_action_received(action: Dictionary) -> void:
 	var action_type: int = int(action.get("action_type", -1))
 	if action_type == 0x64:
 		server_dialogue_active = false
+		server_dialogue_action_type = -1
+		server_dialogue_detail = PackedByteArray()
 		dialogue_overlay.close_dialogue()
 		map_view.set_dialogue_active(false)
 		map_view.restore_interaction_facing()
 		return
+	server_dialogue_action_type = action_type
+	server_dialogue_detail = action.get("detail", PackedByteArray()) if action.get("detail", PackedByteArray()) is PackedByteArray else PackedByteArray()
+	_update_dialogue_string_vars(action)
 	var text_id: int = int(action.get("text_id", 0))
 	var pages: Array = _streamed_dialogue_pages(action.get("detail", PackedByteArray()))
 	if pages.is_empty():
@@ -527,7 +535,7 @@ func _on_dialog_action_received(action: Dictionary) -> void:
 	server_dialogue_sequence = int(action.get("flags", 0)) & 0xFF
 	map_view.set_dialogue_active(true)
 	var anchor: Vector2 = map_view.dialogue_anchor_screen({"object": actor})
-	var choices: Array = _server_dialogue_choices(action_type, action.get("detail", PackedByteArray()))
+	var choices: Array = _server_dialogue_choices(action_type, server_dialogue_detail)
 	if choices.is_empty():
 		dialogue_overlay.show_pages(pages, false, anchor)
 	else:
@@ -550,26 +558,97 @@ func _server_dialogue_choices(action_type: int, detail_value: Variant) -> Array:
 		choices.append({"label": _pokemon_choice_name(species_id), "value": index + 1})
 	if choices.is_empty():
 		for index in 3:
-			choices.append({"label": "POKéMON %d" % (index + 1), "value": index + 1})
+			choices.append({"label": "POKEMON %d" % (index + 1), "value": index + 1})
 	return choices
 
 func _pokemon_choice_name(species_id: int) -> String:
 	var names: Dictionary = {1: "BULBASAUR", 4: "CHARMANDER", 7: "SQUIRTLE", 252: "TREECKO", 255: "TORCHIC", 258: "MUDKIP"}
-	return str(names.get(species_id, "POKéMON #%d" % species_id))
+	return str(names.get(species_id, "POKEMON #%d" % species_id))
 
 func _resolve_dialogue_pages(pages: Array) -> Array:
-	var character_name: String = str(GameState.current_character.get("name", ""))
-	var region_name: String = "Kanto"
-	if GameState.content != null:
-		var profile_value: Variant = GameState.content.get("source_profile")
-		if profile_value is Dictionary:
-			region_name = str((profile_value as Dictionary).get("region", region_name))
+	var values: Dictionary = _dialogue_placeholder_values()
+	var regex: RegEx = RegEx.new()
+	regex.compile("\\{(0x[0-9A-Fa-f]{2}|[0-9A-Fa-f]{2}|[A-Za-z0-9_]+)\\}")
 	var resolved: Array = []
 	for page_value in pages:
 		var page: String = str(page_value)
-		page = page.replace("{01}", character_name).replace("{PLAYER}", character_name).replace("{06}", region_name)
-		resolved.append(page)
+		var matches: Array[RegExMatch] = regex.search_all(page)
+		if matches.is_empty():
+			resolved.append(page)
+			continue
+		var output: String = ""
+		var cursor: int = 0
+		for match in matches:
+			output += page.substr(cursor, match.get_start() - cursor)
+			var key: String = str(match.get_string(1)).to_upper().trim_prefix("0X")
+			output += str(values.get(key, ""))
+			cursor = match.get_end()
+		output += page.substr(cursor)
+		resolved.append(output)
 	return resolved
+
+func _dialogue_placeholder_values() -> Dictionary:
+	var character_name: String = str(GameState.current_character.get("name", ""))
+	var region_name: String = "Kanto"
+	var version_name: String = "FireRed"
+	if GameState.content != null:
+		var profile_value: Variant = GameState.content.get("source_profile")
+		if profile_value is Dictionary:
+			var profile: Dictionary = profile_value
+			region_name = str(profile.get("region", region_name))
+			var source_name: String = str(profile.get("game", profile.get("name", ""))).to_lower()
+			if source_name.contains("leaf"):
+				version_name = "LeafGreen"
+	var vars: Dictionary = {}
+	var character_vars: Variant = GameState.current_character.get("string_vars", {})
+	if character_vars is Dictionary:
+		vars.merge(character_vars)
+	vars.merge(dialogue_string_vars)
+	var party: Variant = GameState.current_character.get("party", [])
+	var party_names: Array = []
+	if party is Array:
+		for pokemon in party:
+			party_names.append(_dialogue_pokemon_name(pokemon))
+	var string_1: String = str(vars.get("02", vars.get("STRING_VAR_1", "")))
+	var string_2: String = str(vars.get("03", vars.get("STRING_VAR_2", "")))
+	var string_3: String = str(vars.get("04", vars.get("STRING_VAR_3", "")))
+	if string_1.is_empty() and party_names.size() > 0:
+		string_1 = str(party_names[0])
+	if string_2.is_empty() and party_names.size() > 1:
+		string_2 = str(party_names[1])
+	if string_3.is_empty() and party_names.size() > 2:
+		string_3 = str(party_names[2])
+	if string_1.is_empty():
+		string_1 = "POKEMON"
+	var rival_name: String = str(GameState.current_character.get("rival_name", "")).strip_edges()
+	if rival_name.is_empty():
+		rival_name = "GARY"
+	var values: Dictionary = {"00": str(vars.get("00", "")), "01": character_name, "02": string_1, "03": string_2, "04": string_3, "05": "KUN", "06": region_name, "07": version_name, "08": "MAGMA", "09": "AQUA", "0A": "MAXIE", "0B": "ARCHIE", "0C": "GROUDON", "0D": "KYOGRE", "PLAYER": character_name, "PLAYER_NAME": character_name, "STRING_VAR_1": string_1, "STRING_VAR_2": string_2, "STRING_VAR_3": string_3, "STR_VAR_1": string_1, "STR_VAR_2": string_2, "STR_VAR_3": string_3, "RIVAL": rival_name, "RIVAL_NAME": rival_name, "KUN": "KUN", "CHAN": "CHAN", "VERSION": version_name, "DYNAMIC": "", "CONTROL": ""}
+	return values
+
+func _dialogue_pokemon_name(value: Variant) -> String:
+	if not value is Dictionary:
+		return "POKEMON"
+	var pokemon: Dictionary = value
+	var nickname: String = str(pokemon.get("nickname", "")).strip_edges()
+	if not nickname.is_empty():
+		return nickname
+	return _pokemon_choice_name(int(pokemon.get("dex_id", pokemon.get("species", 0))))
+
+func _update_dialogue_string_vars(action: Dictionary) -> void:
+	var args_value: Variant = action.get("message_args", [])
+	if not args_value is Array:
+		return
+	for arg_value in args_value:
+		if not arg_value is Dictionary:
+			continue
+		var arg: Dictionary = arg_value
+		if str(arg.get("tag", "")) != "pokemon_species":
+			continue
+		var variable: int = int(arg.get("string_variable", 2))
+		var value: String = _pokemon_choice_name(int(arg.get("species_id", 0)))
+		dialogue_string_vars["%02X" % variable] = value
+		dialogue_string_vars["STRING_VAR_%d" % maxi(variable - 1, 1)] = value
 
 func _streamed_dialogue_pages(detail_value: Variant) -> Array:
 	if not detail_value is PackedByteArray:
@@ -612,6 +691,14 @@ func _on_dialogue_action() -> void:
 func _on_dialogue_choice(value: int) -> void:
 	audio.play_effect("dialogue")
 	if server_dialogue_active:
+		if server_dialogue_action_type == 0x23 and value > 0:
+			for choice_value in _server_dialogue_choices(server_dialogue_action_type, server_dialogue_detail):
+				if not choice_value is Dictionary or int((choice_value as Dictionary).get("value", 0)) != value:
+					continue
+				var selected_name: String = str((choice_value as Dictionary).get("label", "POKEMON"))
+				dialogue_string_vars["02"] = selected_name
+				dialogue_string_vars["STRING_VAR_1"] = selected_name
+				break
 		if GameState.send_dialogue_action_response(server_dialogue_sequence, value):
 			if dialogue_overlay != null:
 				dialogue_overlay.close_dialogue()

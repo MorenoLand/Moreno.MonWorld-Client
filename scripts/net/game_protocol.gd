@@ -27,6 +27,23 @@ const NPC_ANIMATION: int = 0xB2
 const ENTITY_MOVE_GBA: int = 0xEA
 const ENTITY_MOVE_NDS: int = 0xE4
 const ENTITY_FACE_TURN: int = 0x07
+const ENTITY_PRESENCE: int = 0x0F
+const BATTLE_ENTITY_DELTA: int = 0x16
+const BATTLE_ACTION_SELECT: int = 0x32
+const BATTLE_FIELD_STATE: int = 0x30
+const BATTLE_BULK_STATE: int = 0x31
+const BATTLE_QUEUED_EVENT: int = 0x32
+const BATTLE_MOVE_EVENT: int = 0x33
+const BATTLE_SLOT_EVENT: int = 0x34
+const BATTLE_SWITCH_IN: int = 0x35
+const BATTLE_SLOT_FLAG: int = 0x36
+const BATTLE_LIST_EVENT: int = 0x37
+const BATTLE_SIDE_PARTY: int = 0x40
+const BATTLE_STAT_COUNTERS: int = 0x79
+const BATTLE_SIDE: int = 0x6B
+const BATTLE_PROMPT: int = 0x9D
+const BATTLE_TILE_MAP: int = 0xC4
+const BATTLE_START_SCENE: int = 0xCA
 const SPECIAL_MAP_ROM_TYPES: Array[int] = [2, 3, 4, 10]
 
 static func encode_join(user_id: int, session_token: PackedByteArray, hardware_id: PackedByteArray) -> PackedByteArray:
@@ -119,6 +136,24 @@ static func encode_chat_message(text: String, chat_type: int = 0, language: int 
 	OpenMMOCodec.append_u8(output, language)
 	OpenMMOCodec.append_u8(output, 255)
 	OpenMMOCodec.append_utf16_le_null(output, text)
+	return output
+
+static func encode_battle_action_select(action: int, move_or_item_id: int = 0, target_entity_id: int = 0, extra_flag: int = 0, slot_ref: int = 0) -> PackedByteArray:
+	if action < 0 or action > 3:
+		return PackedByteArray()
+	var output: PackedByteArray = PackedByteArray([slot_ref & 0xFF, action & 0xFF])
+	match action:
+		0:
+			OpenMMOCodec.append_s16_le(output, move_or_item_id)
+			OpenMMOCodec.append_u8(output, extra_flag)
+		1:
+			OpenMMOCodec.append_s16_le(output, move_or_item_id)
+			OpenMMOCodec.append_s64_le(output, target_entity_id)
+			OpenMMOCodec.append_u8(output, extra_flag)
+		2:
+			OpenMMOCodec.append_s16_le(output, move_or_item_id)
+		3:
+			pass
 	return output
 
 static func encode_entity_interact(entity_id: int, token: int = 0) -> PackedByteArray:
@@ -350,6 +385,352 @@ static func decode_server_notice(payload: PackedByteArray) -> Dictionary:
 	var result: Dictionary = {"ok": not reader.failed and reader.remaining() == 0, "notice": notice}
 	if not result.ok:
 		result["error"] = "OpenMMO server notice is malformed"
+	return result
+
+static func decode_entity_presence(payload: PackedByteArray) -> Dictionary:
+	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
+	var presence: Dictionary = {"entity_id": reader.read_s64_le(), "status": reader.read_s8()}
+	return _battle_decode_result(reader, {"presence": presence}, "OpenMMO entity presence packet is malformed")
+
+static func decode_battle_side(payload: PackedByteArray) -> Dictionary:
+	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
+	return _battle_decode_result(reader, {"side": reader.read_s8()}, "OpenMMO battle-side packet is malformed")
+
+static func decode_battle_field_state(payload: PackedByteArray) -> Dictionary:
+	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
+	reader.read_bytes(5)
+	var background: int = reader.read_s8()
+	reader.read_bytes(17)
+	var opposing: int = reader.read_s8()
+	reader.read_bytes(4)
+	var player_name: String = reader.read_utf16_le_null()
+	reader.read_u8()
+	var player_id: int = reader.read_s64_le()
+	reader.read_s8()
+	reader.read_bytes(14)
+	reader.read_bytes(5)
+	reader.read_u8()
+	var player_count: int = reader.read_u8()
+	reader.read_u8()
+	var player_party: Array = []
+	if player_count > 6:
+		reader.failed = true
+	for _index in mini(player_count, 6):
+		player_party.append(_read_battle_mon_full(reader))
+		reader.read_s8()
+	var active: Dictionary = _read_battle_active(reader)
+	reader.read_s8()
+	reader.read_u8()
+	reader.read_u8()
+	var trainer_id: int = 0
+	if opposing == 4:
+		trainer_id = reader.read_s16_le()
+	reader.read_bytes(4)
+	if opposing == 4:
+		reader.read_bytes(2)
+	reader.read_u8()
+	var opponent_count: int = reader.read_u8()
+	reader.read_u8()
+	var opponent_party: Array = []
+	if opponent_count > 6:
+		reader.failed = true
+	for _index in mini(opponent_count, 6):
+		opponent_party.append(_read_battle_opponent(reader))
+		reader.read_s8()
+	var opponent_active: Dictionary = _read_battle_active(reader)
+	reader.read_bytes(4)
+	var state: Dictionary = {"background": background, "trainer": opposing == 4, "opposing": opposing, "trainer_id": trainer_id, "player_name": player_name, "player_id": player_id, "player_party": player_party, "active_slot": int(active.get("slot", 0)), "active": active, "opponent_party": opponent_party, "opponent_active_slot": int(opponent_active.get("slot", 0)), "opponent_active": opponent_active}
+	return _battle_decode_result(reader, {"state": state}, "OpenMMO battle field state is malformed")
+
+static func decode_battle_bulk_state(payload: PackedByteArray) -> Dictionary:
+	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
+	var phase: int = reader.read_s8()
+	_skip_battle_serialized_group(reader)
+	_skip_battle_serialized_group(reader)
+	var prize_money: int = reader.read_s32_le()
+	var value_b: int = reader.read_s32_le()
+	var flag: int = reader.read_s8()
+	_skip_battle_serialized_group(reader)
+	return _battle_decode_result(reader, {"phase": phase, "prize_money": prize_money, "value_b": value_b, "flag": flag}, "OpenMMO battle bulk state is malformed")
+
+static func decode_battle_queued_event(payload: PackedByteArray) -> Dictionary:
+	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
+	var packed: int = reader.read_s8()
+	return _battle_decode_result(reader, {"packed": packed, "value": packed & 0x7F, "prompt": packed & 0x80 != 0}, "OpenMMO battle queued event is malformed")
+
+static func decode_battle_move_event(payload: PackedByteArray) -> Dictionary:
+	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
+	var source_entity: int = reader.read_s64_le()
+	var source_move: int = reader.read_s16_le()
+	var kind: int = reader.read_s8()
+	var target_count: int = reader.read_u8()
+	var targets: Array = []
+	if target_count > 8:
+		reader.failed = true
+	for _index in mini(target_count, 8):
+		var target: Dictionary = {"entity_id": reader.read_s64_le(), "target_move": reader.read_s16_le(), "events": []}
+		var event_count: int = reader.read_u8()
+		if event_count > 16:
+			reader.failed = true
+		for _event_index in mini(event_count, 16):
+			var event_type: int = reader.read_u8()
+			var aux: int = reader.read_u8()
+			var event: Dictionary = {"type": event_type, "aux": aux}
+			if aux & 1 != 0:
+				event["entity_a"] = reader.read_s64_le()
+			if aux & 2 != 0:
+				event["entity_b"] = reader.read_s64_le()
+			match event_type:
+				0:
+					event["current_hp"] = reader.read_s16_le()
+				1:
+					event["change_type"] = reader.read_s8()
+					event["stat"] = reader.read_s8()
+					event["stage_delta"] = reader.read_s8()
+					reader.read_u8()
+				4:
+					pass
+				5:
+					event["faint"] = reader.read_bool()
+				0x40:
+					event["failed_move"] = reader.read_s16_le()
+				_:
+					reader.failed = true
+			(target["events"] as Array).append(event)
+		targets.append(target)
+	return _battle_decode_result(reader, {"source_entity": source_entity, "source_move": source_move, "kind": kind, "targets": targets}, "OpenMMO battle move event is malformed")
+
+static func decode_battle_switch_in(payload: PackedByteArray) -> Dictionary:
+	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
+	var side: int = reader.read_s8()
+	reader.read_u8()
+	var new_slot: int = reader.read_u8()
+	var old_slot: int = reader.read_u8()
+	var full_block: bool = reader.remaining() > 21
+	var mon: Dictionary = _read_battle_mon_full(reader) if full_block else {}
+	if full_block:
+		reader.read_s8()
+	var active: Dictionary = _read_battle_active(reader)
+	return _battle_decode_result(reader, {"side": side, "new_slot": new_slot, "old_slot": old_slot, "full_block": full_block, "mon": mon, "active": active}, "OpenMMO battle switch-in packet is malformed")
+
+static func decode_battle_slot_event(payload: PackedByteArray) -> Dictionary:
+	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
+	return _battle_decode_result(reader, {"slot": reader.read_s8(), "event_type": reader.read_s8()}, "OpenMMO battle slot event is malformed")
+
+static func decode_battle_slot_flag(payload: PackedByteArray) -> Dictionary:
+	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
+	return _battle_decode_result(reader, {"slot": reader.read_s8(), "flag": reader.read_bool(), "immediate": reader.read_bool()}, "OpenMMO battle slot flag event is malformed")
+
+static func decode_battle_list_event(payload: PackedByteArray) -> Dictionary:
+	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
+	var event: Dictionary = {"kind": reader.read_s8(), "value": reader.read_s16_le(), "sub_kind": reader.read_s8()}
+	if int(event.get("sub_kind", 0)) == 4:
+		event["detail"] = {"list_type": reader.read_s8(), "value": reader.read_s16_le()}
+	return _battle_decode_result(reader, {"event": event}, "OpenMMO battle list event is malformed")
+
+static func decode_battle_stat_counters(payload: PackedByteArray) -> Dictionary:
+	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
+	var entity_id: int = reader.read_s64_le()
+	var base_counter: int = reader.read_s32_le()
+	var flags: int = reader.read_u8()
+	var counters: Array = []
+	for index in 6:
+		counters.append(reader.read_s32_le() if flags & (1 << index) != 0 else null)
+	return _battle_decode_result(reader, {"entity_id": entity_id, "base_counter": base_counter, "counters": counters}, "OpenMMO battle stat counters are malformed")
+
+static func decode_battle_start_scene(payload: PackedByteArray) -> Dictionary:
+	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
+	return _battle_decode_result(reader, {"battle_type": reader.read_s8(), "double_battle": reader.read_bool(), "perspective": reader.read_s8()}, "OpenMMO battle start scene is malformed")
+
+static func decode_battle_entity_delta(payload: PackedByteArray) -> Dictionary:
+	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
+	var entity_id: int = reader.read_s64_le()
+	var mask: int = reader.read_s32_le()
+	var updates: Dictionary = {}
+	if mask & 0x1 != 0:
+		updates["experience_level"] = reader.read_s8()
+		updates["experience_points"] = reader.read_s32_le()
+	if mask & 0x2 != 0:
+		var stats: Array = []
+		for _index in 6:
+			stats.append(reader.read_s16_le())
+		updates["stats"] = stats
+	if mask & 0x4 != 0:
+		var moves: Array = []
+		for _index in 4:
+			moves.append({"id": reader.read_s16_le(), "pp": reader.read_s8()})
+		updates["moves"] = moves
+		updates["pp_ups"] = reader.read_s8()
+	if mask & 0x8 != 0:
+		updates["current_hp"] = reader.read_s16_le()
+	if mask & 0x10 != 0:
+		updates["faint_flag"] = reader.read_s8()
+	if mask & 0x20 != 0:
+		updates["species"] = reader.read_s16_le()
+		updates["forme"] = reader.read_s8()
+	if mask & 0x40 != 0:
+		updates["listing_type"] = reader.read_s8()
+		updates["listing_sort_key"] = reader.read_s16_le()
+	if mask & 0x80 != 0:
+		var evs: Array = []
+		for _index in 6:
+			evs.append(reader.read_s16_le())
+		updates["evs"] = evs
+	if mask & 0x100 != 0:
+		updates["level"] = reader.read_s16_le()
+	if mask & 0x200 != 0:
+		updates["happiness"] = reader.read_s16_le()
+	if mask & 0x400 != 0:
+		updates["position"] = {"x": reader.read_s32_le(), "y": reader.read_s32_le(), "flag_a": reader.read_s8(), "flag_b": reader.read_s8(), "flag_c": reader.read_s8()}
+	if mask & 0x800 != 0:
+		updates["status_flags"] = reader.read_s16_le()
+	if mask & 0x1000 != 0:
+		updates["map_position"] = {"x": reader.read_s16_le(), "y": reader.read_s16_le()}
+	if mask & 0x2000 != 0:
+		updates["nature"] = reader.read_s8()
+	if mask & 0x4000 != 0:
+		updates["value64"] = reader.read_s64_le()
+	if mask & 0x200000 != 0:
+		updates["packed_ivs"] = reader.read_s32_le()
+	if mask & 0x8000 != 0:
+		var origin_evs: Array = []
+		for _index in 4:
+			origin_evs.append(reader.read_s16_le())
+		updates["origin_evs"] = origin_evs
+		updates["origin_species"] = reader.read_s64_le()
+		updates["origin_trainer"] = reader.read_utf16_le_null()
+		updates["origin_trainer_id"] = reader.read_s32_le()
+	if mask & 0x10000 != 0:
+		updates["shininess_type"] = reader.read_s8()
+	if mask & 0x20000 != 0:
+		updates["gender"] = reader.read_s8()
+	if mask & 0x40000 != 0:
+		var ivs: Array = []
+		for _index in 5:
+			ivs.append(reader.read_s16_le())
+		updates["ivs"] = ivs
+	if mask & 0x80000 != 0:
+		updates["caught_ball"] = reader.read_s8()
+	if mask & 0x100000 != 0:
+		updates["status_flags_2"] = reader.read_s16_le()
+	if mask & 0x400000 != 0:
+		var status_count: int = reader.read_u8()
+		if status_count > 32:
+			reader.failed = true
+		var statuses: Array = []
+		for _index in mini(status_count, 32):
+			statuses.append(reader.read_s8())
+		updates["status_list"] = statuses
+	if mask & 0x800000 != 0:
+		updates["status"] = reader.read_s8()
+	return _battle_decode_result(reader, {"entity_id": entity_id, "mask": mask, "updates": updates}, "OpenMMO battle entity delta is malformed")
+
+static func _read_battle_mon_full(reader: OpenMMOCodec.Reader) -> Dictionary:
+	var mon: Dictionary = {"slot": reader.read_s8()}
+	reader.read_u8()
+	mon["entity_id"] = reader.read_s64_le()
+	mon["species"] = reader.read_s16_le()
+	mon["level"] = reader.read_s8()
+	reader.read_bytes(2)
+	mon["gender"] = reader.read_s8()
+	reader.read_bytes(3)
+	mon["current_hp"] = reader.read_s16_le()
+	mon["max_hp"] = reader.read_s16_le()
+	reader.read_bytes(5)
+	mon["moves_present"] = reader.read_bool()
+	mon["ability_id"] = reader.read_s16_le() if bool(mon.get("moves_present", false)) else 0
+	var move_ids: Array = []
+	for _index in 4:
+		move_ids.append(reader.read_s16_le() if bool(mon.get("moves_present", false)) else 0)
+	mon["move_ids"] = move_ids
+	mon["revealed"] = true
+	return mon
+
+static func _read_battle_opponent(reader: OpenMMOCodec.Reader) -> Dictionary:
+	var slot: int = reader.read_s8()
+	var kind: int = reader.read_s8()
+	if kind != 1:
+		return {"slot": slot, "revealed": false, "species": 0, "level": 0, "current_hp": 0, "max_hp": 0}
+	var mon: Dictionary = {"slot": slot, "revealed": true, "entity_id": reader.read_s64_le(), "species": reader.read_s16_le(), "level": reader.read_s8()}
+	reader.read_bytes(2)
+	mon["gender"] = reader.read_s8()
+	reader.read_bytes(3)
+	mon["current_hp"] = reader.read_s16_le()
+	mon["max_hp"] = reader.read_s16_le()
+	reader.read_bytes(5)
+	reader.read_u8()
+	return mon
+
+static func _read_battle_active(reader: OpenMMOCodec.Reader) -> Dictionary:
+	reader.read_u8()
+	var active: Dictionary = {"slot": reader.read_s8(), "species": reader.read_s16_le(), "level": reader.read_s8()}
+	reader.read_bytes(4)
+	active["gender"] = reader.read_s8()
+	reader.read_u8()
+	reader.read_bytes(10)
+	return active
+
+static func _skip_battle_serialized_group(reader: OpenMMOCodec.Reader) -> void:
+	var count: int = reader.read_u8()
+	if count > 64:
+		reader.failed = true
+	for _index in mini(count, 64):
+		_skip_battle_serialized_entry(reader)
+
+static func _skip_battle_serialized_entry(reader: OpenMMOCodec.Reader) -> void:
+	match reader.read_s8():
+		-1:
+			return
+		0:
+			reader.read_s32_le()
+			var arg_count: int = reader.read_u8()
+			if arg_count > 64:
+				reader.failed = true
+			for _index in mini(arg_count, 64):
+				_skip_battle_message_arg(reader)
+		1:
+			reader.read_s8()
+			var move_count: int = reader.read_u8()
+			if move_count > 64:
+				reader.failed = true
+			reader.read_bytes(mini(move_count, 64) * 2)
+		2:
+			reader.read_s16_le()
+			reader.read_s8()
+			reader.read_s8()
+		3:
+			reader.read_s8()
+			reader.read_s8()
+			reader.read_s16_le()
+			reader.read_s16_le()
+		_:
+			pass
+
+static func _skip_battle_message_arg(reader: OpenMMOCodec.Reader) -> void:
+	reader.read_s8()
+	var raw_type: int = reader.read_s8()
+	if raw_type & 0x80 != 0:
+		reader.read_s8()
+	var type_id: int = raw_type & 0x7F
+	match type_id:
+		5, 18:
+			reader.read_utf16_le_null()
+		28:
+			pass
+		30:
+			reader.read_s64_le()
+		9, 10, 17:
+			reader.read_s32_le()
+		_:
+			var value_count: int = reader.read_u8()
+			if value_count > 64:
+				reader.failed = true
+			reader.read_bytes(mini(value_count, 64) * 2)
+
+static func _battle_decode_result(reader: OpenMMOCodec.Reader, result: Dictionary, error: String) -> Dictionary:
+	result["ok"] = not reader.failed and reader.remaining() == 0
+	if not bool(result.get("ok", false)):
+		result["error"] = error
 	return result
 
 static func _read_dialog_message_arg(reader: OpenMMOCodec.Reader) -> Dictionary:

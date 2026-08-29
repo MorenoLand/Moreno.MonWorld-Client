@@ -532,19 +532,31 @@ func set_world_entities(values: Array, local_character_id: int) -> void:
 		var entity_key: String = "%s:%s" % [str(entity_id), entity_map_id]
 		var previous_value: Variant = previous_entities.get(entity_key, {})
 		var previous: Dictionary = previous_value as Dictionary if previous_value is Dictionary else {}
+		var incoming_position: Vector2i = Vector2i(int(entity.get("x", 0)), int(entity.get("y", 0)))
+		var previous_position: Vector2i = Vector2i(int(previous.get("x", incoming_position.x)), int(previous.get("y", incoming_position.y)))
+		var previous_active: bool = bool(previous.get("movement_active", false))
+		var previous_scripted: bool = bool(previous.get("movement_scripted", false))
+		var retain_script_position: bool = (previous_active or previous_scripted) and incoming_position != previous_position
+		var clear_script_position: bool = previous_scripted and not previous_active and incoming_position == previous_position
+		var resolved_x: int = previous_position.x if retain_script_position else incoming_position.x
+		var resolved_y: int = previous_position.y if retain_script_position else incoming_position.y
+		var script_busy: bool = previous_scripted and not clear_script_position
+		var resolved_facing: int = int(previous.get("facing", facing)) if previous_active or script_busy else facing
 		var texture: Texture2D = previous.get("texture") as Texture2D
-		if texture == null or int(previous.get("graphics_id", -1)) != graphics_id or int(previous.get("facing", -1)) != facing:
-			var sprite: Dictionary = content.render_facing_object_sprite(graphics_id, facing, false, 0)
+		if texture == null or int(previous.get("graphics_id", -1)) != graphics_id or int(previous.get("facing", -1)) != resolved_facing:
+			var sprite: Dictionary = content.render_facing_object_sprite(graphics_id, resolved_facing, false, 0)
 			texture = sprite.get("texture") as Texture2D
 		if texture == null and not is_npc:
 			continue
-		var stored_entity: Dictionary = {"entity_key": entity_key, "entity_id": entity_id, "npc": is_npc, "map_id": entity_map_id, "texture": texture, "width": texture.get_width() if texture != null else 0, "height": texture.get_height() if texture != null else 0, "x": int(entity.get("x", 0)), "y": int(entity.get("y", 0)), "elevation": int(entity.get("elevation", 3)), "facing": facing, "default_facing": int(entity.get("facing", 1)), "graphics_id": graphics_id, "sprite_region_id": sprite_region_id, "blocks_movement": bool(entity.get("blocks_movement", is_npc)), "visible": true, "movement_active": false, "movement_start": Vector2.ZERO, "movement_target": Vector2.ZERO, "movement_elapsed": 0.0, "movement_duration": 0.0, "movement_action": -1, "movement_animation": false, "movement_frame": -1, "movement_queue": []}
-		for dynamic_key in ["visible", "movement_active", "movement_start", "movement_target", "movement_elapsed", "movement_duration", "movement_action", "movement_animation", "movement_frame", "movement_queue"]:
+		var stored_entity: Dictionary = {"entity_key": entity_key, "entity_id": entity_id, "npc": is_npc, "map_id": entity_map_id, "texture": texture, "width": texture.get_width() if texture != null else 0, "height": texture.get_height() if texture != null else 0, "x": resolved_x, "y": resolved_y, "elevation": int(entity.get("elevation", 3)), "facing": resolved_facing, "default_facing": int(entity.get("facing", 1)), "graphics_id": graphics_id, "sprite_region_id": sprite_region_id, "blocks_movement": bool(entity.get("blocks_movement", is_npc)), "visible": true, "movement_scripted": script_busy, "movement_active": false, "movement_start": Vector2.ZERO, "movement_target": Vector2.ZERO, "movement_elapsed": 0.0, "movement_duration": 0.0, "movement_action": -1, "movement_animation": false, "movement_frame": -1, "movement_queue": []}
+		for dynamic_key in ["visible", "movement_scripted", "movement_active", "movement_start", "movement_target", "movement_elapsed", "movement_duration", "movement_action", "movement_animation", "movement_frame", "movement_queue"]:
 			if previous.has(dynamic_key):
 				stored_entity[dynamic_key] = previous.get(dynamic_key)
+		stored_entity["movement_scripted"] = script_busy
 		world_entities.append(stored_entity)
 		var pending_value: Variant = pending_scripted_movements.get(str(entity_id), [])
 		if pending_value is Array and not (pending_value as Array).is_empty():
+			stored_entity["movement_scripted"] = true
 			stored_entity["movement_queue"] = (pending_value as Array).duplicate()
 			pending_scripted_movements.erase(str(entity_id))
 			var stored_index: int = world_entities.size() - 1
@@ -577,6 +589,7 @@ func queue_scripted_movement(entity_id: int, steps: Variant, _running: bool = fa
 		pending_scripted_movements[str(entity_id)] = pending
 		return
 	var entity: Dictionary = (world_entities[entity_index] as Dictionary).duplicate()
+	entity["movement_scripted"] = true
 	var movement_queue: Array = entity.get("movement_queue", []).duplicate()
 	movement_queue.append_array(actions)
 	entity["movement_queue"] = movement_queue

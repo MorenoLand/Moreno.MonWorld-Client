@@ -88,7 +88,7 @@ static func from_rom_bytes(data: PackedByteArray) -> Dictionary:
 	content.rom_header = header
 	content.source_profile = source_profile
 	content.manifest = _manifest_for_profile(source_profile, rom_sha1)
-	content.string_catalog = OpenMMOStorage.read_strings(str(content.manifest.get("content_id", "")))
+	content.string_catalog = OpenMMOStorage.read_strings(content.string_catalog_id())
 	content._hydrate_manifest()
 	return {"ok": true, "content": content}
 
@@ -338,6 +338,15 @@ func map_id_for_location(map_group: int, map_index: int) -> String:
 
 func content_id() -> String:
 	return str(manifest.get("content_id", ""))
+
+func string_catalog_id() -> String:
+	var region: String = str(source_profile.get("region", "unknown")).strip_edges().to_lower().replace(" ", "-")
+	var profile_id: String = str(source_profile.get("id", "")).strip_edges().to_lower()
+	if region.is_empty():
+		region = "unknown"
+	if profile_id.is_empty():
+		profile_id = content_id()
+	return region.path_join(profile_id)
 
 func map_data(map_id: String) -> Dictionary:
 	for map_value in manifest.get("maps", []):
@@ -1529,9 +1538,11 @@ func _register_dialogue(map_id: String, local_id: int, script_offset: int, dialo
 	records[key] = {"map_id": map_id, "local_id": local_id, "script_offset": script_offset, "text_offset": int(dialogue.get("text_offset", -1)), "raw": str(dialogue.get("raw", "")), "pages": dialogue.get("pages", [])}
 	string_catalog["schema_version"] = 1
 	string_catalog["content_id"] = content_id()
+	string_catalog["catalog_id"] = string_catalog_id()
 	string_catalog["language"] = "en"
+	string_catalog["source"] = manifest.get("source", {})
 	string_catalog["records"] = records
-	OpenMMOStorage.write_strings(content_id(), string_catalog)
+	OpenMMOStorage.write_strings(string_catalog_id(), string_catalog)
 
 func _read_dialogue_for_script(script_offset: int) -> Dictionary:
 	if script_offset < 0 or not _valid_range(script_offset, 1):

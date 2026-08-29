@@ -41,6 +41,8 @@ var pending_map_load: Dictionary = {}
 var awaiting_local_entity: bool = false
 var map_transition_pending: bool = false
 var active_map_key: String = ""
+var battle_state: Dictionary = {}
+var battle_in_progress: bool = false
 
 func _ready() -> void:
 	login_session = SESSION_SCRIPT.new()
@@ -154,6 +156,8 @@ func select_character(character_id: int) -> bool:
 	pending_map_load.clear()
 	awaiting_local_entity = false
 	map_transition_pending = false
+	battle_state.clear()
+	battle_in_progress = false
 	return game_session.send_packet(GAME_PROTOCOL_SCRIPT.SELECT_CHARACTER, GAME_PROTOCOL_SCRIPT.encode_select_character(character_id))
 
 func complete_map_load(load_key: String) -> bool:
@@ -207,14 +211,17 @@ func send_chat(text: String, channel: String = "Normal") -> bool:
 	var payload: PackedByteArray = GAME_PROTOCOL_SCRIPT.encode_chat_message(trimmed, 0, 0)
 	return not payload.is_empty() and game_session.send_packet(GAME_PROTOCOL_SCRIPT.CHAT_MESSAGE, payload)
 
-func send_battle_action(_battle_id: String, _action: String) -> bool:
-	return false
+func send_battle_action(action: int, move_or_item_id: int = 0, target_entity_id: int = 0, extra_flag: int = 0, slot_ref: int = 0) -> bool:
+	var payload: PackedByteArray = GAME_PROTOCOL_SCRIPT.encode_battle_action_select(action, move_or_item_id, target_entity_id, extra_flag, slot_ref)
+	return not payload.is_empty() and game_session.send_packet(GAME_PROTOCOL_SCRIPT.BATTLE_ACTION_SELECT, payload)
 
 func disconnect_game() -> void:
 	pending_map_load.clear()
 	server_maps.clear()
 	awaiting_local_entity = false
 	map_transition_pending = false
+	battle_state.clear()
+	battle_in_progress = false
 	game_session.close()
 
 func _on_login_established() -> void:
@@ -289,6 +296,16 @@ func _on_game_packet(opcode: int, payload: PackedByteArray) -> void:
 		game_flow = "characters"
 		if not game_session.send_packet(GAME_PROTOCOL_SCRIPT.REQUEST_CHARACTERS, GAME_PROTOCOL_SCRIPT.encode_request_characters()):
 			_finish_game_connection({"ok": false, "error": "OpenMMO character-list request could not be sent"})
+	elif opcode == GAME_PROTOCOL_SCRIPT.ENTITY_PRESENCE:
+		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_entity_presence(payload)
+		if not response.ok:
+			connection_error.emit(str(response.get("error", "OpenMMO entity presence packet is malformed")))
+			return
+		var presence: Dictionary = response.presence
+		if int(presence.get("entity_id", 0)) == int(current_character.get("id", 0)):
+			battle_in_progress = int(presence.get("status", 0)) != 0
+			battle_state["in_progress"] = battle_in_progress
+		battle_event_received.emit({"type": "presence", "presence": presence, "in_progress": battle_in_progress})
 	elif opcode == GAME_PROTOCOL_SCRIPT.REQUEST_CHARACTERS:
 		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_characters(payload)
 		if response.ok:
@@ -317,6 +334,102 @@ func _on_game_packet(opcode: int, payload: PackedByteArray) -> void:
 			chat_received.emit(notice)
 		else:
 			connection_error.emit(str(response.get("error", "OpenMMO server notice is malformed")))
+	elif opcode == GAME_PROTOCOL_SCRIPT.BATTLE_SIDE:
+		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_battle_side(payload)
+		if response.ok:
+			battle_state["player_side"] = int(response.get("side", 0))
+			battle_event_received.emit({"type": "side", "side": int(response.get("side", 0))})
+		else:
+			connection_error.emit(str(response.get("error", "OpenMMO battle-side packet is malformed")))
+	elif opcode == GAME_PROTOCOL_SCRIPT.BATTLE_FIELD_STATE:
+		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_battle_field_state(payload)
+		if not response.ok:
+			connection_error.emit(str(response.get("error", "OpenMMO battle field state is malformed")))
+			return
+		battle_state = (response.state as Dictionary).duplicate(true)
+		battle_state["in_progress"] = true
+		battle_state["can_act"] = false
+		battle_state["force_switch"] = false
+		battle_in_progress = true
+		battle_event_received.emit({"type": "field_state", "state": battle_state})
+	elif opcode == GAME_PROTOCOL_SCRIPT.BATTLE_BULK_STATE:
+		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_battle_bulk_state(payload)
+		if not response.ok:
+			connection_error.emit(str(response.get("error", "OpenMMO battle bulk state is malformed")))
+			return
+		battle_state["phase"] = int(response.get("phase", 0))
+		battle_state["prize_money"] = int(response.get("prize_money", 0))
+		battle_state["value_b"] = int(response.get("value_b", 0))
+		battle_state["battle_flag"] = int(response.get("flag", 0))
+		battle_state["in_progress"] = false
+		battle_state["can_act"] = false
+		battle_state["battle_complete"] = true
+		battle_in_progress = false
+		game_session.send_packet(GAME_PROTOCOL_SCRIPT.MAP_LOADED_ACK, GAME_PROTOCOL_SCRIPT.encode_map_loaded_ack())
+		battle_event_received.emit({"type": "battle_end", "state": battle_state.duplicate(true)})
+	elif opcode == GAME_PROTOCOL_SCRIPT.BATTLE_QUEUED_EVENT:
+		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_battle_queued_event(payload)
+		if response.ok:
+			battle_state["can_act"] = bool(response.get("prompt", false))
+			battle_state["prompt_value"] = int(response.get("value", 0))
+			battle_event_received.emit({"type": "queued_event", "event": response, "state": battle_state})
+		else:
+			connection_error.emit(str(response.get("error", "OpenMMO battle queued event is malformed")))
+	elif opcode == GAME_PROTOCOL_SCRIPT.BATTLE_MOVE_EVENT:
+		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_battle_move_event(payload)
+		if response.ok:
+			_apply_battle_move_event(response)
+			battle_event_received.emit({"type": "move_event", "event": response, "state": battle_state})
+		else:
+			connection_error.emit(str(response.get("error", "OpenMMO battle move event is malformed")))
+	elif opcode == GAME_PROTOCOL_SCRIPT.BATTLE_SLOT_EVENT:
+		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_battle_slot_event(payload)
+		if response.ok:
+			battle_event_received.emit({"type": "slot_event", "event": response})
+		else:
+			connection_error.emit(str(response.get("error", "OpenMMO battle slot event is malformed")))
+	elif opcode == GAME_PROTOCOL_SCRIPT.BATTLE_SWITCH_IN:
+		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_battle_switch_in(payload)
+		if response.ok:
+			_apply_battle_switch_event(response)
+			battle_event_received.emit({"type": "switch_in", "event": response, "state": battle_state})
+		else:
+			connection_error.emit(str(response.get("error", "OpenMMO battle switch-in packet is malformed")))
+	elif opcode == GAME_PROTOCOL_SCRIPT.BATTLE_SLOT_FLAG:
+		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_battle_slot_flag(payload)
+		if response.ok:
+			battle_state["force_switch"] = bool(response.get("flag", false)) and not bool(response.get("immediate", false))
+			if bool(response.get("immediate", false)):
+				battle_state["can_act"] = bool(response.get("flag", false))
+			battle_event_received.emit({"type": "slot_flag", "event": response, "state": battle_state})
+		else:
+			connection_error.emit(str(response.get("error", "OpenMMO battle slot flag event is malformed")))
+	elif opcode == GAME_PROTOCOL_SCRIPT.BATTLE_LIST_EVENT:
+		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_battle_list_event(payload)
+		if response.ok:
+			battle_event_received.emit({"type": "list_event", "event": response.event})
+		else:
+			connection_error.emit(str(response.get("error", "OpenMMO battle list event is malformed")))
+	elif opcode == GAME_PROTOCOL_SCRIPT.BATTLE_STAT_COUNTERS:
+		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_battle_stat_counters(payload)
+		if response.ok:
+			battle_event_received.emit({"type": "stat_counters", "event": response})
+		else:
+			connection_error.emit(str(response.get("error", "OpenMMO battle stat counters are malformed")))
+	elif opcode == GAME_PROTOCOL_SCRIPT.BATTLE_START_SCENE:
+		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_battle_start_scene(payload)
+		if response.ok:
+			battle_state["start_scene"] = response
+			battle_event_received.emit({"type": "start_scene", "event": response})
+		else:
+			connection_error.emit(str(response.get("error", "OpenMMO battle start scene is malformed")))
+	elif opcode == GAME_PROTOCOL_SCRIPT.BATTLE_ENTITY_DELTA:
+		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_battle_entity_delta(payload)
+		if response.ok:
+			_apply_battle_entity_delta(response)
+			battle_event_received.emit({"type": "entity_delta", "event": response, "state": battle_state})
+		else:
+			connection_error.emit(str(response.get("error", "OpenMMO battle entity delta is malformed")))
 	elif opcode == GAME_PROTOCOL_SCRIPT.ENTITY_LEAVE:
 		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_entity_leave(payload)
 		if response.ok:
@@ -447,6 +560,69 @@ func _emit_entity_update(entity: Dictionary) -> void:
 			if entity.has(key):
 				current_character[key] = entity[key]
 	entity_update_received.emit({"player": entity, "local": entity_id == int(current_character.get("id", 0))})
+
+func _apply_battle_move_event(event: Dictionary) -> void:
+	for target_value in event.get("targets", []):
+		if not target_value is Dictionary:
+			continue
+		var target: Dictionary = target_value
+		var entity_id: int = int(target.get("entity_id", 0))
+		for event_value in target.get("events", []):
+			if not event_value is Dictionary:
+				continue
+			var nested: Dictionary = event_value
+			var updates: Dictionary = {}
+			if nested.has("current_hp"):
+				updates["current_hp"] = int(nested.get("current_hp", 0))
+			if nested.has("faint"):
+				updates["faint_flag"] = 1 if bool(nested.get("faint", false)) else 0
+			if not updates.is_empty():
+				_apply_battle_entity_updates(entity_id, updates)
+
+func _apply_battle_switch_event(event: Dictionary) -> void:
+	var side: int = int(event.get("side", 0))
+	var active: Dictionary = event.get("active", {}) if event.get("active", {}) is Dictionary else {}
+	var slot: int = int(active.get("slot", event.get("new_slot", 0)))
+	var party_key: String = "player_party" if side == 0 else "opponent_party"
+	var party_value: Variant = battle_state.get(party_key, [])
+	if party_value is Array:
+		var party: Array = (party_value as Array).duplicate(true)
+		var new_mon: Dictionary = event.get("mon", {}) if event.get("mon", {}) is Dictionary else {}
+		if not new_mon.is_empty():
+			for index in party.size():
+				if not party[index] is Dictionary or int((party[index] as Dictionary).get("slot", -1)) != int(event.get("new_slot", -2)):
+					continue
+				party[index] = new_mon.duplicate(true)
+				break
+			battle_state[party_key] = party
+	if side == 0:
+		battle_state["active_slot"] = slot
+	else:
+		battle_state["opponent_active_slot"] = slot
+	battle_state["force_switch"] = false
+
+func _apply_battle_entity_delta(event: Dictionary) -> void:
+	_apply_battle_entity_updates(int(event.get("entity_id", 0)), event.get("updates", {}) if event.get("updates", {}) is Dictionary else {})
+
+func _apply_battle_entity_updates(entity_id: int, updates: Dictionary) -> void:
+	for party_key in ["player_party", "opponent_party"]:
+		var party_value: Variant = battle_state.get(party_key, [])
+		if not party_value is Array:
+			continue
+		var party: Array = (party_value as Array).duplicate(true)
+		for index in party.size():
+			if not party[index] is Dictionary:
+				continue
+			var mon: Dictionary = party[index]
+			if entity_id != 0 and int(mon.get("entity_id", 0)) != entity_id:
+				continue
+			for key in ["current_hp", "species", "level", "gender", "faint_flag"]:
+				if updates.has(key):
+					mon[key] = updates[key]
+			if updates.has("moves"):
+				mon["move_ids"] = updates.get("moves", [])
+			party[index] = mon
+			battle_state[party_key] = party
 
 func _on_login_failed(message: String) -> void:
 	if login_flow != "idle":
