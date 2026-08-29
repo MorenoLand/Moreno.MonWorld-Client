@@ -97,7 +97,6 @@ func _build_ui() -> void:
 	party_context_menu.add_item("Follow", 1)
 	party_context_menu.add_item("Stop following", 2)
 	party_context_menu.id_pressed.connect(_on_party_context_menu_pressed)
-	party_context_menu.z_index = 20
 	add_child(party_context_menu)
 	action_panel = PanelContainer.new()
 	action_panel.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
