@@ -5,6 +5,8 @@ const ANIMATION_PHASE_COUNT: int = 40
 
 const SCHEMA_VERSION: int = 1
 const KANTO_GBA_CONTENT_ID: String = "kanto-gba-slice-v1"
+const FIRE_RED_REV1_SHA1: String = "dd5945db9b930750cb39d00c84da8571feebf417"
+const FIRE_RED_REV1_DIALOGUE_DELTAS: Array = [0x78, 0x73, 0x70]
 const GBA_TITLE_OFFSET: int = 0xA0
 const GBA_TITLE_LENGTH: int = 12
 const GBA_GAME_CODE_OFFSET: int = 0xAC
@@ -878,7 +880,7 @@ func _server_map_for_local_map(map_id: String, server_maps: Dictionary) -> Dicti
 			return candidate
 	return {}
 
-func animated_tile_texture(map_id: String, tile_entry: int, animation_tick_value: int) -> Texture2D:
+func animated_tile_texture(map_id: String, tile_entry: int, animation_tick_value: int, transparent_zero: bool = true) -> Texture2D:
 	var cached_map: Dictionary = _get_or_build_map_cache(map_id)
 	if not bool(cached_map.get("ok", false)) or not bool(cached_map.get("primary_animation_enabled", false)):
 		return null
@@ -891,14 +893,14 @@ func animated_tile_texture(map_id: String, tile_entry: int, animation_tick_value
 		tile_cache.clear()
 		cached_map["animated_primary_tiles"] = _animated_primary_tiles(cached_map.get("primary_tiles", PackedByteArray()), phase, true)
 		cached_map["animated_tile_phase"] = phase
-	var cache_key: String = "%d:%d" % [phase, tile_entry]
+	var cache_key: String = "%d:%d:%d" % [phase, tile_entry, 1 if transparent_zero else 0]
 	var cached_texture: Texture2D = tile_cache.get(cache_key) as Texture2D
 	if cached_texture != null:
 		return cached_texture
 	var image: Image = Image.create(8, 8, false, Image.FORMAT_RGBA8)
 	image.fill(Color(0.0, 0.0, 0.0, 0.0))
 	var ignored_animated_tiles: Array = []
-	_draw_tile(image, 0, 0, tile_entry, cached_map.get("primary", {}), cached_map.get("secondary", {}), ignored_animated_tiles, cached_map.get("animated_primary_tiles", PackedByteArray()))
+	_draw_tile(image, 0, 0, tile_entry, cached_map.get("primary", {}), cached_map.get("secondary", {}), ignored_animated_tiles, cached_map.get("animated_primary_tiles", PackedByteArray()), transparent_zero)
 	var texture: ImageTexture = ImageTexture.create_from_image(image)
 	tile_cache[cache_key] = texture
 	cached_map["animated_tile_textures"] = tile_cache
@@ -1340,7 +1342,7 @@ func _render_cached_map(cached_map: Dictionary, animation_phase: int) -> Image:
 	for tile_value in animated_tiles:
 		if tile_value is Dictionary:
 			var tile: Dictionary = tile_value
-			_draw_tile(image, int(tile.get("x", 0)), int(tile.get("y", 0)), int(tile.get("entry", 0)), primary, secondary, ignored_animated_tiles, animated_primary)
+			_draw_tile(image, int(tile.get("x", 0)), int(tile.get("y", 0)), int(tile.get("entry", 0)), primary, secondary, ignored_animated_tiles, animated_primary, bool(tile.get("transparent_zero", true)))
 	return image
 
 func _render_cached_layer(cached_map: Dictionary, animation_phase: int, foreground: bool) -> Image:
@@ -1353,7 +1355,7 @@ func _render_cached_layer(cached_map: Dictionary, animation_phase: int, foregrou
 	for tile_value in animated_tiles:
 		if tile_value is Dictionary:
 			var tile: Dictionary = tile_value
-			_draw_tile(image, int(tile.get("x", 0)), int(tile.get("y", 0)), int(tile.get("entry", 0)), primary, secondary, ignored_animated_tiles, animated_primary)
+			_draw_tile(image, int(tile.get("x", 0)), int(tile.get("y", 0)), int(tile.get("entry", 0)), primary, secondary, ignored_animated_tiles, animated_primary, bool(tile.get("transparent_zero", true)))
 	return image
 
 func _animated_primary_tiles(base_tiles: PackedByteArray, animation_phase: int, enabled: bool) -> PackedByteArray:
@@ -1461,6 +1463,21 @@ func _read_dialogue_for_script(script_offset: int) -> Dictionary:
 	var cursor: int = script_offset
 	var limit: int = mini(rom_data.size(), script_offset + 512)
 	var data_slot_zero: int = -1
+	for scan_offset in range(script_offset, limit):
+		var scan_opcode: int = int(rom_data[scan_offset])
+		if scan_opcode == 0x67 and scan_offset + 5 <= limit:
+			var direct_message_offset: int = _read_rom_pointer(scan_offset + 1)
+			var direct_dialogue: Dictionary = _decode_rom_text(direct_message_offset)
+			if not direct_dialogue.is_empty():
+				return direct_dialogue
+		if scan_opcode == 0x0F and scan_offset + 8 <= limit and int(rom_data[scan_offset + 1]) == 0:
+			var standard_message_offset: int = _read_rom_pointer(scan_offset + 2)
+			var standard_call: int = int(rom_data[scan_offset + 6])
+			var standard_id: int = int(rom_data[scan_offset + 7])
+			if standard_call == 0x09 and standard_id >= 2 and standard_id <= 6:
+				var standard_dialogue: Dictionary = _decode_rom_text(standard_message_offset)
+				if not standard_dialogue.is_empty():
+					return standard_dialogue
 	while cursor < limit:
 		var opcode: int = int(rom_data[cursor])
 		if opcode == 0x02 or opcode == 0x03:
@@ -1508,18 +1525,22 @@ func _decode_rom_text(text_offset: int) -> Dictionary:
 	var raw: PackedByteArray = PackedByteArray()
 	var pages: Array = []
 	var current: String = ""
+	var terminated: bool = false
 	while cursor < rom_data.size() and raw.size() < 4096:
 		var value: int = int(rom_data[cursor])
 		raw.append(value)
 		cursor += 1
 		match value:
 			0xFF:
+				terminated = true
 				break
 			0xFE:
 				current += "\n"
-			0xFB, 0xFA:
+			0xFB:
 				pages.append(current)
 				current = ""
+			0xFA:
+				current += "\n"
 			0xFD:
 				if cursor >= rom_data.size():
 					break
@@ -1535,9 +1556,21 @@ func _decode_rom_text(text_offset: int) -> Dictionary:
 					cursor += 1
 				current += "{CONTROL}"
 			0xFC:
-				current += "{CONTROL}"
+				if cursor >= rom_data.size():
+					break
+				var control: int = int(rom_data[cursor])
+				raw.append(control)
+				cursor += 1
+				var argument_count: int = _rom_text_control_argument_count(control)
+				if not _valid_range(cursor, argument_count):
+					break
+				for argument_index in range(argument_count):
+					raw.append(rom_data[cursor + argument_index])
+				cursor += argument_count
 			_:
 				current += _decode_rom_character(value)
+	if not terminated:
+		return {}
 	if not current.is_empty() or pages.is_empty():
 		pages.append(current)
 	while not pages.is_empty() and str(pages[pages.size() - 1]).is_empty():
@@ -1547,18 +1580,42 @@ func _decode_rom_text(text_offset: int) -> Dictionary:
 	return {"text_offset": text_offset, "raw": raw.hex_encode(), "pages": pages}
 
 func dialogue_for_text_id(text_id: int) -> Dictionary:
-	var candidates: Array[int] = [text_id]
+	var bases: Array = [text_id]
 	var packed_offset: int = text_id & 0x00FFFFFF
 	if packed_offset != text_id:
-		candidates.append(packed_offset)
-	for candidate_value in candidates:
-		var candidate: int = int(candidate_value)
-		if not _valid_range(candidate, 1):
-			continue
-		var dialogue: Dictionary = _decode_rom_text(candidate)
-		if not dialogue.is_empty():
-			return dialogue
-	return {}
+		bases.append(packed_offset)
+	var best_dialogue: Dictionary = {}
+	var best_score: int = -1
+	for base_value in bases:
+		for delta_value in _dialogue_offset_deltas():
+			var candidate: int = int(base_value) + int(delta_value)
+			if not _valid_range(candidate, 1):
+				continue
+			var dialogue: Dictionary = _decode_rom_text(candidate)
+			if dialogue.is_empty():
+				continue
+			var score: int = 0
+			if candidate > 0 and int(rom_data[candidate - 1]) == 0xFF:
+				score += 100
+			if score > best_score:
+				best_dialogue = dialogue
+				best_score = score
+	return best_dialogue
+
+func _dialogue_offset_deltas() -> Array:
+	if str(source_profile.get("id", "")) == "pokemon-fire-red" and rom_sha1 == FIRE_RED_REV1_SHA1:
+		var deltas: Array = FIRE_RED_REV1_DIALOGUE_DELTAS.duplicate()
+		deltas.append(0)
+		return deltas
+	return [0]
+
+func _rom_text_control_argument_count(control: int) -> int:
+	match control:
+		0x06, 0x08, 0x11:
+			return 1
+		0x0B, 0x10:
+			return 2
+	return 0
 
 func _decode_rom_character(value: int) -> String:
 	if value == 0x00:
@@ -1593,12 +1650,7 @@ func _decode_rom_character(value: int) -> String:
 	return "{0x%02X}" % value
 
 func _placeholder_name(value: int) -> String:
-	match value:
-		1:
-			return "{PLAYER}"
-		6:
-			return "{RIVAL}"
-	return "{VAR_%02X}" % value
+	return "{%02X}" % value
 
 func _read_map_warps(header_offset: int) -> Array:
 	var warps: Array = []
@@ -1779,7 +1831,7 @@ func _draw_metatile(image: Image, destination_x: int, destination_y: int, tilese
 	for tile_value in cached.get("animated_tiles", []):
 		if tile_value is Dictionary:
 			var tile: Dictionary = tile_value
-			animated_tiles.append({"x": destination_x + int(tile.get("x", 0)), "y": destination_y + int(tile.get("y", 0)), "entry": int(tile.get("entry", 0))})
+			animated_tiles.append({"x": destination_x + int(tile.get("x", 0)), "y": destination_y + int(tile.get("y", 0)), "entry": int(tile.get("entry", 0)), "transparent_zero": bool(tile.get("transparent_zero", true))})
 
 func _draw_metatile_uncached(image: Image, destination_x: int, destination_y: int, tileset: Dictionary, metatile_index: int, primary: Dictionary, secondary: Dictionary, animated_tiles: Array, primary_override: PackedByteArray = PackedByteArray()) -> void:
 	var metatiles: PackedInt32Array = tileset.get("metatiles", PackedInt32Array())
@@ -1793,14 +1845,14 @@ func _draw_metatile_uncached(image: Image, destination_x: int, destination_y: in
 		layer_type = (int(attributes[metatile_index]) & _format_int("map_grid_layer_type_mask", MAPGRID_LAYER_TYPE_MASK)) >> _format_int("map_grid_layer_type_shift", MAPGRID_LAYER_TYPE_SHIFT)
 	match layer_type:
 		1:
-			_draw_metatile_layer(image, destination_x, destination_y, metatiles, base, 0, primary, secondary, animated_tiles, primary_override)
-			_draw_metatile_layer(image, destination_x, destination_y, metatiles, base, 4, primary, secondary, animated_tiles, primary_override)
+			_draw_metatile_layer(image, destination_x, destination_y, metatiles, base, 0, primary, secondary, animated_tiles, primary_override, false)
+			_draw_metatile_layer(image, destination_x, destination_y, metatiles, base, 4, primary, secondary, animated_tiles, primary_override, true)
 		2:
-			_draw_metatile_layer(image, destination_x, destination_y, metatiles, base, 0, primary, secondary, animated_tiles, primary_override)
-			_draw_metatile_layer(image, destination_x, destination_y, metatiles, base, 4, primary, secondary, animated_tiles, primary_override)
+			_draw_metatile_layer(image, destination_x, destination_y, metatiles, base, 0, primary, secondary, animated_tiles, primary_override, false)
+			_draw_metatile_layer(image, destination_x, destination_y, metatiles, base, 4, primary, secondary, animated_tiles, primary_override, true)
 		_:
-			_draw_metatile_layer(image, destination_x, destination_y, metatiles, base, 0, primary, secondary, animated_tiles, primary_override)
-			_draw_metatile_layer(image, destination_x, destination_y, metatiles, base, 4, primary, secondary, animated_tiles, primary_override)
+			_draw_metatile_layer(image, destination_x, destination_y, metatiles, base, 0, primary, secondary, animated_tiles, primary_override, false)
+			_draw_metatile_layer(image, destination_x, destination_y, metatiles, base, 4, primary, secondary, animated_tiles, primary_override, true)
 
 func _draw_metatile_layers(background_image: Image, foreground_image: Image, destination_x: int, destination_y: int, tileset: Dictionary, metatile_index: int, primary: Dictionary, secondary: Dictionary, animated_background_tiles: Array = [], animated_foreground_tiles: Array = [], primary_override: PackedByteArray = PackedByteArray()) -> void:
 	if not primary_override.is_empty():
@@ -1829,11 +1881,11 @@ func _draw_metatile_layers(background_image: Image, foreground_image: Image, des
 	for tile_value in cached.get("background_tiles", []):
 		if tile_value is Dictionary:
 			var background_tile: Dictionary = tile_value
-			animated_background_tiles.append({"x": destination_x + int(background_tile.get("x", 0)), "y": destination_y + int(background_tile.get("y", 0)), "entry": int(background_tile.get("entry", 0))})
+			animated_background_tiles.append({"x": destination_x + int(background_tile.get("x", 0)), "y": destination_y + int(background_tile.get("y", 0)), "entry": int(background_tile.get("entry", 0)), "transparent_zero": bool(background_tile.get("transparent_zero", true))})
 	for tile_value in cached.get("foreground_tiles", []):
 		if tile_value is Dictionary:
 			var foreground_tile: Dictionary = tile_value
-			animated_foreground_tiles.append({"x": destination_x + int(foreground_tile.get("x", 0)), "y": destination_y + int(foreground_tile.get("y", 0)), "entry": int(foreground_tile.get("entry", 0))})
+			animated_foreground_tiles.append({"x": destination_x + int(foreground_tile.get("x", 0)), "y": destination_y + int(foreground_tile.get("y", 0)), "entry": int(foreground_tile.get("entry", 0)), "transparent_zero": bool(foreground_tile.get("transparent_zero", true))})
 
 func _draw_metatile_layers_uncached(background_image: Image, foreground_image: Image, destination_x: int, destination_y: int, tileset: Dictionary, metatile_index: int, primary: Dictionary, secondary: Dictionary, animated_background_tiles: Array = [], animated_foreground_tiles: Array = [], primary_override: PackedByteArray = PackedByteArray()) -> void:
 	var metatiles: PackedInt32Array = tileset.get("metatiles", PackedInt32Array())
@@ -1845,21 +1897,21 @@ func _draw_metatile_layers_uncached(background_image: Image, foreground_image: I
 	var layer_type: int = 0
 	if metatile_index < attributes.size():
 		layer_type = (int(attributes[metatile_index]) & _format_int("map_grid_layer_type_mask", MAPGRID_LAYER_TYPE_MASK)) >> _format_int("map_grid_layer_type_shift", MAPGRID_LAYER_TYPE_SHIFT)
-	_draw_metatile_layer(background_image, destination_x, destination_y, metatiles, base, 0, primary, secondary, animated_background_tiles, primary_override)
+	_draw_metatile_layer(background_image, destination_x, destination_y, metatiles, base, 0, primary, secondary, animated_background_tiles, primary_override, false)
 	if layer_type == 1:
-		_draw_metatile_layer(background_image, destination_x, destination_y, metatiles, base, 4, primary, secondary, animated_background_tiles, primary_override)
+		_draw_metatile_layer(background_image, destination_x, destination_y, metatiles, base, 4, primary, secondary, animated_background_tiles, primary_override, true)
 	else:
-		_draw_metatile_layer(foreground_image, destination_x, destination_y, metatiles, base, 4, primary, secondary, animated_foreground_tiles, primary_override)
+		_draw_metatile_layer(foreground_image, destination_x, destination_y, metatiles, base, 4, primary, secondary, animated_foreground_tiles, primary_override, true)
 
-func _draw_metatile_layer(image: Image, destination_x: int, destination_y: int, metatiles: PackedInt32Array, base: int, start: int, primary: Dictionary, secondary: Dictionary, animated_tiles: Array, primary_override: PackedByteArray = PackedByteArray()) -> void:
+func _draw_metatile_layer(image: Image, destination_x: int, destination_y: int, metatiles: PackedInt32Array, base: int, start: int, primary: Dictionary, secondary: Dictionary, animated_tiles: Array, primary_override: PackedByteArray = PackedByteArray(), transparent_zero: bool = true) -> void:
 	var tiles_per_metatile: int = _format_int("tiles_per_metatile", TILES_PER_METATILE)
 	for local_index in range(4):
 		var tile_index: int = start + local_index
 		if tile_index >= tiles_per_metatile:
 			continue
-		_draw_tile(image, destination_x + (local_index & 1) * 8, destination_y + (local_index >> 1) * 8, int(metatiles[base + tile_index]), primary, secondary, animated_tiles, primary_override)
+		_draw_tile(image, destination_x + (local_index & 1) * 8, destination_y + (local_index >> 1) * 8, int(metatiles[base + tile_index]), primary, secondary, animated_tiles, primary_override, transparent_zero)
 
-func _draw_tile(image: Image, destination_x: int, destination_y: int, tile_entry: int, primary: Dictionary, secondary: Dictionary, animated_tiles: Array = [], primary_override: PackedByteArray = PackedByteArray()) -> void:
+func _draw_tile(image: Image, destination_x: int, destination_y: int, tile_entry: int, primary: Dictionary, secondary: Dictionary, animated_tiles: Array = [], primary_override: PackedByteArray = PackedByteArray(), transparent_zero: bool = true) -> void:
 	var tile_bytes_per_tile: int = _format_int("tile_bytes", TILE_BYTES)
 	var primary_tile_count: int = _format_int("primary_tile_count", PRIMARY_TILE_COUNT)
 	var metatile_id_mask: int = _format_int("map_grid_metatile_id_mask", MAPGRID_METATILE_ID_MASK)
@@ -1888,12 +1940,12 @@ func _draw_tile(image: Image, destination_x: int, destination_y: int, tile_entry
 			var sample_x: int = 7 - pixel_x if h_flip else pixel_x
 			var packed: int = int(tile_bytes[tile_offset + sample_y * 4 + (sample_x >> 1)])
 			var color_index: int = packed & 0x0F if (sample_x & 1) == 0 else packed >> 4
-			if color_index == 0:
+			if color_index == 0 and transparent_zero:
 				continue
 			var color: Color = palette_values[palette_bank * 16 + color_index]
 			image.set_pixel(destination_x + pixel_x, destination_y + pixel_y, color)
 	if animated_tiles != null and bool(primary.get("animation_enabled", false)) and _is_animated_tile(global_tile_index):
-		animated_tiles.append({"x": destination_x, "y": destination_y, "entry": tile_entry})
+		animated_tiles.append({"x": destination_x, "y": destination_y, "entry": tile_entry, "transparent_zero": transparent_zero})
 
 func _tileset_animation_enabled(tileset: Dictionary) -> bool:
 	if bool(tileset.get("is_secondary", true)):

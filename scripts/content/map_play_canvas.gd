@@ -384,7 +384,7 @@ func _camera_origin(world_position: Vector2, camera_world_size: Vector2) -> Vect
 			camera_origin.y = world_bounds.position.y - (camera_world_size.y - world_bounds.size.y) * 0.5
 		else:
 			camera_origin.y = clampf(camera_origin.y, world_bounds.position.y, world_bounds.end.y - camera_world_size.y)
-	return camera_origin
+	return Vector2(roundf(camera_origin.x), roundf(camera_origin.y))
 
 func set_player_state(x: int, y: int, elevation: int = 3, facing: int = 1) -> void:
 	var next_position: Vector2i = Vector2i(x, y)
@@ -704,6 +704,7 @@ func _request_move(direction: int) -> bool:
 			sound_requested.emit("step")
 			queue_redraw()
 			return true
+		_prepare_transition_map(result)
 		if not GameState.send_input(_direction_name(direction), player_position.x, player_position.y):
 			return false
 		movement_unvalidated = false
@@ -746,6 +747,16 @@ func _request_move(direction: int) -> bool:
 	sound_requested.emit("door" if movement_door else "step")
 	queue_redraw()
 	return true
+
+func _prepare_transition_map(result: Dictionary) -> void:
+	var destination_map_id: String = str(result.get("map_id", map_id))
+	if not authoritative_state or content == null or not content.has_method("_server_map_for_local_map") or not content.has_method("_is_server_custom_map") or destination_map_id.is_empty() or destination_map_id == map_id:
+		return
+	var server_map: Dictionary = content._server_map_for_local_map(destination_map_id, GameState.server_maps)
+	if content._is_server_custom_map(server_map):
+		content.prepare_server_map(destination_map_id, server_map, GameState.server_maps, false)
+	else:
+		content.prepare_map(destination_map_id, false)
 
 func _process(delta: float) -> void:
 	if transition_active:
@@ -1066,7 +1077,7 @@ func _draw() -> void:
 				var tile_rect: Rect2 = Rect2(tile_world_position, Vector2(8.0, 8.0))
 				if not tile_rect.intersects(camera_rect):
 					continue
-				var animated_texture: Texture2D = content.animated_tile_texture(region_id, int(animated_tile.get("entry", 0)), animation_tick)
+				var animated_texture: Texture2D = content.animated_tile_texture(region_id, int(animated_tile.get("entry", 0)), animation_tick, bool(animated_tile.get("transparent_zero", true)))
 				if animated_texture == null:
 					continue
 				draw_texture_rect(animated_texture, Rect2(destination_position + (tile_world_position - camera_origin) * tile_scale, Vector2(8.0, 8.0) * tile_scale), false)
@@ -1087,7 +1098,7 @@ func _draw() -> void:
 				var tile_rect: Rect2 = Rect2(tile_world_position, Vector2(8.0, 8.0))
 				if not tile_rect.intersects(camera_rect):
 					continue
-				var animated_texture: Texture2D = content.animated_tile_texture(region_id, int(animated_tile.get("entry", 0)), animation_tick)
+				var animated_texture: Texture2D = content.animated_tile_texture(region_id, int(animated_tile.get("entry", 0)), animation_tick, bool(animated_tile.get("transparent_zero", true)))
 				if animated_texture == null:
 					continue
 				drawables.append({"kind": "animated_tile", "texture": animated_texture, "world_position": tile_world_position, "sort_y": float(_region_origin(region_id).y + floori(float(int(animated_tile.get("y", 0))) / TILE_PIXELS) + 1), "sort_order": 3})

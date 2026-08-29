@@ -273,6 +273,8 @@ func _load_map_texture(map_id: String, expected_width: int = 0, expected_height:
 
 func _expand_connected_world(root_map_id: String, generation: int) -> void:
 	await get_tree().process_frame
+	while transition_overlay != null and transition_overlay.visible:
+		await get_tree().process_frame
 	if generation != connected_world_generation or map_view == null or map_view.map_id != root_map_id:
 		return
 	var connected_world: Dictionary = GameState.content.prepare_connected_world(root_map_id, 96, CONNECTED_WORLD_PRELOAD_DEPTH, GameState.server_maps)
@@ -479,6 +481,7 @@ func _on_interaction_requested(dialogue: Dictionary) -> void:
 	var pages: Array = dialogue.get("pages", [])
 	if pages.is_empty():
 		pages = [str(dialogue.get("text", ""))]
+	pages = _resolve_dialogue_pages(pages)
 	dialogue_overlay.show_pages(pages, false, map_view.dialogue_anchor_screen(dialogue))
 	map_view.set_dialogue_active(true)
 	audio.play_effect("dialogue")
@@ -500,6 +503,7 @@ func _on_dialog_action_received(action: Dictionary) -> void:
 		pages = dialogue.get("pages", []) if not dialogue.is_empty() else []
 	if pages.is_empty():
 		pages = ["Dialogue text 0x%08X is unavailable in the selected ROM." % text_id]
+	pages = _resolve_dialogue_pages(pages)
 	var actor: Dictionary = {}
 	var entity_id: int = int(action.get("entity_id", -1))
 	var entity_value: Variant = entities.get(str(entity_id), {})
@@ -512,6 +516,15 @@ func _on_dialog_action_received(action: Dictionary) -> void:
 	map_view.set_dialogue_active(true)
 	dialogue_overlay.show_pages(pages, false, map_view.dialogue_anchor_screen({"object": actor}))
 	audio.play_effect("dialogue")
+
+func _resolve_dialogue_pages(pages: Array) -> Array:
+	var character_name: String = str(GameState.current_character.get("name", ""))
+	var resolved: Array = []
+	for page_value in pages:
+		var page: String = str(page_value)
+		page = page.replace("{01}", character_name).replace("{PLAYER}", character_name)
+		resolved.append(page)
+	return resolved
 
 func _streamed_dialogue_pages(detail_value: Variant) -> Array:
 	if not detail_value is PackedByteArray:

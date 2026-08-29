@@ -2,13 +2,13 @@ extends SceneTree
 
 func _init() -> void:
 	var invalid_data: PackedByteArray = PackedByteArray([0, 1, 2])
-	var rom_result: Dictionary = MonWorldContent.from_rom_bytes(invalid_data)
+	var rom_result: Dictionary = OpenMMOContent.from_rom_bytes(invalid_data)
 	if bool(rom_result.get("ok", false)):
 		push_error("invalid ROM bytes were accepted")
 		quit(1)
 		return
 	for profile_case in [{"code": "BPRF", "game": "LeafGreen", "region": "Kanto"}, {"code": "BPEE", "game": "Emerald", "region": "Hoenn"}, {"code": "AXPE", "game": "Sapphire", "region": "Hoenn"}]:
-		var profile: Dictionary = MonWorldRomProfile.from_header({"game_code": str(profile_case.get("code", "")), "maker_code": "01"})
+		var profile: Dictionary = OpenMMORomProfile.from_header({"game_code": str(profile_case.get("code", "")), "maker_code": "01"})
 		if str(profile.get("game", "")) != str(profile_case.get("game", "")) or str(profile.get("region", "")) != str(profile_case.get("region", "")):
 			push_error("ROM profile registry did not identify %s" % str(profile_case.get("code", "")))
 			quit(1)
@@ -25,12 +25,12 @@ func _init() -> void:
 	if path.is_empty():
 		quit(0)
 		return
-	var result: Dictionary = MonWorldContent.from_rom_path(path)
+	var result: Dictionary = OpenMMOContent.from_rom_path(path)
 	if not bool(result.get("ok", false)):
 		push_error(str(result.get("error", "content load failed")))
 		quit(1)
 		return
-	var content: MonWorldContent = result.get("content") as MonWorldContent
+	var content: OpenMMOContent = result.get("content") as OpenMMOContent
 	if str(content.source_profile.get("id", "")) != "pokemon-fire-red":
 		push_error("FireRed ROM did not select the FireRed source profile")
 		quit(1)
@@ -39,9 +39,21 @@ func _init() -> void:
 		push_error("ROM map manifest did not expose the selectable map table")
 		quit(1)
 		return
+	var online_dialogue: Dictionary = content.dialogue_for_text_id(1639103)
+	var online_pages: Array = online_dialogue.get("pages", [])
+	if int(online_dialogue.get("text_offset", -1)) != 1639223 or online_pages.size() != 1 or str(online_pages[0]) != "Okay, thanks! Please say hi to\nPROF. OAK for me, too.":
+		push_error("Rev1 ROM dialogue relocation or page decoding is incorrect")
+		quit(1)
+		return
+	for dialogue_case in [{"id": 1800324, "offset": 1800439}, {"id": 1856969, "offset": 1857081}]:
+		var dialogue_case_result: Dictionary = content.dialogue_for_text_id(int(dialogue_case.get("id", 0)))
+		if int(dialogue_case_result.get("text_offset", -1)) != int(dialogue_case.get("offset", -1)):
+			push_error("Rev1 ROM dialogue relocation is incorrect for 0x%08X" % int(dialogue_case.get("id", 0)))
+			quit(1)
+			return
 	var patched_data: PackedByteArray = content.rom_data.duplicate()
 	patched_data[0x1000] = (int(patched_data[0x1000]) + 1) & 0xFF
-	var patched_result: Dictionary = MonWorldContent.from_rom_bytes(patched_data)
+	var patched_result: Dictionary = OpenMMOContent.from_rom_bytes(patched_data)
 	if not bool(patched_result.get("ok", false)):
 		push_error("graphics-patched compatible ROM was rejected: %s" % str(patched_result.get("error", "unknown error")))
 		quit(1)
@@ -204,12 +216,12 @@ func _init() -> void:
 		push_error("directional ROM sign interaction ignored its facing rule")
 		quit(1)
 		return
-	var audio: MonWorldAudio = MonWorldAudio.new()
+	var audio: OpenMMOAudio = OpenMMOAudio.new()
 	if audio.has_method("_build_effect_stream") or audio.has_method("_build_music_stream"):
 		push_error("procedural audio fallback is still present")
 		quit(1)
 		return
-	var rom_audio: MonWorldRomAudio = MonWorldRomAudio.new()
+	var rom_audio: OpenMMORomAudio = OpenMMORomAudio.new()
 	for song_id in [291, 300, 30, 241]:
 		var audio_result: Dictionary = rom_audio.inspect_song(content, int(song_id))
 		if not bool(audio_result.get("ok", false)) or int(audio_result.get("event_count", 0)) <= 0:
@@ -277,7 +289,7 @@ func _init() -> void:
 		push_error("Pallet Town did not expose two consecutive movement cells")
 		quit(1)
 		return
-	var world_view: MonWorldMapPlayCanvas = MonWorldMapPlayCanvas.new()
+	var world_view: OpenMMOMapPlayCanvas = OpenMMOMapPlayCanvas.new()
 	world_view.set_content(content)
 	world_view.set_map(prepared_result.get("texture") as Texture2D, int(prepared_result.get("width", 0)), int(prepared_result.get("height", 0)), prepared_result.get("objects", []), "pallet-town", prepared_result.get("foreground_texture") as Texture2D)
 	world_view.set_player_state(int(continuous_step.get("x", 0)), int(continuous_step.get("y", 0)), 3)
@@ -314,7 +326,7 @@ func _init() -> void:
 		push_error("Pallet Town did not expose a traversable map connection")
 		quit(1)
 		return
-	var transition_view: MonWorldMapPlayCanvas = MonWorldMapPlayCanvas.new()
+	var transition_view: OpenMMOMapPlayCanvas = OpenMMOMapPlayCanvas.new()
 	transition_view.set_content(content)
 	transition_view.set_map(prepared_result.get("texture") as Texture2D, pallet_width, pallet_height, pallet_result.get("objects", []), "pallet-town", prepared_result.get("foreground_texture") as Texture2D)
 	transition_view.set_player_state(int(connection_step.x), int(connection_step.y), 3)
@@ -364,7 +376,7 @@ func _init() -> void:
 		push_error("Pallet Town door warp could not be entered from an adjacent tile")
 		quit(1)
 		return
-	var provider: MonWorldContentProvider = MonWorldContentProvider.new()
+	var provider: OpenMMOContentProvider = OpenMMOContentProvider.new()
 	provider._save_rom_path(path)
 	if not provider.restore_saved_rom():
 		provider._clear_saved_rom()
