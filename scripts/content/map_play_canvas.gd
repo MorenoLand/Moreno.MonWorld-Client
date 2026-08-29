@@ -129,10 +129,24 @@ func set_dialogue_active(value: bool) -> void:
 
 func set_authoritative_state(value: bool) -> void:
 	authoritative_state = value
+	objects = objects_for_mode(objects)
 	held_direction = 0
 	authoritative_probe_pending = false
 	authoritative_probe_elapsed = 0.0
 	movement_unvalidated = false
+
+func objects_for_mode(values: Variant) -> Array:
+	if not values is Array:
+		return []
+	var source: Array = values as Array
+	if not authoritative_state:
+		return source
+	var filtered: Array = []
+	for value in source:
+		if value is Dictionary and str((value as Dictionary).get("kind", "")) == "object":
+			continue
+		filtered.append(value)
+	return filtered
 
 func _reset_movement_state(clear_direction: bool = false) -> void:
 	movement_active = false
@@ -176,15 +190,16 @@ func request_move(direction_name: String) -> bool:
 
 func set_map(texture: Texture2D, map_width: int, map_height: int, map_objects: Array, selected_map_id: String = "", map_foreground_texture: Texture2D = null) -> void:
 	var changed: bool = not selected_map_id.is_empty() and map_id != selected_map_id
+	var visible_objects: Array = objects_for_mode(map_objects)
 	if not selected_map_id.is_empty():
 		map_id = selected_map_id
-	regions = [{"map_id": map_id, "origin": Vector2i.ZERO, "width": map_width, "height": map_height, "background_texture": texture, "foreground_texture": map_foreground_texture, "objects": map_objects, "ready": true}]
+	regions = [{"map_id": map_id, "origin": Vector2i.ZERO, "width": map_width, "height": map_height, "background_texture": texture, "foreground_texture": map_foreground_texture, "objects": visible_objects, "ready": true}]
 	region_origins = {map_id: Vector2i.ZERO}
 	_rebuild_world_bounds()
 	map_texture = texture
 	foreground_texture = map_foreground_texture
 	map_pixel_size = Vector2(map_width * 16, map_height * 16)
-	objects = map_objects
+	objects = visible_objects
 	if changed or not has_spawn:
 		if authoritative_state:
 			has_spawn = false
@@ -278,7 +293,7 @@ func _ensure_region_rendered(selected_map_id: String) -> bool:
 			return false
 		region["background_texture"] = prepared.get("background_texture", prepared.get("texture"))
 		region["foreground_texture"] = prepared.get("foreground_texture")
-		region["objects"] = prepared.get("objects", [])
+		region["objects"] = objects_for_mode(prepared.get("objects", []))
 		region["warps"] = prepared.get("warps", [])
 		region["connections"] = prepared.get("connections", region.get("connections", []))
 		region["animated_background_tiles"] = prepared.get("animated_background_tiles", [])
@@ -304,7 +319,7 @@ func _set_active_region(selected_map_id: String) -> void:
 		map_texture = region.get("background_texture") as Texture2D
 		foreground_texture = region.get("foreground_texture") as Texture2D
 		map_pixel_size = Vector2(int(region.get("width", 0)) * TILE_PIXELS, int(region.get("height", 0)) * TILE_PIXELS)
-		objects = region.get("objects", [])
+		objects = objects_for_mode(region.get("objects", []))
 		return
 
 func _rebuild_world_bounds() -> void:
@@ -495,7 +510,7 @@ func _apply_map(result: Dictionary, reset_spawn: bool) -> void:
 	map_texture = result.get("texture", result.get("background_texture")) as Texture2D
 	foreground_texture = result.get("foreground_texture") as Texture2D
 	map_pixel_size = Vector2(int(result.get("width", 0)) * 16, int(result.get("height", 0)) * 16)
-	objects = result.get("objects", [])
+	objects = objects_for_mode(result.get("objects", []))
 	regions = [{"map_id": map_id, "origin": Vector2i.ZERO, "width": int(result.get("width", 0)), "height": int(result.get("height", 0)), "background_texture": map_texture, "foreground_texture": foreground_texture, "objects": objects, "ready": true}]
 	region_origins = {map_id: Vector2i.ZERO}
 	_rebuild_world_bounds()
@@ -863,7 +878,7 @@ func _refresh_object_textures() -> void:
 func _refresh_object_list(values: Array) -> void:
 	if content == null:
 		return
-	for object_value in values:
+	for object_value in objects_for_mode(values):
 		if not object_value is Dictionary or not bool(object_value.get("render", true)):
 			continue
 		var object: Dictionary = object_value
