@@ -11,6 +11,7 @@ const FACE_DIRECTION: int = 0x07
 const CHAT_SEND: int = 0x08
 const ENTITY_LEAVE: int = 0x08
 const CHAT_MESSAGE: int = 0x09
+const ENTITY_MOVE_SEQUENCE: int = 0x0D
 const DIALOG_STATE: int = 0x0E
 const SERVER_NOTICE: int = 0x74
 const LOAD_MAP: int = 0x10
@@ -241,6 +242,16 @@ static func decode_gba_entity_move(payload: PackedByteArray) -> Dictionary:
 	else:
 		entity["facing"] = direction_ordinal + 1
 	return {"ok": not reader.failed and reader.remaining() == 0, "error": "OpenMMO GBA movement packet is malformed" if reader.failed or reader.remaining() != 0 else "", "entity": entity}
+
+static func decode_entity_move_sequence(payload: PackedByteArray) -> Dictionary:
+	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
+	var entity_id: int = reader.read_s64_le()
+	var running: bool = reader.read_u8() == 1
+	var count: int = reader.read_u8()
+	var steps: PackedByteArray = reader.read_bytes(reader.remaining())
+	if count > 64 or steps.size() != count:
+		reader.failed = true
+	return {"ok": not reader.failed and reader.remaining() == 0, "error": "OpenMMO scripted movement packet is malformed" if reader.failed or reader.remaining() != 0 else "", "entity_id": entity_id, "running": running, "steps": steps}
 
 static func decode_entity_move(payload: PackedByteArray) -> Dictionary:
 	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)

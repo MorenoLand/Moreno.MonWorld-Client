@@ -191,7 +191,83 @@ func _animation_offsets(kind: String) -> Array:
 	return animations.get(kind, [])
 
 func _object_sprite_specs() -> Dictionary:
-	return source_profile.get("object_sprites", {})
+	var object_sprites: Dictionary = source_profile.get("object_sprites", {})
+	if not bool(object_sprites.get("__generated", false)):
+		_populate_fire_red_object_sprites(object_sprites)
+		object_sprites["__generated"] = true
+	return object_sprites
+
+func _read_rom_u16(offset: int) -> int:
+	if not _valid_range(offset, 2):
+		return -1
+	return int(rom_data[offset]) | (int(rom_data[offset + 1]) << 8)
+
+func _populate_fire_red_object_sprites(object_sprites: Dictionary) -> void:
+	if str(source_profile.get("region", "")) != "Kanto" or rom_data.is_empty():
+		return
+	var table_offset: int = -1
+	for candidate in [0x39FE20, 0x39FDB0]:
+		var valid_entries: int = 0
+		for entry in range(16):
+			var structure_offset: int = _read_rom_pointer(candidate + entry * 4)
+			if structure_offset < 0 or not _valid_range(structure_offset + 0x08, 4):
+				continue
+			var width: int = _read_s16(structure_offset + 0x08)
+			var height: int = _read_s16(structure_offset + 0x0A)
+			if width > 0 and height > 0 and width % 8 == 0 and height % 8 == 0 and width <= 64 and height <= 64:
+				valid_entries += 1
+		if valid_entries >= 4:
+			table_offset = candidate
+			break
+	if table_offset < 0:
+		return
+	var palette_table_offset: int = 0x3A51C8 if table_offset == 0x39FE20 else 0x3A501C
+	for entry in range(152):
+		var structure_offset: int = _read_rom_pointer(table_offset + entry * 4)
+		if structure_offset < 0 or not _valid_range(structure_offset + 0x20, 4):
+			continue
+		var width: int = _read_s16(structure_offset + 0x08)
+		var height: int = _read_s16(structure_offset + 0x0A)
+		if width <= 0 or height <= 0 or width % 8 != 0 or height % 8 != 0 or width > 64 or height > 64:
+			continue
+		var images_offset: int = _read_rom_pointer(structure_offset + 0x1C)
+		if images_offset < 0:
+			continue
+		var expected_bytes: int = width * height / 2
+		var inanimate: bool = (_read_rom_u16(structure_offset + 0x0C) & 0x40) != 0
+		var max_frames: int = 1 if inanimate or (width <= 16 and height <= 16) else 9
+		var first_data_offset: int = -1
+		var frame_count: int = 0
+		for frame in range(max_frames):
+			var frame_offset: int = images_offset + frame * 8
+			var data_offset: int = _read_rom_pointer(frame_offset)
+			var frame_size: int = _read_rom_u16(frame_offset + 4)
+			if data_offset < 0 or frame_size != expected_bytes or not _valid_range(data_offset, frame_size):
+				break
+			if frame > 0:
+				var previous_data_offset: int = _read_rom_pointer(frame_offset - 8)
+				var previous_size: int = _read_rom_u16(frame_offset - 4)
+				if data_offset != previous_data_offset + previous_size:
+					break
+			if frame == 0:
+				first_data_offset = data_offset
+			frame_count += 1
+		if frame_count <= 0:
+			continue
+		var palette_tag: int = _read_rom_u16(structure_offset + 2)
+		var palette_offset: int = -1
+		for palette_entry in range(256):
+			var palette_record: int = palette_table_offset + palette_entry * 8
+			var palette_pointer: int = _read_rom_pointer(palette_record)
+			if palette_pointer < 0:
+				break
+			if _read_rom_u16(palette_record + 4) == palette_tag:
+				palette_offset = palette_pointer
+				break
+		if palette_offset < 0:
+			continue
+		if not object_sprites.has(entry):
+			object_sprites[entry] = {"data_offset": first_data_offset, "width": width, "height": height, "frame_bytes": expected_bytes, "frame_count": frame_count, "palette_offset": palette_offset}
 
 func _hydrate_manifest() -> void:
 	var maps: Array = manifest.get("maps", [])

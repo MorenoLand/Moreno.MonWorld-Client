@@ -373,6 +373,12 @@ func _on_game_packet(opcode: int, payload: PackedByteArray) -> void:
 			_emit_entity_update(response.entity)
 		else:
 			connection_error.emit(str(response.get("error", "OpenMMO NPC animation packet is malformed")))
+	elif opcode == GAME_PROTOCOL_SCRIPT.ENTITY_MOVE_SEQUENCE:
+		var movement_sequence: Dictionary = GAME_PROTOCOL_SCRIPT.decode_entity_move_sequence(payload)
+		if movement_sequence.ok:
+			entity_update_received.emit({"scripted_movement": movement_sequence})
+		else:
+			connection_error.emit(str(movement_sequence.get("error", "OpenMMO scripted movement packet is malformed")))
 	elif opcode == GAME_PROTOCOL_SCRIPT.DIALOG_ACTION:
 		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_dialog_action(payload)
 		if response.ok:

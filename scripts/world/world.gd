@@ -59,6 +59,7 @@ func _build_ui() -> void:
 	map_view.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	map_view.set_content(GameState.content)
 	map_view.set_authoritative_state(true)
+	map_view.set_local_entity_id(selected_character_id)
 	map_view.interaction_requested.connect(_on_interaction_requested)
 	map_view.sound_requested.connect(_on_sound_requested)
 	map_view.location_changed.connect(_on_local_location_changed)
@@ -277,7 +278,7 @@ func _expand_connected_world(root_map_id: String, generation: int) -> void:
 		await get_tree().process_frame
 	if generation != connected_world_generation or map_view == null or map_view.map_id != root_map_id:
 		return
-	var connected_world: Dictionary = GameState.content.prepare_connected_world(root_map_id, 96, CONNECTED_WORLD_PRELOAD_DEPTH, GameState.server_maps)
+	var connected_world: Dictionary = GameState.content.prepare_connected_world(root_map_id, 96, 0, GameState.server_maps)
 	if not bool(connected_world.get("ok", false)) or generation != connected_world_generation:
 		return
 	map_view.set_world(connected_world, root_map_id)
@@ -311,6 +312,12 @@ func _preload_connected_regions(world_value: Dictionary, root_map_id: String, ge
 		_sync_map_entities()
 
 func _on_entity_update(value: Dictionary) -> void:
+	if value.has("scripted_movement"):
+		var scripted_value: Variant = value.get("scripted_movement")
+		if scripted_value is Dictionary and map_view != null:
+			var scripted: Dictionary = scripted_value as Dictionary
+			map_view.queue_scripted_movement(int(scripted.get("entity_id", 0)), scripted.get("steps", PackedByteArray()), bool(scripted.get("running", false)))
+		return
 	if value.has("remove_entity_id"):
 		var removed_entity_id: int = int(value.get("remove_entity_id", 0))
 		var remove_keys: Array = []
@@ -519,10 +526,15 @@ func _on_dialog_action_received(action: Dictionary) -> void:
 
 func _resolve_dialogue_pages(pages: Array) -> Array:
 	var character_name: String = str(GameState.current_character.get("name", ""))
+	var region_name: String = "Kanto"
+	if GameState.content != null:
+		var profile_value: Variant = GameState.content.get("source_profile")
+		if profile_value is Dictionary:
+			region_name = str((profile_value as Dictionary).get("region", region_name))
 	var resolved: Array = []
 	for page_value in pages:
 		var page: String = str(page_value)
-		page = page.replace("{01}", character_name).replace("{PLAYER}", character_name)
+		page = page.replace("{01}", character_name).replace("{PLAYER}", character_name).replace("{06}", region_name)
 		resolved.append(page)
 	return resolved
 

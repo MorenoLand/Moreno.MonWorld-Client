@@ -33,6 +33,9 @@ var player_texture_key: String = ""
 var animation_tick: int = 0
 var animation_elapsed: float = 0.0
 var movement_active: bool = false
+var movement_scripted: bool = false
+var movement_scripted_action: int = -1
+var movement_animation_active: bool = false
 var movement_unvalidated: bool = false
 var movement_start: Vector2 = Vector2.ZERO
 var movement_target: Vector2 = Vector2.ZERO
@@ -52,6 +55,10 @@ var has_spawn: bool = false
 var input_enabled: bool = false
 var player_facing: int = 1
 var held_direction: int = 0
+var local_entity_id: int = 0
+var player_visible: bool = true
+var scripted_movement_queue: Array = []
+var pending_scripted_movements: Dictionary = {}
 var movement_retry_elapsed: float = 0.0
 var authoritative_probe_pending: bool = false
 var authoritative_probe_elapsed: float = 0.0
@@ -127,6 +134,9 @@ func set_dialogue_active(value: bool) -> void:
 	else:
 		_restore_interaction_facing()
 
+func set_local_entity_id(value: int) -> void:
+	local_entity_id = value
+
 func set_authoritative_state(value: bool) -> void:
 	authoritative_state = value
 	objects = objects_for_mode(objects)
@@ -150,6 +160,10 @@ func objects_for_mode(values: Variant) -> Array:
 
 func _reset_movement_state(clear_direction: bool = false) -> void:
 	movement_active = false
+	movement_scripted = false
+	movement_scripted_action = -1
+	movement_animation_active = false
+	scripted_movement_queue.clear()
 	movement_unvalidated = false
 	movement_start = Vector2.ZERO
 	movement_target = Vector2.ZERO
@@ -203,6 +217,7 @@ func set_map(texture: Texture2D, map_width: int, map_height: int, map_objects: A
 	if changed or not has_spawn:
 		if authoritative_state:
 			has_spawn = false
+			player_visible = true
 			movement_active = false
 			movement_unvalidated = false
 			pending_map_id = ""
@@ -236,6 +251,7 @@ func set_world(world_value: Dictionary, selected_map_id: String = "") -> void:
 	var changed: bool = previous_map_id != map_id
 	if changed:
 		_reset_movement_state(true)
+		player_visible = true
 		if authoritative_state:
 			has_spawn = false
 		elif not has_spawn:
@@ -257,6 +273,7 @@ func set_active_map(selected_map_id: String) -> bool:
 	map_id = selected_map_id
 	if changed:
 		_reset_movement_state(true)
+		player_visible = true
 		if authoritative_state:
 			has_spawn = false
 	_set_active_region(map_id)
@@ -492,9 +509,11 @@ func set_world_entities(values: Array, local_character_id: int) -> void:
 		if int(entity.get("character_id", 0)) == local_character_id or not region_origins.has(entity_map_id):
 			continue
 		var is_npc: bool = bool(entity.get("npc", false))
-		var graphics_id: int = int(entity.get("graphics_id", 19)) if is_npc else 19
+		var graphics_id: int = int(entity.get("resolved_graphics_id", entity.get("graphics_id", entity.get("graphic_id", entity.get("sprite_id", 19))))) if is_npc else 19
+		var sprite_region_id: int = int(entity.get("sprite_region_id", 1))
 		var facing: int = int(entity.get("facing", 1))
-		var entity_key: String = "%s:%s" % [str(entity.get("entity_id", entity.get("character_id", entity.get("user_id", 0)))), entity_map_id]
+		var entity_id: int = int(entity.get("entity_id", entity.get("character_id", entity.get("user_id", 0))))
+		var entity_key: String = "%s:%s" % [str(entity_id), entity_map_id]
 		var previous_value: Variant = previous_entities.get(entity_key, {})
 		var previous: Dictionary = previous_value as Dictionary if previous_value is Dictionary else {}
 		var texture: Texture2D = previous.get("texture") as Texture2D
@@ -503,8 +522,206 @@ func set_world_entities(values: Array, local_character_id: int) -> void:
 			texture = sprite.get("texture") as Texture2D
 		if texture == null and not is_npc:
 			continue
-		world_entities.append({"entity_key": entity_key, "entity_id": int(entity.get("entity_id", 0)), "npc": is_npc, "map_id": entity_map_id, "texture": texture, "width": texture.get_width() if texture != null else 0, "height": texture.get_height() if texture != null else 0, "x": int(entity.get("x", 0)), "y": int(entity.get("y", 0)), "elevation": int(entity.get("elevation", 3)), "facing": facing, "default_facing": int(entity.get("facing", 1)), "graphics_id": graphics_id, "blocks_movement": bool(entity.get("blocks_movement", is_npc))})
+		var stored_entity: Dictionary = {"entity_key": entity_key, "entity_id": entity_id, "npc": is_npc, "map_id": entity_map_id, "texture": texture, "width": texture.get_width() if texture != null else 0, "height": texture.get_height() if texture != null else 0, "x": int(entity.get("x", 0)), "y": int(entity.get("y", 0)), "elevation": int(entity.get("elevation", 3)), "facing": facing, "default_facing": int(entity.get("facing", 1)), "graphics_id": graphics_id, "sprite_region_id": sprite_region_id, "blocks_movement": bool(entity.get("blocks_movement", is_npc)), "visible": true, "movement_active": false, "movement_start": Vector2.ZERO, "movement_target": Vector2.ZERO, "movement_elapsed": 0.0, "movement_duration": 0.0, "movement_action": -1, "movement_animation": false, "movement_frame": -1, "movement_queue": []}
+		for dynamic_key in ["visible", "movement_active", "movement_start", "movement_target", "movement_elapsed", "movement_duration", "movement_action", "movement_animation", "movement_frame", "movement_queue"]:
+			if previous.has(dynamic_key):
+				stored_entity[dynamic_key] = previous.get(dynamic_key)
+		world_entities.append(stored_entity)
+		var pending_value: Variant = pending_scripted_movements.get(str(entity_id), [])
+		if pending_value is Array and not (pending_value as Array).is_empty():
+			stored_entity["movement_queue"] = (pending_value as Array).duplicate()
+			pending_scripted_movements.erase(str(entity_id))
+			var stored_index: int = world_entities.size() - 1
+			if not bool(stored_entity.get("movement_active", false)):
+				_start_world_entity_movement(stored_index)
 	queue_redraw()
+
+func queue_scripted_movement(entity_id: int, steps: Variant, _running: bool = false) -> void:
+	var actions: Array = []
+	if steps is PackedByteArray:
+		for step in steps:
+			actions.append(int(step))
+	elif steps is Array:
+		for step_value in steps:
+			actions.append(int(step_value))
+	if actions.is_empty():
+		return
+	var resolved_local_id: int = local_entity_id
+	if resolved_local_id <= 0:
+		resolved_local_id = int(GameState.current_character.get("id", 0))
+	if entity_id == resolved_local_id:
+		scripted_movement_queue.append_array(actions)
+		if not movement_active:
+			_start_next_scripted_movement()
+		return
+	var entity_index: int = _world_entity_index(entity_id)
+	if entity_index < 0:
+		var pending: Array = pending_scripted_movements.get(str(entity_id), [])
+		pending.append_array(actions)
+		pending_scripted_movements[str(entity_id)] = pending
+		return
+	var entity: Dictionary = (world_entities[entity_index] as Dictionary).duplicate()
+	var movement_queue: Array = entity.get("movement_queue", []).duplicate()
+	movement_queue.append_array(actions)
+	entity["movement_queue"] = movement_queue
+	world_entities[entity_index] = entity
+	if not bool(entity.get("movement_active", false)):
+		_start_world_entity_movement(entity_index)
+	queue_redraw()
+
+func _world_entity_index(entity_id: int) -> int:
+	for index in world_entities.size():
+		if world_entities[index] is Dictionary and int((world_entities[index] as Dictionary).get("entity_id", 0)) == entity_id:
+			return index
+	return -1
+
+func _scripted_step_info(action: int) -> Dictionary:
+	match action:
+		0x00:
+			return {"direction": 1, "walk": false, "animate": false, "duration": 0.08}
+		0x01:
+			return {"direction": 2, "walk": false, "animate": false, "duration": 0.08}
+		0x02:
+			return {"direction": 3, "walk": false, "animate": false, "duration": 0.08}
+		0x03:
+			return {"direction": 4, "walk": false, "animate": false, "duration": 0.08}
+		0x10:
+			return {"direction": 1, "walk": true, "animate": true, "duration": 0.25}
+		0x11:
+			return {"direction": 2, "walk": true, "animate": true, "duration": 0.25}
+		0x12:
+			return {"direction": 3, "walk": true, "animate": true, "duration": 0.25}
+		0x13:
+			return {"direction": 4, "walk": true, "animate": true, "duration": 0.25}
+		0x1B:
+			return {"direction": 0, "walk": false, "animate": false, "duration": 8.0 / 60.0}
+		0x1C:
+			return {"direction": 0, "walk": false, "animate": false, "duration": 16.0 / 60.0}
+		0x1D:
+			return {"direction": 1, "walk": true, "animate": true, "duration": 0.13}
+		0x1E:
+			return {"direction": 2, "walk": true, "animate": true, "duration": 0.13}
+		0x1F:
+			return {"direction": 3, "walk": true, "animate": true, "duration": 0.13}
+		0x20:
+			return {"direction": 4, "walk": true, "animate": true, "duration": 0.13}
+		0x23:
+			return {"direction": 3, "walk": false, "animate": true, "duration": 0.13}
+		0x24:
+			return {"direction": 4, "walk": false, "animate": true, "duration": 0.13}
+		0x60:
+			return {"direction": 0, "walk": false, "animate": false, "duration": 0.01, "visible": false}
+	return {}
+
+func _start_next_scripted_movement() -> void:
+	while not scripted_movement_queue.is_empty():
+		var action: int = int(scripted_movement_queue.pop_front())
+		var info: Dictionary = _scripted_step_info(action)
+		if info.is_empty():
+			continue
+		var direction: int = int(info.get("direction", 0))
+		if direction > 0:
+			player_facing = direction
+		movement_scripted = true
+		movement_scripted_action = action
+		movement_animation_active = bool(info.get("animate", false))
+		movement_start = Vector2(player_position)
+		movement_target = movement_start + _direction_vector(direction) if bool(info.get("walk", false)) else movement_start
+		pending_map_id = map_id
+		pending_position = Vector2i(int(round(movement_target.x)), int(round(movement_target.y)))
+		pending_elevation = player_elevation
+		pending_warp = {}
+		movement_jump = false
+		movement_stair = false
+		movement_stair_behavior = 0
+		movement_door = false
+		movement_elapsed = 0.0
+		movement_duration = maxf(float(info.get("duration", NORMAL_STEP_DURATION)), 0.01)
+		if bool(info.get("visible", true)) == false:
+			player_visible = false
+		if bool(info.get("walk", false)):
+			sound_requested.emit("step")
+		movement_active = true
+		_update_player_texture()
+		queue_redraw()
+		return
+	movement_scripted = false
+	movement_animation_active = false
+	movement_active = false
+
+func _start_world_entity_movement(index: int) -> void:
+	if index < 0 or index >= world_entities.size() or not world_entities[index] is Dictionary:
+		return
+	var entity: Dictionary = (world_entities[index] as Dictionary).duplicate()
+	var movement_queue: Array = entity.get("movement_queue", []).duplicate()
+	while not movement_queue.is_empty():
+		var action: int = int(movement_queue.pop_front())
+		var info: Dictionary = _scripted_step_info(action)
+		if info.is_empty():
+			continue
+		var direction: int = int(info.get("direction", 0))
+		var start: Vector2 = Vector2(int(entity.get("x", 0)), int(entity.get("y", 0)))
+		entity["movement_queue"] = movement_queue
+		entity["movement_active"] = true
+		entity["movement_start"] = start
+		entity["movement_target"] = start + _direction_vector(direction) if bool(info.get("walk", false)) else start
+		entity["movement_elapsed"] = 0.0
+		entity["movement_duration"] = maxf(float(info.get("duration", NORMAL_STEP_DURATION)), 0.01)
+		entity["movement_action"] = action
+		entity["movement_animation"] = bool(info.get("animate", false))
+		entity["movement_frame"] = -1
+		if direction > 0:
+			entity["facing"] = direction
+		if info.has("visible"):
+			entity["visible"] = bool(info.get("visible", true))
+		_update_world_entity_texture(entity)
+		world_entities[index] = entity
+		return
+	entity["movement_queue"] = movement_queue
+	entity["movement_active"] = false
+	entity["movement_action"] = -1
+	entity["movement_animation"] = false
+	_update_world_entity_texture(entity)
+	world_entities[index] = entity
+
+func _update_world_entity_texture(entity: Dictionary) -> void:
+	if content == null:
+		return
+	var moving: bool = bool(entity.get("movement_animation", false))
+	var frame_step: int = 0
+	if moving and float(entity.get("movement_duration", 0.0)) > 0.0:
+		frame_step = int(floorf(clampf(float(entity.get("movement_elapsed", 0.0)) / float(entity.get("movement_duration", 1.0)), 0.0, 0.999) * 4.0))
+	var sprite: Dictionary = content.render_facing_object_sprite(int(entity.get("graphics_id", 19)), int(entity.get("facing", 1)), moving, frame_step)
+	if bool(sprite.get("ok", false)):
+		entity["texture"] = sprite.get("texture")
+		entity["width"] = int(sprite.get("width", 0))
+		entity["height"] = int(sprite.get("height", 0))
+
+func _process_world_entity_movements(delta: float) -> void:
+	for index in world_entities.size():
+		if not world_entities[index] is Dictionary:
+			continue
+		var entity: Dictionary = (world_entities[index] as Dictionary).duplicate()
+		if not bool(entity.get("movement_active", false)):
+			continue
+		var elapsed: float = float(entity.get("movement_elapsed", 0.0)) + delta
+		var duration: float = maxf(float(entity.get("movement_duration", NORMAL_STEP_DURATION)), 0.01)
+		if elapsed >= duration:
+			var target: Vector2 = entity.get("movement_target", Vector2(int(entity.get("x", 0)), int(entity.get("y", 0))))
+			entity["x"] = int(round(target.x))
+			entity["y"] = int(round(target.y))
+			entity["movement_elapsed"] = duration
+			entity["movement_active"] = false
+			entity["movement_action"] = -1
+			entity["movement_animation"] = false
+			_update_world_entity_texture(entity)
+			world_entities[index] = entity
+			if not (entity.get("movement_queue", []) as Array).is_empty():
+				_start_world_entity_movement(index)
+		else:
+			entity["movement_elapsed"] = elapsed
+			_update_world_entity_texture(entity)
+			world_entities[index] = entity
 
 func _apply_map(result: Dictionary, reset_spawn: bool) -> void:
 	map_texture = result.get("texture", result.get("background_texture")) as Texture2D
@@ -528,6 +745,7 @@ func _set_spawn() -> void:
 	player_position = Vector2i(int(spawn.get("x", 0)), int(spawn.get("y", 0)))
 	player_elevation = int(spawn.get("elevation", 3))
 	player_facing = 1
+	player_visible = true
 	has_spawn = true
 	movement_active = false
 	movement_unvalidated = false
@@ -700,11 +918,11 @@ func _request_move(direction: int) -> bool:
 			movement_elapsed = 0.0
 			movement_duration = NORMAL_STEP_DURATION
 			movement_active = true
+			movement_animation_active = true
 			movement_unvalidated = true
 			sound_requested.emit("step")
 			queue_redraw()
 			return true
-		_prepare_transition_map(result)
 		if not GameState.send_input(_direction_name(direction), player_position.x, player_position.y):
 			return false
 		movement_unvalidated = false
@@ -725,6 +943,7 @@ func _request_move(direction: int) -> bool:
 		movement_duration = 0.24 if movement_stair else DOOR_ANIMATION_DURATION if movement_door else 0.32 if movement_jump else NORMAL_STEP_DURATION
 		door_progress = 0.0
 		movement_active = true
+		movement_animation_active = true
 		sound_requested.emit("door" if movement_door else "step")
 		queue_redraw()
 		return true
@@ -744,24 +963,16 @@ func _request_move(direction: int) -> bool:
 	movement_duration = 0.24 if movement_stair else DOOR_ANIMATION_DURATION if movement_door else 0.32 if movement_jump else NORMAL_STEP_DURATION
 	door_progress = 0.0
 	movement_active = true
+	movement_animation_active = true
 	sound_requested.emit("door" if movement_door else "step")
 	queue_redraw()
 	return true
-
-func _prepare_transition_map(result: Dictionary) -> void:
-	var destination_map_id: String = str(result.get("map_id", map_id))
-	if not authoritative_state or content == null or not content.has_method("_server_map_for_local_map") or not content.has_method("_is_server_custom_map") or destination_map_id.is_empty() or destination_map_id == map_id:
-		return
-	var server_map: Dictionary = content._server_map_for_local_map(destination_map_id, GameState.server_maps)
-	if content._is_server_custom_map(server_map):
-		content.prepare_server_map(destination_map_id, server_map, GameState.server_maps, false)
-	else:
-		content.prepare_map(destination_map_id, false)
 
 func _process(delta: float) -> void:
 	if transition_active:
 		held_direction = 0
 		return
+	_process_world_entity_movements(delta)
 	if _text_input_has_focus():
 		held_direction = 0
 		movement_retry_elapsed = 0.0
@@ -780,6 +991,9 @@ func _process(delta: float) -> void:
 		animation_tick += 1
 		queue_redraw()
 	if not movement_active:
+		if not scripted_movement_queue.is_empty():
+			_start_next_scripted_movement()
+			return
 		if held_direction != 0 and not authoritative_probe_pending:
 			movement_retry_elapsed += delta
 			if movement_retry_elapsed >= 0.05:
@@ -799,7 +1013,10 @@ func _process(delta: float) -> void:
 	var completed_position: Vector2i = pending_position
 	var completed_elevation: int = pending_elevation
 	var completed_warp: Dictionary = pending_warp
+	var completed_scripted: bool = movement_scripted
 	movement_active = false
+	movement_scripted = false
+	movement_animation_active = false
 	movement_unvalidated = false
 	movement_stair = false
 	movement_stair_behavior = 0
@@ -808,6 +1025,14 @@ func _process(delta: float) -> void:
 	pending_warp = {}
 	player_position = completed_position
 	player_elevation = completed_elevation
+	if completed_scripted:
+		if not scripted_movement_queue.is_empty():
+			_start_next_scripted_movement()
+		else:
+			movement_scripted_action = -1
+		_update_player_texture()
+		queue_redraw()
+		return
 	if authoritative_state:
 		if completed_map_id != map_id:
 			set_active_map(completed_map_id)
@@ -920,11 +1145,11 @@ func _update_player_texture() -> void:
 	var frame_step: int = 0
 	if movement_active and movement_duration > 0.0:
 		frame_step = int(floorf(clampf(movement_elapsed / movement_duration, 0.0, 0.999) * 4.0))
-	var movement_key: int = 1 if movement_active else 0
+	var movement_key: int = 1 if movement_active and movement_animation_active else 0
 	var texture_key: String = "%d:%d:%d" % [player_facing, movement_key, frame_step]
 	if player_texture != null and player_texture_key == texture_key:
 		return
-	var sprite: Dictionary = content.render_facing_object_sprite(19, player_facing, movement_active, frame_step)
+	var sprite: Dictionary = content.render_facing_object_sprite(19, player_facing, movement_animation_active and movement_active, frame_step)
 	player_texture = sprite.get("texture") as Texture2D
 	player_texture_key = texture_key if player_texture != null else ""
 
@@ -985,6 +1210,8 @@ func restore_interaction_facing() -> void:
 		var entity: Dictionary = (entity_value as Dictionary).duplicate()
 		if not bool(entity.get("npc", false)):
 			continue
+		if bool(entity.get("movement_active", false)):
+			continue
 		var facing: int = int(entity.get("default_facing", 1))
 		entity["facing"] = facing
 		var sprite: Dictionary = content.render_facing_object_sprite(int(entity.get("graphics_id", 19)), facing, false, 0)
@@ -1035,6 +1262,14 @@ func _direction_name(direction: int) -> String:
 		4:
 			return "right"
 	return ""
+
+func _world_entity_render_position(entity: Dictionary) -> Vector2:
+	var position: Vector2 = Vector2(int(entity.get("x", 0)), int(entity.get("y", 0)))
+	if bool(entity.get("movement_active", false)):
+		var duration: float = maxf(float(entity.get("movement_duration", NORMAL_STEP_DURATION)), 0.01)
+		var progress: float = clampf(float(entity.get("movement_elapsed", 0.0)) / duration, 0.0, 1.0)
+		position = (entity.get("movement_start", position) as Vector2).lerp(entity.get("movement_target", position) as Vector2, progress)
+	return position
 
 func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO, size), Color.BLACK, true)
@@ -1125,13 +1360,15 @@ func _draw() -> void:
 		if not entity_value is Dictionary:
 			continue
 		var entity: Dictionary = entity_value
+		if not bool(entity.get("visible", true)):
+			continue
 		var entity_texture: Texture2D = entity.get("texture") as Texture2D
 		if entity_texture == null:
 			continue
 		var entity_map_id: String = str(entity.get("map_id", ""))
-		var entity_world: Vector2 = _world_position(entity_map_id, Vector2(int(entity.get("x", 0)), int(entity.get("y", 0))))
+		var entity_world: Vector2 = _world_position(entity_map_id, _world_entity_render_position(entity))
 		drawables.append({"kind": "sprite", "texture": entity_texture, "width": float(entity.get("width", 0)), "height": float(entity.get("height", 0)), "world_anchor": Vector2((entity_world.x + 0.5) * TILE_PIXELS, (entity_world.y + 1.0) * TILE_PIXELS), "sort_y": entity_world.y + 1.0, "sort_order": 0})
-	if player_texture != null:
+	if player_texture != null and player_visible:
 		var player_size: Vector2 = Vector2(player_texture.get_width(), player_texture.get_height())
 		var player_anchor: Vector2 = (world_player + Vector2(0.5, 1.0)) * TILE_PIXELS
 		drawables.append({"kind": "sprite", "texture": player_texture, "width": player_size.x, "height": player_size.y, "world_anchor": player_anchor, "sort_y": world_player.y + 1.0, "sort_order": 1})
