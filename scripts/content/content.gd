@@ -62,8 +62,10 @@ var battle_tables_scanned: bool = false
 var battle_sprite_cache: Dictionary = {}
 var battle_name_cache: Dictionary = {}
 var battle_move_name_cache: Dictionary = {}
+var battle_move_info_cache: Dictionary = {}
 var follower_sprite_cache: Dictionary = {}
 var string_catalog: Dictionary = {}
+var rom_ascii_cache: String = ""
 
 static func from_rom_path(path: String) -> Dictionary:
 	var file: FileAccess = FileAccess.open(path, FileAccess.READ)
@@ -380,6 +382,24 @@ func battle_move_name(move_id: int) -> String:
 	battle_move_name_cache[cache_key] = name
 	return name
 
+func battle_move_info(move_id: int) -> Dictionary:
+	if move_id <= 0:
+		return {"id": move_id, "name": "Move", "type": -1, "type_name": "Unknown", "power": 0}
+	var cache_key: String = str(move_id)
+	if battle_move_info_cache.has(cache_key):
+		return battle_move_info_cache[cache_key]
+	var info: Dictionary = {"id": move_id, "name": battle_move_name(move_id), "type": -1, "type_name": "Unknown", "power": 0}
+	var tables: Dictionary = _battle_rom_tables()
+	var table_offset: int = int(tables.get("move_table", -1))
+	var offset: int = table_offset + move_id * 12
+	if table_offset >= 0 and _valid_range(offset, 12):
+		var move_type: int = int(rom_data[offset + 2])
+		info["type"] = move_type
+		info["type_name"] = _battle_move_type_name(move_type)
+		info["power"] = int(rom_data[offset + 1])
+	battle_move_info_cache[cache_key] = info
+	return info
+
 func battle_pokemon_sprite(species_id: int, back: bool = false) -> Dictionary:
 	if species_id <= 0:
 		return {"ok": false}
@@ -496,27 +516,32 @@ func _battle_rom_tables() -> Dictionary:
 	return battle_table_cache
 
 func _find_rom_ascii(value: String) -> int:
-	var needle: PackedByteArray = value.to_ascii_buffer()
-	if needle.is_empty() or rom_data.size() < needle.size():
+	if value.is_empty() or rom_data.is_empty():
 		return -1
-	var first_byte: int = int(needle[0])
-	for offset in range(rom_data.size() - needle.size() + 1):
-		if int(rom_data[offset]) != first_byte and int(rom_data[offset]) != first_byte - 32:
-			continue
-		var matched: bool = true
-		for index in range(needle.size()):
-			var actual: int = int(rom_data[offset + index])
-			var expected: int = int(needle[index])
-			if actual >= 65 and actual <= 90:
-				actual += 32
-			if expected >= 65 and expected <= 90:
-				expected += 32
-			if actual != expected:
-				matched = false
-				break
-		if matched:
-			return offset
-	return -1
+	if rom_ascii_cache.is_empty():
+		rom_ascii_cache = rom_data.get_string_from_ascii().to_lower()
+	return rom_ascii_cache.find(value.to_lower())
+
+func _battle_move_type_name(move_type: int) -> String:
+	match move_type:
+		0: return "Normal"
+		1: return "Fighting"
+		2: return "Flying"
+		3: return "Poison"
+		4: return "Ground"
+		5: return "Rock"
+		6: return "Bug"
+		7: return "Ghost"
+		8: return "Steel"
+		10: return "Fire"
+		11: return "Water"
+		12: return "Grass"
+		13: return "Electric"
+		14: return "Psychic"
+		15: return "Ice"
+		16: return "Dragon"
+		17: return "Dark"
+	return "Unknown"
 
 func _battle_fixed_name(table_offset: int, index: int, width: int, fallback: String) -> String:
 	var offset: int = table_offset + index * width
@@ -571,8 +596,7 @@ func render_map(map_id: String, animation_tick: int = 0) -> Dictionary:
 	var source: Dictionary = manifest.get("source", {})
 	if not bool(source_profile.get("supports_map_rendering", false)):
 		return {"ok": false, "error": "%s map reader is not enabled yet" % str(source.get("game", "GBA"))}
-	if cached_map.is_empty():
-		cached_map = _get_or_build_map_cache(map_id, map_value)
+	cached_map = _get_or_build_map_cache(map_id, map_value, true)
 	if not bool(cached_map.get("ok", false)):
 		return cached_map
 	var animation_phase: int = posmod(animation_tick, 40)
@@ -1195,19 +1219,23 @@ func has_animated_tiles(map_id: String) -> bool:
 	var cached_map: Dictionary = _get_or_build_map_cache(map_id)
 	return bool(cached_map.get("ok", false)) and not (cached_map.get("animated_tiles", []) as Array).is_empty()
 
-func _get_or_build_map_cache(map_id: String, map_value: Dictionary = {}) -> Dictionary:
+func _get_or_build_map_cache(map_id: String, map_value: Dictionary = {}, include_composite: bool = false) -> Dictionary:
 	var cached_map: Dictionary = map_cache.get(map_id, {})
 	if not cached_map.is_empty():
+		var base_image: Image = cached_map.get("base_image") as Image
+		if include_composite and base_image == null:
+			cached_map = _build_map_composite_cache(cached_map)
+			map_cache[map_id] = cached_map
 		return cached_map
 	var selected_map: Dictionary = map_value if not map_value.is_empty() else map_data(map_id)
 	if selected_map.is_empty():
 		return {"ok": false, "error": "unknown map"}
-	var built_map: Dictionary = _build_map_cache(map_id, selected_map)
+	var built_map: Dictionary = _build_map_cache(map_id, selected_map, include_composite)
 	if bool(built_map.get("ok", false)):
 		map_cache[map_id] = built_map
 	return built_map
 
-func _build_map_cache(map_id: String, map_value: Dictionary) -> Dictionary:
+func _build_map_cache(map_id: String, map_value: Dictionary, include_composite: bool = false) -> Dictionary:
 	var descriptor: Dictionary = _read_map_descriptor(map_value)
 	if not bool(descriptor.get("ok", false)):
 		return descriptor
@@ -1244,8 +1272,10 @@ func _build_map_cache(map_id: String, map_value: Dictionary) -> Dictionary:
 	secondary["is_secondary"] = true
 	primary["animation_enabled"] = _tileset_animation_enabled(primary)
 	secondary["animation_enabled"] = false
-	var image: Image = Image.create(width * 16, height * 16, false, Image.FORMAT_RGBA8)
-	image.fill(Color.BLACK)
+	var image: Image
+	if include_composite:
+		image = Image.create(width * 16, height * 16, false, Image.FORMAT_RGBA8)
+		image.fill(Color.BLACK)
 	var background_image: Image = Image.create(width * 16, height * 16, false, Image.FORMAT_RGBA8)
 	background_image.fill(Color.BLACK)
 	var foreground_image: Image = Image.create(width * 16, height * 16, false, Image.FORMAT_RGBA8)
@@ -1262,7 +1292,8 @@ func _build_map_cache(map_id: String, map_value: Dictionary) -> Dictionary:
 			if metatile_id >= primary_metatile_count:
 				tileset = secondary
 				metatile_index = metatile_id - primary_metatile_count
-			_draw_metatile(image, map_x * 16, map_y * 16, tileset, metatile_index, primary, secondary, animated_tiles)
+			if include_composite:
+				_draw_metatile(image, map_x * 16, map_y * 16, tileset, metatile_index, primary, secondary, animated_tiles)
 			_draw_metatile_layers(background_image, foreground_image, map_x * 16, map_y * 16, tileset, metatile_index, primary, secondary, animated_background_tiles, animated_foreground_tiles)
 	var objects: Array = _read_map_objects(header_offset, map_id)
 	objects.append_array(_read_map_background_events(header_offset, map_id))
@@ -1275,6 +1306,33 @@ func _build_map_cache(map_id: String, map_value: Dictionary) -> Dictionary:
 		for border_index in range(border_width * border_height):
 			border_tiles.append(_read_u16(border_offset + border_index * 2))
 	return {"ok": true, "base_image": image, "base_background_image": background_image, "base_foreground_image": foreground_image, "primary": primary, "secondary": secondary, "primary_tiles": primary.get("tiles", PackedByteArray()), "primary_animation_enabled": bool(primary.get("animation_enabled", false)), "animated_tiles": animated_tiles, "animated_background_tiles": animated_background_tiles, "animated_foreground_tiles": animated_foreground_tiles, "map_cells": map_cells, "objects": objects, "warps": _read_map_warps(header_offset), "connections": _read_map_connections(header_offset), "textures": {}, "images": {}, "background_textures": {}, "foreground_textures": {}, "width": width, "height": height, "header_offset": header_offset, "layout_offset": layout_offset, "border_offset": border_offset, "border_width": border_width, "border_height": border_height, "border_tiles": border_tiles, "map_group": int(map_value.get("map_group", -1)), "map_index": int(map_value.get("map_index", -1)), "music_id": int(map_value.get("music_id", 0))}
+
+func _build_map_composite_cache(cached_map: Dictionary) -> Dictionary:
+	var width: int = int(cached_map.get("width", 0))
+	var height: int = int(cached_map.get("height", 0))
+	var image: Image = Image.create(width * 16, height * 16, false, Image.FORMAT_RGBA8)
+	image.fill(Color.BLACK)
+	var map_cells: PackedInt32Array = cached_map.get("map_cells", PackedInt32Array())
+	var primary: Dictionary = cached_map.get("primary", {})
+	var secondary: Dictionary = cached_map.get("secondary", {})
+	var animated_tiles: Array = []
+	var metatile_id_mask: int = _format_int("map_grid_metatile_id_mask", MAPGRID_METATILE_ID_MASK)
+	var primary_metatile_count: int = _format_int("primary_metatile_count", PRIMARY_METATILE_COUNT)
+	for map_y in range(height):
+		for map_x in range(width):
+			var cell_index: int = map_y * width + map_x
+			if cell_index < 0 or cell_index >= map_cells.size():
+				continue
+			var metatile_id: int = int(map_cells[cell_index]) & metatile_id_mask
+			var tileset: Dictionary = primary
+			var metatile_index: int = metatile_id
+			if metatile_id >= primary_metatile_count:
+				tileset = secondary
+				metatile_index = metatile_id - primary_metatile_count
+			_draw_metatile(image, map_x * 16, map_y * 16, tileset, metatile_index, primary, secondary, animated_tiles)
+	cached_map["base_image"] = image
+	cached_map["animated_tiles"] = animated_tiles
+	return cached_map
 
 func map_cell(map_id: String, x: int, y: int) -> Dictionary:
 	var cached_map: Dictionary = _get_or_build_map_cache(map_id)

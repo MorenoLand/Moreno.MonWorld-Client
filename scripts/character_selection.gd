@@ -192,14 +192,30 @@ func _add_character_card(character: Dictionary) -> void:
 	var party: Array = character.get("party", [])
 	for index in range(6):
 		var slot := PanelContainer.new()
-		slot.custom_minimum_size = Vector2(42, 42)
+		slot.custom_minimum_size = Vector2(42, 52)
 		slot.add_theme_stylebox_override("panel", _panel_style(Color("101923"), Color("334760"), 5, 1))
+		var slot_box := VBoxContainer.new()
+		slot_box.alignment = BoxContainer.ALIGNMENT_CENTER
+		slot_box.add_theme_constant_override("separation", 0)
+		slot.add_child(slot_box)
+		var member: Dictionary = party[index] as Dictionary if index < party.size() and party[index] is Dictionary else {}
+		var slot_icon := TextureRect.new()
+		slot_icon.custom_minimum_size = Vector2(36, 36)
+		slot_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		slot_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		slot_icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		slot_icon.texture = _party_icon_texture(member)
+		slot_icon.visible = slot_icon.texture != null
+		slot_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		slot_box.add_child(slot_icon)
 		var slot_label := Label.new()
 		slot_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		slot_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		slot_label.add_theme_font_size_override("font_size", 10)
-		slot_label.text = _party_slot_text(party[index]) if index < party.size() and party[index] is Dictionary else ""
-		slot.add_child(slot_label)
+		slot_label.add_theme_font_size_override("font_size", 9)
+		slot_label.text = "Lv %d" % int(member.get("level", 0)) if not member.is_empty() else ""
+		slot_label.tooltip_text = _party_slot_text(member) if not member.is_empty() else ""
+		slot_box.add_child(slot_label)
+		slot.tooltip_text = _party_slot_text(member) if not member.is_empty() else ""
 		party_box.add_child(slot)
 	var local_map_id: String = GameState.content.map_id_for_location(int(character.get("bank_id", -1)), int(character.get("map_id", -1))) if GameState.content != null else ""
 	var character_id: int = int(character.get("id", 0))
@@ -271,10 +287,20 @@ func _location_text(character: Dictionary) -> String:
 	return str(map_value.get("name", local_id))
 
 func _party_slot_text(member: Dictionary) -> String:
-	var nickname := str(member.get("nickname", ""))
+	var species_id: int = int(member.get("dex_id", member.get("species_id", member.get("species", 0))))
+	var nickname: String = str(member.get("nickname", "")).strip_edges()
+	if nickname.is_empty() and species_id > 0 and GameState.content != null:
+		nickname = GameState.content.battle_pokemon_name(species_id)
 	if nickname.is_empty():
-		nickname = "#%03d" % int(member.get("dex_id", 0))
-	return "%s\nLv %d" % [nickname.left(7), int(member.get("level", 0))]
+		nickname = "Pokemon"
+	return "%s\nLv %d" % [nickname.left(10), int(member.get("level", 0))]
+
+func _party_icon_texture(member: Dictionary) -> Texture2D:
+	var species_id: int = int(member.get("dex_id", member.get("species_id", member.get("species", 0))))
+	if species_id <= 0 or GameState.content == null:
+		return null
+	var sprite: Dictionary = GameState.content.battle_pokemon_sprite(species_id, false)
+	return sprite.get("texture") as Texture2D
 
 func _select_character(character_id: int) -> void:
 	if selecting:

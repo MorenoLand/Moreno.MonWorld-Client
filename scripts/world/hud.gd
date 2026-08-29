@@ -9,6 +9,10 @@ var money_label: Label
 var time_label: Label
 var party_box: VBoxContainer
 var party_labels: Array = []
+var party_level_labels: Array = []
+var party_hp_bars: Array = []
+var party_icons: Array = []
+var party_hp_tweens: Dictionary = {}
 var party_slots: Array = []
 var party_context_menu: PopupMenu
 var party_context_index: int = -1
@@ -66,10 +70,10 @@ func _build_ui() -> void:
 	info_box.add_child(time_label)
 	party_box = VBoxContainer.new()
 	party_box.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	party_box.offset_left = -136.0
+	party_box.offset_left = -156.0
 	party_box.offset_top = 100.0
 	party_box.offset_right = -16.0
-	party_box.custom_minimum_size = Vector2(120.0, 0.0)
+	party_box.custom_minimum_size = Vector2(140.0, 0.0)
 	party_box.add_theme_constant_override("separation", 5)
 	party_box.mouse_filter = Control.MOUSE_FILTER_PASS
 	add_child(party_box)
@@ -80,16 +84,51 @@ func _build_ui() -> void:
 	party_box.add_child(party_title)
 	for index in range(PARTY_COUNT):
 		var slot: PanelContainer = PanelContainer.new()
-		slot.custom_minimum_size = Vector2(120.0, 52.0)
+		slot.custom_minimum_size = Vector2(140.0, 58.0)
 		slot.mouse_filter = Control.MOUSE_FILTER_STOP
 		slot.add_theme_stylebox_override("panel", _panel_style(Color("10151eb8"), Color("5f7185")))
+		var margin: MarginContainer = MarginContainer.new()
+		margin.add_theme_constant_override("margin_left", 5)
+		margin.add_theme_constant_override("margin_top", 4)
+		margin.add_theme_constant_override("margin_right", 5)
+		margin.add_theme_constant_override("margin_bottom", 4)
+		slot.add_child(margin)
+		var row: HBoxContainer = HBoxContainer.new()
+		row.add_theme_constant_override("separation", 4)
+		margin.add_child(row)
+		var icon: TextureRect = TextureRect.new()
+		icon.custom_minimum_size = Vector2(36.0, 36.0)
+		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		row.add_child(icon)
+		var details: VBoxContainer = VBoxContainer.new()
+		details.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		details.add_theme_constant_override("separation", 0)
+		details.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		row.add_child(details)
 		var label: Label = Label.new()
 		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		label.text_overrun_behavior = TextServer.OVERRUN_ELLIPSIS
 		label.add_theme_font_size_override("font_size", 10)
-		slot.add_child(label)
+		details.add_child(label)
+		var level_label: Label = Label.new()
+		level_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		level_label.add_theme_font_size_override("font_size", 9)
+		level_label.add_theme_color_override("font_color", Color("b8cbe0"))
+		details.add_child(level_label)
+		var hp_bar: ProgressBar = ProgressBar.new()
+		hp_bar.show_percentage = false
+		hp_bar.custom_minimum_size = Vector2(0.0, 6.0)
+		hp_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		hp_bar.add_theme_stylebox_override("background", _panel_style(Color("26303d"), Color("26303d"), 3, 0))
+		hp_bar.add_theme_stylebox_override("fill", _panel_style(Color("5ccf77"), Color("5ccf77"), 3, 0))
+		details.add_child(hp_bar)
 		party_labels.append(label)
+		party_level_labels.append(level_label)
+		party_hp_bars.append(hp_bar)
+		party_icons.append(icon)
 		party_slots.append(slot)
 		slot.gui_input.connect(_on_party_slot_gui_input.bind(index))
 		party_box.add_child(slot)
@@ -369,10 +408,9 @@ func _refresh() -> void:
 	var money_value: int = int(current_state.get("money", current_state.get("currency", 0)))
 	money_label.text = "$%s" % _format_money(money_value)
 	_refresh_time()
-	for index in range(party_labels.size()):
-		var party_label: Label = party_labels[index] as Label
+	for index in range(party_slots.size()):
 		var member: Variant = current_party[index] if index < current_party.size() else {}
-		party_label.text = _party_slot_text(member as Dictionary) if member is Dictionary else ""
+		_refresh_party_slot(index, member as Dictionary if member is Dictionary else {})
 	_refresh_bag()
 	_refresh_hotbar()
 
@@ -417,12 +455,66 @@ func _format_money(value: int) -> String:
 	formatted = digits + formatted
 	return "-" + formatted if negative else formatted
 
+func _refresh_party_slot(index: int, member: Dictionary) -> void:
+	if index < 0 or index >= party_slots.size():
+		return
+	var label: Label = party_labels[index] as Label
+	var level_label: Label = party_level_labels[index] as Label
+	var hp_bar: ProgressBar = party_hp_bars[index] as ProgressBar
+	var icon: TextureRect = party_icons[index] as TextureRect
+	var species_id: int = _party_species_id(member)
+	if species_id <= 0:
+		label.text = ""
+		level_label.text = ""
+		icon.texture = null
+		icon.visible = false
+		hp_bar.value = 0.0
+		hp_bar.max_value = 1.0
+		hp_bar.visible = false
+		hp_bar.set_meta("initialized", false)
+		return
+	var name: String = _party_slot_name(member)
+	var level: int = int(member.get("level", 0))
+	var current_hp: int = int(member.get("current_hp", member.get("hp", 0)))
+	var max_hp: int = int(member.get("max_hp", member.get("hp_max", 0)))
+	if max_hp <= 0:
+		max_hp = maxi(current_hp, 1)
+	var target_hp: float = clampf(float(current_hp), 0.0, float(max_hp))
+	label.text = name.left(12)
+	level_label.text = "Lv %d" % level if level > 0 else ""
+	var sprite: Dictionary = current_content.battle_pokemon_sprite(species_id, false) if current_content != null else {}
+	icon.texture = sprite.get("texture") as Texture2D
+	icon.visible = icon.texture != null
+	hp_bar.visible = true
+	hp_bar.max_value = max_hp
+	var fill_color: Color = Color("d94c5a") if target_hp * 5.0 <= max_hp else Color("e6bd5a") if target_hp * 2.0 <= max_hp else Color("5ccf77")
+	hp_bar.add_theme_stylebox_override("fill", _panel_style(fill_color, fill_color, 3, 0))
+	hp_bar.tooltip_text = "%s\n%d / %d HP" % [name, current_hp, max_hp]
+	if not bool(hp_bar.get_meta("initialized", false)):
+		hp_bar.value = target_hp
+		hp_bar.set_meta("initialized", true)
+	else:
+		var previous_tween: Tween = party_hp_tweens.get(index) as Tween
+		if previous_tween != null:
+			previous_tween.kill()
+		if absf(float(hp_bar.value) - target_hp) > 0.1:
+			var tween: Tween = create_tween()
+			party_hp_tweens[index] = tween
+			tween.tween_property(hp_bar, "value", target_hp, 0.42).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+		else:
+			hp_bar.value = target_hp
+
+func _party_species_id(member: Dictionary) -> int:
+	return int(member.get("dex_id", member.get("species_id", member.get("species", 0))))
+
+func _party_slot_name(member: Dictionary) -> String:
+	var species_id: int = _party_species_id(member)
+	var nickname: String = str(member.get("nickname", "")).strip_edges()
+	if nickname.is_empty() and species_id > 0 and current_content != null:
+		nickname = current_content.battle_pokemon_name(species_id)
+	return nickname if not nickname.is_empty() else "Pokemon"
+
 func _party_slot_text(member: Dictionary) -> String:
-	var dex_id: int = int(member.get("dex_id", member.get("species_id", member.get("species", 0))))
-	if dex_id <= 0:
+	if _party_species_id(member) <= 0:
 		return ""
-	var nickname_value: Variant = member.get("nickname", "")
-	var nickname: String = str(nickname_value).strip_edges() if nickname_value != null else ""
-	if nickname.is_empty():
-		nickname = current_content.battle_pokemon_name(dex_id) if current_content != null else "#%03d" % dex_id
-	return "%s\nLv %d" % [nickname.left(12), int(member.get("level", 0))]
+	return "%s\nLv %d" % [_party_slot_name(member).left(12), int(member.get("level", 0))]
