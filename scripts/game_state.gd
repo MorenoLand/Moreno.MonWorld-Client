@@ -434,6 +434,13 @@ func _on_game_packet(opcode: int, payload: PackedByteArray) -> void:
 			battle_event_received.emit({"type": "entity_delta", "event": response, "state": battle_state})
 		else:
 			connection_error.emit(str(response.get("error", "OpenMMO battle entity delta is malformed")))
+	elif opcode == GAME_PROTOCOL_SCRIPT.ENTITY_MOVE_PP:
+		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_entity_move_pp(payload)
+		if response.ok:
+			_apply_battle_move_pp(response)
+			battle_event_received.emit({"type": "move_pp", "event": response, "state": battle_state})
+		else:
+			connection_error.emit(str(response.get("error", "OpenMMO move PP packet is malformed")))
 	elif opcode == GAME_PROTOCOL_SCRIPT.ENTITY_LEAVE:
 		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_entity_leave(payload)
 		if response.ok:
@@ -608,6 +615,37 @@ func _apply_battle_switch_event(event: Dictionary) -> void:
 func _apply_battle_entity_delta(event: Dictionary) -> void:
 	_apply_battle_entity_updates(int(event.get("entity_id", 0)), event.get("updates", {}) if event.get("updates", {}) is Dictionary else {})
 
+func _apply_battle_move_pp(event: Dictionary) -> void:
+	var entity_id: int = int(event.get("entity_id", 0))
+	var move_slot: int = int(event.get("move_slot", -1))
+	if entity_id == 0 or move_slot < 0 or move_slot >= 4:
+		return
+	for party_key in ["player_party", "opponent_party"]:
+		var party_value: Variant = battle_state.get(party_key, [])
+		if not party_value is Array:
+			continue
+		var party: Array = (party_value as Array).duplicate(true)
+		for index in party.size():
+			if not party[index] is Dictionary:
+				continue
+			var mon: Dictionary = party[index]
+			if int(mon.get("entity_id", 0)) != entity_id:
+				continue
+			var move_pp: Array = mon.get("move_pp", []).duplicate() if mon.get("move_pp", []) is Array else []
+			while move_pp.size() < 4:
+				move_pp.append(-1)
+			move_pp[move_slot] = maxi(0, int(event.get("pp", 0)))
+			mon["move_pp"] = move_pp
+			var moves: Array = mon.get("moves", []).duplicate(true) if mon.get("moves", []) is Array else []
+			if move_slot < moves.size() and moves[move_slot] is Dictionary:
+				var move: Dictionary = moves[move_slot]
+				move["pp"] = move_pp[move_slot]
+				moves[move_slot] = move
+				mon["moves"] = moves
+			party[index] = mon
+			battle_state[party_key] = party
+			return
+
 func _apply_battle_entity_updates(entity_id: int, updates: Dictionary) -> void:
 	for party_key in ["player_party", "opponent_party"]:
 		var party_value: Variant = battle_state.get(party_key, [])
@@ -624,9 +662,19 @@ func _apply_battle_entity_updates(entity_id: int, updates: Dictionary) -> void:
 				if updates.has(key):
 					mon[key] = updates[key]
 			if updates.has("moves"):
-				mon["move_ids"] = updates.get("moves", [])
+				var moves: Array = updates.get("moves", []) if updates.get("moves", []) is Array else []
+				var move_ids: Array = []
+				var move_pp: Array = []
+				for move_value in moves:
+					if move_value is Dictionary:
+						move_ids.append(int((move_value as Dictionary).get("id", 0)))
+						move_pp.append(int((move_value as Dictionary).get("pp", 0)))
+				mon["moves"] = moves.duplicate(true)
+				mon["move_ids"] = move_ids
+				mon["move_pp"] = move_pp
 			party[index] = mon
 			battle_state[party_key] = party
+			break
 
 func _on_login_failed(message: String) -> void:
 	if login_flow != "idle":

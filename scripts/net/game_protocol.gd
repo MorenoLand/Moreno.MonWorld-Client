@@ -17,6 +17,7 @@ const SERVER_NOTICE: int = 0x74
 const LOAD_MAP: int = 0x10
 const NPC_UPDATE: int = 0x11
 const NPC_SPAWN: int = 0x12
+const ENTITY_MOVE_PP: int = 0x1A
 const DIALOG_ACTION: int = 0x21
 const ENTITY_INTERACT: int = 0x22
 const DIALOG_CHOICE: int = 0x25
@@ -624,6 +625,14 @@ static func decode_battle_entity_delta(payload: PackedByteArray) -> Dictionary:
 	if mask & 0x800000 != 0:
 		updates["status"] = reader.read_s8()
 	return _battle_decode_result(reader, {"entity_id": entity_id, "mask": mask, "updates": updates}, "OpenMMO battle entity delta is malformed")
+
+static func decode_entity_move_pp(payload: PackedByteArray) -> Dictionary:
+	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
+	var result: Dictionary = {"entity_id": reader.read_s64_le(), "move_slot": reader.read_s8(), "pp": reader.read_s8()}
+	result["ok"] = not reader.failed and reader.remaining() == 0
+	if not bool(result.get("ok", false)):
+		result["error"] = "OpenMMO move PP packet is malformed"
+	return result
 
 static func _read_battle_mon_full(reader: OpenMMOCodec.Reader) -> Dictionary:
 	var mon: Dictionary = {"slot": reader.read_s8()}

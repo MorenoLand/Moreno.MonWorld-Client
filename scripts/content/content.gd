@@ -6,6 +6,7 @@ const ANIMATION_PHASE_COUNT: int = 40
 const SCHEMA_VERSION: int = 1
 const KANTO_GBA_CONTENT_ID: String = "kanto-gba-slice-v1"
 const FIRE_RED_REV1_SHA1: String = "dd5945db9b930750cb39d00c84da8571feebf417"
+const FIRE_RED_SHA1: String = "41cb23d8dccc8ebd7c649cd8fbb58eeace6e2fdc"
 const FIRE_RED_REV1_DIALOGUE_DELTAS: Array = [0x78, 0x73, 0x70]
 const GBA_TITLE_OFFSET: int = 0xA0
 const GBA_TITLE_LENGTH: int = 12
@@ -63,6 +64,8 @@ var battle_sprite_cache: Dictionary = {}
 var battle_name_cache: Dictionary = {}
 var battle_move_name_cache: Dictionary = {}
 var battle_move_info_cache: Dictionary = {}
+var battle_animation_sheet_cache: Dictionary = {}
+var battle_animation_plan_cache: Dictionary = {}
 var follower_sprite_cache: Dictionary = {}
 var string_catalog: Dictionary = {}
 
@@ -383,19 +386,26 @@ func battle_move_name(move_id: int) -> String:
 
 func battle_move_info(move_id: int) -> Dictionary:
 	if move_id <= 0:
-		return {"id": move_id, "name": "Move", "type": -1, "type_name": "Unknown", "power": 0}
+		return {"id": move_id, "name": "Move", "effect": -1, "type": -1, "type_name": "Unknown", "power": 0, "accuracy": 0, "pp": 0, "effect_chance": 0, "target": 0, "priority": 0, "flags": 0}
 	var cache_key: String = str(move_id)
 	if battle_move_info_cache.has(cache_key):
 		return battle_move_info_cache[cache_key]
-	var info: Dictionary = {"id": move_id, "name": battle_move_name(move_id), "type": -1, "type_name": "Unknown", "power": 0}
+	var info: Dictionary = {"id": move_id, "name": battle_move_name(move_id), "effect": -1, "type": -1, "type_name": "Unknown", "power": 0, "accuracy": 0, "pp": 0, "effect_chance": 0, "target": 0, "priority": 0, "flags": 0}
 	var tables: Dictionary = _battle_rom_tables()
 	var table_offset: int = int(tables.get("move_table", -1))
 	var offset: int = table_offset + move_id * 12
 	if table_offset >= 0 and _valid_range(offset, 12):
 		var move_type: int = int(rom_data[offset + 2])
+		info["effect"] = int(rom_data[offset])
 		info["type"] = move_type
 		info["type_name"] = _battle_move_type_name(move_type)
 		info["power"] = int(rom_data[offset + 1])
+		info["accuracy"] = int(rom_data[offset + 3])
+		info["pp"] = int(rom_data[offset + 4])
+		info["effect_chance"] = int(rom_data[offset + 5])
+		info["target"] = int(rom_data[offset + 6])
+		info["priority"] = int(rom_data[offset + 7]) - 256 if int(rom_data[offset + 7]) >= 128 else int(rom_data[offset + 7])
+		info["flags"] = int(rom_data[offset + 8])
 	battle_move_info_cache[cache_key] = info
 	return info
 
@@ -489,7 +499,11 @@ func _battle_rom_tables() -> Dictionary:
 		battle_table_cache = {"available": false}
 		battle_tables_scanned = true
 		return battle_table_cache
-	var tables: Dictionary = {"header_offset": header_offset, "front_sprite_table": _read_rom_pointer(header_offset + 40), "back_sprite_table": _read_rom_pointer(header_offset + 44), "palette_table": _read_rom_pointer(header_offset + 48), "species_name_table": _read_rom_pointer(header_offset + 68), "move_name_table": _read_rom_pointer(header_offset + 72), "move_table": _format_int("battle_move_table_offset", -1)}
+	var tables: Dictionary = {"header_offset": header_offset, "front_sprite_table": _read_rom_pointer(header_offset + 40), "back_sprite_table": _read_rom_pointer(header_offset + 44), "palette_table": _read_rom_pointer(header_offset + 48), "species_name_table": _read_rom_pointer(header_offset + 68), "move_name_table": _read_rom_pointer(header_offset + 72), "move_table": _format_int("battle_move_table_offset", -1), "animation_pic_table": _format_int("battle_animation_pic_table_offset", -1), "animation_palette_table": _format_int("battle_animation_palette_table_offset", -1), "animation_move_table": _format_int("battle_animation_move_table_offset", -1)}
+	if str(source_profile.get("id", "")) == "pokemon-fire-red" and rom_sha1 == FIRE_RED_SHA1:
+		tables["animation_pic_table"] = 0x3ACC08
+		tables["animation_palette_table"] = 0x3AD510
+		tables["animation_move_table"] = 0x1C68F4
 	if not _valid_range(int(tables.get("front_sprite_table", -1)), 8) or not _valid_range(int(tables.get("back_sprite_table", -1)), 8) or not _valid_range(int(tables.get("palette_table", -1)), 8) or not _valid_range(int(tables.get("species_name_table", -1)), 11) or not _valid_range(int(tables.get("move_name_table", -1)), 13):
 		battle_table_cache = {"available": false}
 		battle_tables_scanned = true
@@ -499,6 +513,266 @@ func _battle_rom_tables() -> Dictionary:
 	battle_name_cache.clear()
 	battle_move_name_cache.clear()
 	return battle_table_cache
+
+func battle_move_animation_plan(move_id: int) -> Dictionary:
+	if move_id <= 0:
+		return {"ok": false}
+	var cache_key: String = str(move_id)
+	if battle_animation_plan_cache.has(cache_key):
+		return battle_animation_plan_cache[cache_key]
+	var tables: Dictionary = _battle_animation_tables()
+	var move_table: int = int(tables.get("animation_move_table", -1))
+	if move_table < 0 or not _valid_range(move_table + move_id * 4, 4):
+		return {"ok": false}
+	var move_info: Dictionary = battle_move_info(move_id)
+	var state: Dictionary = {"delay": 0, "loaded": [], "tags": [], "spawns": [], "visited": {}}
+	_walk_battle_animation_script(_read_rom_pointer(move_table + move_id * 4), int(move_info.get("power", 0)), 0, state)
+	var tags: Array = state.get("tags", [])
+	if tags.is_empty():
+		tags.append(_battle_animation_fallback_tag(int(move_info.get("type", -1))))
+	var spawns: Array = state.get("spawns", [])
+	if spawns.is_empty():
+		var count: int = 6 if int(move_info.get("power", 0)) <= 0 else 5
+		for index in range(count):
+			spawns.append({"tag": int(tags[index % tags.size()]), "kind": "aura" if int(move_info.get("power", 0)) <= 0 else "travel", "delay": index * 3, "offset": Vector2((index - count / 2) * 8, ((index * 5) % 13) - 6)})
+	var duration: int = clampi(int(state.get("delay", 0)) + 24, 48, 96)
+	var result: Dictionary = {"ok": true, "tags": tags, "spawns": spawns, "duration_frames": duration, "hit_frame": clampi(duration - 18, 12, 72)}
+	battle_animation_plan_cache[cache_key] = result
+	return result
+
+func battle_animation_sheet(tag: int) -> Dictionary:
+	var cache_key: String = str(tag)
+	if battle_animation_sheet_cache.has(cache_key):
+		return battle_animation_sheet_cache[cache_key]
+	var tables: Dictionary = _battle_animation_tables()
+	var pic_table: int = int(tables.get("animation_pic_table", -1))
+	var palette_table: int = int(tables.get("animation_palette_table", -1))
+	var index: int = tag - 10000
+	var record: int = pic_table + index * 8
+	var palette_record: int = palette_table + index * 8
+	if index < 0 or index >= 289 or pic_table < 0 or palette_table < 0 or not _valid_range(record, 8) or not _valid_range(palette_record, 8):
+		return {"ok": false}
+	var size: int = _read_u16(record + 4)
+	var data_offset: int = _read_rom_pointer(record)
+	var pixels: PackedByteArray = _read_lz77(data_offset)
+	if pixels.size() < 32 and size >= 32 and _valid_range(data_offset, size):
+		pixels = rom_data.slice(data_offset, data_offset + size)
+	var palette_offset: int = _read_rom_pointer(palette_record)
+	var palette: PackedByteArray = _read_lz77(palette_offset)
+	if palette.size() < 32 and _valid_range(palette_offset, 32):
+		palette = rom_data.slice(palette_offset, palette_offset + 32)
+	if pixels.size() < 32 or palette.size() < 32:
+		return {"ok": false}
+	var dimensions: Vector3i = _battle_animation_dimensions(pixels.size())
+	var width: int = dimensions.x
+	var height: int = dimensions.y
+	var frame_count: int = dimensions.z
+	var tiles_wide: int = width / 8
+	var tiles_high: int = height / 8
+	var frame_tiles: int = tiles_wide * tiles_high
+	frame_count = mini(frame_count, maxi(1, pixels.size() / maxi(frame_tiles * 32, 1)))
+	var frames: Array = []
+	for frame_index in range(frame_count):
+		var image: Image = Image.create(width, height, false, Image.FORMAT_RGBA8)
+		var frame_offset: int = frame_index * frame_tiles * 32
+		for tile_y in range(tiles_high):
+			for tile_x in range(tiles_wide):
+				var tile_offset: int = frame_offset + (tile_y * tiles_wide + tile_x) * 32
+				for pixel_y in range(8):
+					for pixel_x in range(8):
+						var packed: int = int(pixels[tile_offset + pixel_y * 4 + pixel_x / 2])
+						var palette_index: int = (packed & 0x0F) if pixel_x % 2 == 0 else ((packed >> 4) & 0x0F)
+						if palette_index == 0:
+							continue
+						var color_value: int = int(palette[palette_index * 2]) | (int(palette[palette_index * 2 + 1]) << 8)
+						image.set_pixel(tile_x * 8 + pixel_x, tile_y * 8 + pixel_y, _rgb555_color(color_value))
+		frames.append(ImageTexture.create_from_image(image))
+	var result: Dictionary = {"ok": not frames.is_empty(), "frames": frames, "width": width, "height": height, "tag": tag}
+	battle_animation_sheet_cache[cache_key] = result
+	return result
+
+func _battle_animation_tables() -> Dictionary:
+	var tables: Dictionary = _battle_rom_tables()
+	if int(tables.get("animation_pic_table", -1)) >= 0 and int(tables.get("animation_move_table", -1)) >= 0:
+		return tables
+	var pic_table: int = _find_battle_animation_pic_table()
+	var move_table: int = _find_battle_animation_move_table()
+	if pic_table >= 0:
+		tables["animation_pic_table"] = pic_table
+		var palette_table: int = pic_table + 289 * 8
+		if _valid_range(palette_table, 8) and _read_u16(palette_table + 4) == 10000:
+			tables["animation_palette_table"] = palette_table
+	if move_table >= 0:
+		tables["animation_move_table"] = move_table
+	battle_table_cache = tables
+	return tables
+
+func _find_battle_animation_pic_table() -> int:
+	var cursor: int = 7
+	while cursor < rom_data.size():
+		var marker: int = rom_data.find(0x27, cursor)
+		if marker < 0:
+			return -1
+		var offset: int = marker - 7
+		if offset % 4 == 0 and _valid_range(offset, 32):
+			var valid: bool = true
+			for index in range(4):
+				var record: int = offset + index * 8
+				if _read_u16(record + 6) != 10000 + index or _read_u16(record + 4) < 32 or _read_rom_pointer(record) < 0:
+					valid = false
+					break
+			if valid:
+				return offset
+		cursor = marker + 1
+	return -1
+
+func _find_battle_animation_move_table() -> int:
+	var cursor: int = 7
+	while cursor < rom_data.size():
+		var marker: int = rom_data.find(0x08, cursor)
+		if marker < 0:
+			return -1
+		var offset: int = marker - 3
+		if offset % 4 == 0 and _valid_range(offset, 355 * 4) and _read_u32(offset) == _read_u32(offset + 4) and _read_rom_pointer(offset) >= 0:
+			var valid: bool = true
+			var unique_scripts: Dictionary = {}
+			for index in range(355):
+				var script: int = _read_rom_pointer(offset + index * 4)
+				if script < 0 or int(rom_data[script]) > 0x2F:
+					valid = false
+					break
+				unique_scripts[script] = true
+			if valid and unique_scripts.size() > 120:
+				return offset
+		cursor = marker + 1
+	return -1
+
+func _walk_battle_animation_script(address: int, power: int, depth: int, state: Dictionary) -> void:
+	if depth > 6 or address < 0 or not _valid_range(address, 1):
+		return
+	var command_lengths: Array = [2, 2, -1, -1, 1, 0, 0, 0, 0, 2, 1, 1, 2, 0, 4, 0, 3, 8, 5, 4, 1, 0, 0, 0, 1, 3, 1, 6, 5, 4, 2, -1, 0, 7, 1, 1, 4, 3, 6, 6, 1, 0, 1, 1, 1, 1, 1, 0]
+	var pc: int = address
+	var steps: int = 0
+	while _valid_range(pc, 1) and steps < 400:
+		steps += 1
+		var visited: Dictionary = state.get("visited", {})
+		if visited.has(pc):
+			break
+		visited[pc] = true
+		state["visited"] = visited
+		var command: int = int(rom_data[pc])
+		if command > 0x2F or command == 0x08:
+			break
+		if command == 0x0F:
+			return
+		if command == 0x00 and _valid_range(pc, 3):
+			var tag: int = _read_u16(pc + 1)
+			if tag >= 10000 and tag < 10289:
+				var loaded: Array = state.get("loaded", [])
+				loaded.append(tag)
+				state["loaded"] = loaded
+				var tags: Array = state.get("tags", [])
+				if not tags.has(tag):
+					tags.append(tag)
+				state["tags"] = tags
+			state["delay"] = int(state.get("delay", 0)) + 1
+			pc += 3
+			continue
+		if command == 0x01 and _valid_range(pc, 3):
+			var loaded: Array = state.get("loaded", [])
+			loaded.erase(_read_u16(pc + 1))
+			state["loaded"] = loaded
+			pc += 3
+			continue
+		if command in [0x02, 0x03, 0x1F] and _valid_range(pc, 7):
+			var argument_count: int = int(rom_data[pc + 6])
+			var total: int = 7 + argument_count * 2
+			if not _valid_range(pc, total):
+				break
+			var loaded: Array = state.get("loaded", [])
+			var spawns: Array = state.get("spawns", [])
+			if command == 0x02 and not loaded.is_empty() and spawns.size() < 20:
+				var offset_x: int = _read_u16(pc + 7) if argument_count >= 1 else 0
+				var offset_y: int = _read_u16(pc + 9) if argument_count >= 2 else 0
+				if offset_x >= 0x8000:
+					offset_x -= 0x10000
+				if offset_y >= 0x8000:
+					offset_y -= 0x10000
+				if absi(offset_x) >= 80:
+					offset_x = 0
+				if absi(offset_y) >= 80:
+					offset_y = 0
+				var tag: int = int(loaded.back())
+				var on_target: bool = (int(rom_data[pc + 5]) & 0x80) != 0
+				spawns.append({"tag": tag, "kind": _battle_animation_kind(tag, power, on_target), "delay": int(state.get("delay", 0)), "offset": Vector2(offset_x, offset_y)})
+				state["spawns"] = spawns
+			pc += total
+			continue
+		if command == 0x04 and _valid_range(pc, 2):
+			state["delay"] = int(state.get("delay", 0)) + int(rom_data[pc + 1])
+			pc += 2
+			continue
+		if command == 0x05:
+			state["delay"] = int(state.get("delay", 0)) + 12
+			pc += 1
+			continue
+		if command == 0x0E and _valid_range(pc, 5):
+			_walk_battle_animation_script(_read_rom_pointer(pc + 1), power, depth + 1, state)
+			pc += 5
+			continue
+		if command == 0x11 and _valid_range(pc, 9):
+			_walk_battle_animation_script(_read_rom_pointer(pc + 1), power, depth + 1, state)
+			pc += 9
+			continue
+		if command == 0x13 and _valid_range(pc, 5):
+			pc = _read_rom_pointer(pc + 1)
+			if pc < 0:
+				break
+			continue
+		if command == 0x12 and _valid_range(pc, 6):
+			if int(rom_data[pc + 1]) == 0:
+				var destination: int = _read_rom_pointer(pc + 2)
+				if destination >= 0:
+					pc = destination
+					continue
+			pc += 6
+			continue
+		if command == 0x21 and _valid_range(pc, 8):
+			pc += 8
+			continue
+		if command == 0x24 and _valid_range(pc, 5):
+			pc += 5
+			continue
+		var extra: int = int(command_lengths[command])
+		if extra < 0 or not _valid_range(pc, extra + 1):
+			break
+		pc += extra + 1
+
+func _battle_animation_kind(tag: int, power: int, on_target: bool) -> String:
+	var index: int = tag - 10000
+	if index in [21, 22, 26, 38, 39, 40, 41, 50, 51, 52, 55, 56, 116, 135, 136, 137, 138, 139, 143, 192, 204, 222, 245, 246, 285, 286, 287]:
+		return "impact"
+	if index in [65, 67, 68, 69, 115, 146]:
+		return "rain" if power <= 0 else "travel"
+	if power <= 0:
+		return "rain" if on_target else "aura"
+	return "travel"
+
+func _battle_animation_fallback_tag(move_type: int) -> int:
+	var tags: Dictionary = {1: 10143, 2: 10003, 3: 10065, 4: 10058, 5: 10058, 6: 10020, 7: 10200, 8: 10001, 10: 10029, 11: 10146, 12: 10063, 13: 10037, 14: 10004, 15: 10043, 16: 10033, 17: 10017}
+	return int(tags.get(move_type, 10135))
+
+func _battle_animation_dimensions(byte_count: int) -> Vector3i:
+	var tiles: int = byte_count / 32
+	if tiles <= 0:
+		return Vector3i(8, 8, 1)
+	if tiles % 16 == 0 and tiles / 16 <= 12:
+		return Vector3i(32, 32, tiles / 16)
+	if tiles == 64:
+		return Vector3i(64, 64, 1)
+	if tiles % 4 == 0 and tiles / 4 <= 16:
+		return Vector3i(16, 16, tiles / 4)
+	return Vector3i(8, 8, tiles)
 
 func _battle_move_type_name(move_type: int) -> String:
 	match move_type:
@@ -1022,7 +1296,7 @@ func _create_corner_filler_region(filler_id: String, gap: Rect2i, donor: Diction
 			if metatile_id >= primary_metatile_count:
 				tileset = secondary
 				metatile_index = metatile_id - primary_metatile_count
-			_draw_metatile_layers(background_image, foreground_image, map_x * 16, map_y * 16, tileset, metatile_index, primary, secondary, animated_background_tiles, animated_foreground_tiles)
+			_draw_map_metatile_layers(background_image, foreground_image, map_x * 16, map_y * 16, tileset, metatile_index, primary, secondary, animated_background_tiles, animated_foreground_tiles)
 	var background_texture: ImageTexture = ImageTexture.create_from_image(background_image)
 	var foreground_texture: ImageTexture = ImageTexture.create_from_image(foreground_image)
 	var filler_cache: Dictionary = {"ok": true, "base_image": background_image, "base_background_image": background_image, "base_foreground_image": foreground_image, "primary": primary, "secondary": secondary, "primary_tiles": donor_cache.get("primary_tiles", PackedByteArray()), "primary_animation_enabled": bool(donor_cache.get("primary_animation_enabled", false)), "animated_tiles": [], "animated_background_tiles": animated_background_tiles, "animated_foreground_tiles": animated_foreground_tiles, "animated_primary_tiles": PackedByteArray(), "animated_tile_phase": -1, "animated_tile_textures": {}, "map_cells": PackedInt32Array(), "objects": [], "warps": [], "connections": [], "textures": {}, "images": {}, "background_textures": {}, "foreground_textures": {}, "width": width, "height": height, "header_offset": -1, "layout_offset": -1, "border_offset": -1, "border_width": border_width, "border_height": border_height, "border_tiles": border_tiles, "map_group": -1, "map_index": filler_index, "music_id": 0, "map_type": int(donor_cache.get("map_type", 0))}
@@ -1105,7 +1379,7 @@ func _build_server_map_cache(map_id: String, server_map: Dictionary, server_maps
 			var metatile_id: int = int(map_cells[map_y * width + map_x]) & metatile_id_mask
 			var tileset: Dictionary = primary if metatile_id < primary_metatile_count else secondary
 			var metatile_index: int = metatile_id if metatile_id < primary_metatile_count else metatile_id - primary_metatile_count
-			_draw_metatile_layers(background_image, foreground_image, map_x * 16, map_y * 16, tileset, metatile_index, primary, secondary, animated_background_tiles, animated_foreground_tiles)
+			_draw_map_metatile_layers(background_image, foreground_image, map_x * 16, map_y * 16, tileset, metatile_index, primary, secondary, animated_background_tiles, animated_foreground_tiles)
 	return {"ok": true, "base_image": background_image, "base_background_image": background_image, "base_foreground_image": foreground_image, "primary": primary, "secondary": secondary, "primary_tiles": primary.get("tiles", PackedByteArray()), "primary_animation_enabled": bool(primary.get("animation_enabled", false)), "animated_tiles": [], "animated_background_tiles": animated_background_tiles, "animated_foreground_tiles": animated_foreground_tiles, "map_cells": map_cells, "objects": [], "warps": [], "connections": _server_connections(server_map, server_maps), "textures": {}, "images": {}, "background_textures": {}, "foreground_textures": {}, "width": width, "height": height, "header_offset": -1, "layout_offset": -1, "border_offset": -1, "border_width": int(server_map.get("border_width", 0)), "border_height": int(server_map.get("border_height", 0)), "map_group": int(server_map.get("bank_id", -1)), "map_index": int(server_map.get("map_id", -1)), "music_id": 0, "map_type": int(server_map.get("map_type", 0))}
 
 func _gzip_decompress(data: PackedByteArray, expected_bytes: int) -> PackedByteArray:
@@ -1154,27 +1428,24 @@ func _server_map_for_local_map(map_id: String, server_maps: Dictionary) -> Dicti
 			return candidate
 	return {}
 
-func animated_tile_texture(map_id: String, tile_entry: int, animation_tick_value: int, transparent_zero: bool = true) -> Texture2D:
+func animated_metatile_texture(map_id: String, metatile: Dictionary, animation_tick_value: int, foreground: bool) -> Texture2D:
 	var cached_map: Dictionary = _get_or_build_map_cache(map_id)
 	if not bool(cached_map.get("ok", false)) or not bool(cached_map.get("primary_animation_enabled", false)):
 		return null
 	var phase: int = posmod(animation_tick_value, ANIMATION_PHASE_COUNT)
-	if phase == 0:
-		return null
 	var tile_cache: Dictionary = cached_map.get("animated_tile_textures", {})
 	var cached_phase: int = int(cached_map.get("animated_tile_phase", -1))
 	if cached_phase != phase:
 		tile_cache.clear()
 		cached_map["animated_primary_tiles"] = _animated_primary_tiles(cached_map.get("primary_tiles", PackedByteArray()), phase, true)
 		cached_map["animated_tile_phase"] = phase
-	var cache_key: String = "%d:%d:%d" % [phase, tile_entry, 1 if transparent_zero else 0]
+	var cache_key: String = "%d:%d:%d:%d" % [phase, int(metatile.get("metatile_index", -1)), 1 if bool(metatile.get("secondary", false)) else 0, 1 if foreground else 0]
 	var cached_texture: Texture2D = tile_cache.get(cache_key) as Texture2D
 	if cached_texture != null:
 		return cached_texture
-	var image: Image = Image.create(8, 8, false, Image.FORMAT_RGBA8)
-	image.fill(Color(0.0, 0.0, 0.0, 0.0))
-	var ignored_animated_tiles: Array = []
-	_draw_tile(image, 0, 0, tile_entry, cached_map.get("primary", {}), cached_map.get("secondary", {}), ignored_animated_tiles, cached_map.get("animated_primary_tiles", PackedByteArray()), transparent_zero)
+	var image: Image = _render_animated_metatile(cached_map, metatile, foreground)
+	if image == null:
+		return null
 	var texture: ImageTexture = ImageTexture.create_from_image(image)
 	tile_cache[cache_key] = texture
 	cached_map["animated_tile_textures"] = tile_cache
@@ -1195,7 +1466,7 @@ func _connected_map_origin(origin: Vector2i, width: int, height: int, target_wid
 
 func has_animated_tiles(map_id: String) -> bool:
 	var cached_map: Dictionary = _get_or_build_map_cache(map_id)
-	return bool(cached_map.get("ok", false)) and not (cached_map.get("animated_tiles", []) as Array).is_empty()
+	return bool(cached_map.get("ok", false)) and (not (cached_map.get("animated_tiles", []) as Array).is_empty() or not (cached_map.get("animated_background_tiles", []) as Array).is_empty() or not (cached_map.get("animated_foreground_tiles", []) as Array).is_empty())
 
 func _get_or_build_map_cache(map_id: String, map_value: Dictionary = {}, include_composite: bool = false) -> Dictionary:
 	var cached_map: Dictionary = map_cache.get(map_id, {})
@@ -1272,7 +1543,7 @@ func _build_map_cache(map_id: String, map_value: Dictionary, include_composite: 
 				metatile_index = metatile_id - primary_metatile_count
 			if include_composite:
 				_draw_metatile(image, map_x * 16, map_y * 16, tileset, metatile_index, primary, secondary, animated_tiles)
-			_draw_metatile_layers(background_image, foreground_image, map_x * 16, map_y * 16, tileset, metatile_index, primary, secondary, animated_background_tiles, animated_foreground_tiles)
+			_draw_map_metatile_layers(background_image, foreground_image, map_x * 16, map_y * 16, tileset, metatile_index, primary, secondary, animated_background_tiles, animated_foreground_tiles)
 	var objects: Array = _read_map_objects(header_offset, map_id)
 	objects.append_array(_read_map_background_events(header_offset, map_id))
 	var border_offset: int = int(descriptor.get("border_offset", -1))
@@ -1419,14 +1690,23 @@ func movement_result(map_id: String, x: int, y: int, direction: int, elevation: 
 		var stair_warp: Dictionary = warp_at(map_id, x, y, elevation)
 		if bool(stair_warp.get("ok", false)):
 			return {"ok": true, "map_id": map_id, "x": x, "y": y, "from_x": x, "from_y": y, "jump": false, "stair": true, "stair_behavior": source_behavior, "warp": stair_warp, "elevation": elevation}
+	var destination_cell: Dictionary = map_cell(map_id, destination.x, destination.y)
+	var destination_behavior: int = int(destination_cell.get("behavior", 0))
+	var jump_direction: int = _jump_direction(destination_behavior)
+	if jump_direction != 0:
+		if jump_direction != direction:
+			return {"ok": false, "error": "ledge"}
+		var landing: Vector2i = destination + vector
+		var landing_cell: Dictionary = map_cell(map_id, landing.x, landing.y) if landing.x >= 0 and landing.y >= 0 and landing.x < width and landing.y < height else {}
+		if landing_cell.is_empty() or not can_walk(map_id, destination.x, destination.y, landing.x, landing.y, elevation, occupied):
+			return {"ok": false, "error": "jump landing is blocked"}
+		if _is_surfable_behavior(int(landing_cell.get("behavior", 0))):
+			return {"ok": false, "error": "water"}
+		return {"ok": true, "map_id": map_id, "x": landing.x, "y": landing.y, "from_x": x, "from_y": y, "intermediate_x": destination.x, "intermediate_y": destination.y, "jump": true, "elevation": int(_map_cell_from_cache(_get_or_build_map_cache(map_id), landing.x, landing.y).get("elevation", elevation))}
+	if _is_surfable_behavior(destination_behavior):
+		return {"ok": false, "error": "water"}
 	if not can_walk(map_id, x, y, destination.x, destination.y, elevation, occupied):
 		return {"ok": false, "error": "blocked"}
-	var destination_cell: Dictionary = map_cell(map_id, destination.x, destination.y)
-	if _jump_direction(int(destination_cell.get("behavior", 0))) == direction:
-		var landing: Vector2i = destination + vector
-		if landing.x < 0 or landing.y < 0 or landing.x >= width or landing.y >= height or not can_walk(map_id, destination.x, destination.y, landing.x, landing.y, elevation, occupied):
-			return {"ok": false, "error": "jump landing is blocked"}
-		return {"ok": true, "map_id": map_id, "x": landing.x, "y": landing.y, "from_x": x, "from_y": y, "intermediate_x": destination.x, "intermediate_y": destination.y, "jump": true, "elevation": int(_map_cell_from_cache(_get_or_build_map_cache(map_id), landing.x, landing.y).get("elevation", elevation))}
 	var destination_warp: Dictionary = warp_at(map_id, destination.x, destination.y, elevation)
 	var has_door_warp: bool = bool(destination_warp.get("ok", false))
 	return {"ok": true, "map_id": map_id, "x": destination.x, "y": destination.y, "from_x": x, "from_y": y, "jump": false, "stair": false, "door": has_door_warp, "warp": destination_warp if has_door_warp else {}, "elevation": int(destination_cell.get("elevation", elevation))}
@@ -1591,6 +1871,9 @@ func _jump_direction(behavior: int) -> int:
 			return CONNECTION_SOUTH
 	return 0
 
+func _is_surfable_behavior(behavior: int) -> bool:
+	return behavior == 0x10 or behavior == 0x11 or behavior == 0x12 or behavior == 0x13 or behavior == 0x15 or behavior == 0x1A or behavior == 0x1B or behavior >= 0x50 and behavior <= 0x53
+
 func _is_stair_warp_behavior(behavior: int) -> bool:
 	var format: Dictionary = source_profile.get("format", {})
 	var stair_behaviors: Array = format.get("stair_warp_behaviors", [0x6C, 0x6D, 0x6E, 0x6F])
@@ -1639,32 +1922,38 @@ func _direction_vector(direction: int) -> Vector2i:
 	return Vector2i.ZERO
 
 func _render_cached_map(cached_map: Dictionary, animation_phase: int) -> Image:
-	var animated_tiles: Array = cached_map.get("animated_tiles", [])
-	if animated_tiles.is_empty() or animation_phase == 0:
-		return (cached_map.get("base_image") as Image).duplicate()
-	var image: Image = (cached_map.get("base_image") as Image).duplicate()
-	var primary: Dictionary = cached_map.get("primary", {})
-	var secondary: Dictionary = cached_map.get("secondary", {})
-	var animated_primary: PackedByteArray = _animated_primary_tiles(cached_map.get("primary_tiles", PackedByteArray()), animation_phase, bool(cached_map.get("primary_animation_enabled", false)))
-	var ignored_animated_tiles: Array = []
-	for tile_value in animated_tiles:
-		if tile_value is Dictionary:
-			var tile: Dictionary = tile_value
-			_draw_tile(image, int(tile.get("x", 0)), int(tile.get("y", 0)), int(tile.get("entry", 0)), primary, secondary, ignored_animated_tiles, animated_primary, bool(tile.get("transparent_zero", true)))
+	var image: Image = _render_cached_layer(cached_map, animation_phase, false)
+	var foreground: Image = _render_cached_layer(cached_map, animation_phase, true)
+	image.blend_rect(foreground, Rect2i(Vector2i.ZERO, foreground.get_size()), Vector2i.ZERO)
 	return image
 
 func _render_cached_layer(cached_map: Dictionary, animation_phase: int, foreground: bool) -> Image:
 	var image: Image = (cached_map.get("base_foreground_image" if foreground else "base_background_image") as Image).duplicate()
+	cached_map["animated_primary_tiles"] = _animated_primary_tiles(cached_map.get("primary_tiles", PackedByteArray()), animation_phase, bool(cached_map.get("primary_animation_enabled", false)))
+	for metatile_value in cached_map.get("animated_foreground_tiles" if foreground else "animated_background_tiles", []):
+		if not metatile_value is Dictionary:
+			continue
+		var metatile: Dictionary = metatile_value
+		var replacement: Image = _render_animated_metatile(cached_map, metatile, foreground)
+		if replacement != null:
+			image.blend_rect(replacement, Rect2i(Vector2i.ZERO, replacement.get_size()), Vector2i(int(metatile.get("x", 0)), int(metatile.get("y", 0))))
+	return image
+
+func _render_animated_metatile(cached_map: Dictionary, metatile: Dictionary, foreground: bool) -> Image:
 	var primary: Dictionary = cached_map.get("primary", {})
 	var secondary: Dictionary = cached_map.get("secondary", {})
-	var animated_primary: PackedByteArray = _animated_primary_tiles(cached_map.get("primary_tiles", PackedByteArray()), animation_phase, bool(cached_map.get("primary_animation_enabled", false))) if animation_phase != 0 else PackedByteArray()
-	var animated_tiles: Array = cached_map.get("animated_foreground_tiles" if foreground else "animated_background_tiles", [])
-	var ignored_animated_tiles: Array = []
-	for tile_value in animated_tiles:
-		if tile_value is Dictionary:
-			var tile: Dictionary = tile_value
-			_draw_tile(image, int(tile.get("x", 0)), int(tile.get("y", 0)), int(tile.get("entry", 0)), primary, secondary, ignored_animated_tiles, animated_primary, bool(tile.get("transparent_zero", true)))
-	return image
+	var tileset: Dictionary = secondary if bool(metatile.get("secondary", false)) else primary
+	var metatile_index: int = int(metatile.get("metatile_index", -1))
+	if metatile_index < 0 or tileset.is_empty():
+		return null
+	var background_image: Image = Image.create(16, 16, false, Image.FORMAT_RGBA8)
+	background_image.fill(Color.BLACK)
+	var foreground_image: Image = Image.create(16, 16, false, Image.FORMAT_RGBA8)
+	foreground_image.fill(Color(0.0, 0.0, 0.0, 0.0))
+	var ignored_background: Array = []
+	var ignored_foreground: Array = []
+	_draw_metatile_layers(background_image, foreground_image, 0, 0, tileset, metatile_index, primary, secondary, ignored_background, ignored_foreground, cached_map.get("animated_primary_tiles", PackedByteArray()))
+	return foreground_image if foreground else background_image
 
 func _animated_primary_tiles(base_tiles: PackedByteArray, animation_phase: int, enabled: bool) -> PackedByteArray:
 	var tiles: PackedByteArray = base_tiles.duplicate()
@@ -2196,6 +2485,17 @@ func _draw_metatile_layers(background_image: Image, foreground_image: Image, des
 		if tile_value is Dictionary:
 			var foreground_tile: Dictionary = tile_value
 			animated_foreground_tiles.append({"x": destination_x + int(foreground_tile.get("x", 0)), "y": destination_y + int(foreground_tile.get("y", 0)), "entry": int(foreground_tile.get("entry", 0)), "transparent_zero": bool(foreground_tile.get("transparent_zero", true))})
+
+func _draw_map_metatile_layers(background_image: Image, foreground_image: Image, destination_x: int, destination_y: int, tileset: Dictionary, metatile_index: int, primary: Dictionary, secondary: Dictionary, animated_background_metatiles: Array, animated_foreground_metatiles: Array) -> void:
+	var background_tiles: Array = []
+	var foreground_tiles: Array = []
+	_draw_metatile_layers(background_image, foreground_image, destination_x, destination_y, tileset, metatile_index, primary, secondary, background_tiles, foreground_tiles)
+	var descriptor: Dictionary = {"x": destination_x, "y": destination_y, "metatile_index": metatile_index, "secondary": bool(tileset.get("is_secondary", false))}
+	if not background_tiles.is_empty():
+		animated_background_metatiles.append(descriptor)
+	if not foreground_tiles.is_empty():
+		foreground_image.fill_rect(Rect2i(destination_x, destination_y, 16, 16), Color(0.0, 0.0, 0.0, 0.0))
+		animated_foreground_metatiles.append(descriptor)
 
 func _draw_metatile_layers_uncached(background_image: Image, foreground_image: Image, destination_x: int, destination_y: int, tileset: Dictionary, metatile_index: int, primary: Dictionary, secondary: Dictionary, animated_background_tiles: Array = [], animated_foreground_tiles: Array = [], primary_override: PackedByteArray = PackedByteArray()) -> void:
 	var metatiles: PackedInt32Array = tileset.get("metatiles", PackedInt32Array())

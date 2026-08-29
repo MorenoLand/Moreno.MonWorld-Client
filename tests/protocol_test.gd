@@ -22,6 +22,9 @@ func _init() -> void:
 	if not _test_game_codec():
 		quit(1)
 		return
+	if not _test_battle_hp_event():
+		quit(1)
+		return
 	quit(0)
 
 func _test_codec() -> bool:
@@ -200,6 +203,49 @@ func _character_list_fixture() -> PackedByteArray:
 	OpenMMOCodec.append_bool(output, false)
 	OpenMMOCodec.append_u8(output, 0)
 	return output
+
+func _test_battle_hp_event() -> bool:
+	var payload: PackedByteArray = PackedByteArray()
+	OpenMMOCodec.append_s64_le(payload, 10)
+	OpenMMOCodec.append_s16_le(payload, 33)
+	OpenMMOCodec.append_u8(payload, 1)
+	OpenMMOCodec.append_u8(payload, 1)
+	OpenMMOCodec.append_s64_le(payload, 20)
+	OpenMMOCodec.append_s16_le(payload, 0x20)
+	OpenMMOCodec.append_u8(payload, 1)
+	OpenMMOCodec.append_u8(payload, 0)
+	OpenMMOCodec.append_u8(payload, 0)
+	OpenMMOCodec.append_s16_le(payload, 14)
+	var decoded: Dictionary = OpenMMOGameProtocol.decode_battle_move_event(payload)
+	if not bool(decoded.get("ok", false)) or int(decoded.get("source_entity", 0)) != 10 or int(decoded.get("source_move", 0)) != 33:
+		push_error("OpenMMO battle move event header did not decode")
+		return false
+	var target: Dictionary = decoded.get("targets", [])[0]
+	var event: Dictionary = target.get("events", [])[0]
+	if int(target.get("entity_id", 0)) != 20 or int(event.get("current_hp", -1)) != 14:
+		push_error("OpenMMO battle HP event did not decode")
+		return false
+	var previous_state: Dictionary = GameState.battle_state.duplicate(true)
+	GameState.battle_state = {"player_party": [{"slot": 0, "entity_id": 10, "current_hp": 20}], "opponent_party": [{"slot": 0, "entity_id": 20, "current_hp": 20}]}
+	GameState.call("_apply_battle_move_event", decoded)
+	var opponent: Dictionary = GameState.battle_state.get("opponent_party", [])[0]
+	if int(opponent.get("current_hp", -1)) != 14:
+		GameState.battle_state = previous_state
+		push_error("OpenMMO battle HP event did not update battle state")
+		return false
+	var pp_payload: PackedByteArray = PackedByteArray()
+	OpenMMOCodec.append_s64_le(pp_payload, 10)
+	OpenMMOCodec.append_u8(pp_payload, 1)
+	OpenMMOCodec.append_u8(pp_payload, 24)
+	var pp_event: Dictionary = OpenMMOGameProtocol.decode_entity_move_pp(pp_payload)
+	GameState.battle_state = {"player_party": [{"slot": 0, "entity_id": 10, "move_ids": [33, 45, 0, 0]}], "opponent_party": []}
+	GameState.call("_apply_battle_move_pp", pp_event)
+	var player: Dictionary = GameState.battle_state.get("player_party", [])[0]
+	GameState.battle_state = previous_state
+	if not bool(pp_event.get("ok", false)) or int(pp_event.get("move_slot", -1)) != 1 or int(pp_event.get("pp", -1)) != 24 or int(player.get("move_pp", [])[1]) != 24:
+		push_error("OpenMMO move PP event did not decode and update battle state")
+		return false
+	return true
 
 func _hex(value: String) -> PackedByteArray:
 	var output: PackedByteArray = PackedByteArray()

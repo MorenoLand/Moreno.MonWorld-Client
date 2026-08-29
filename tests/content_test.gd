@@ -35,6 +35,21 @@ func _init() -> void:
 		push_error("FireRed ROM did not select the FireRed source profile")
 		quit(1)
 		return
+	var ember_plan: Dictionary = content.battle_move_animation_plan(52)
+	if not bool(ember_plan.get("ok", false)) or (ember_plan.get("spawns", []) as Array).is_empty():
+		push_error("FireRed Ember animation script was not decoded")
+		quit(1)
+		return
+	var animation_sheet_found: bool = false
+	for tag_value in ember_plan.get("tags", []):
+		var sheet: Dictionary = content.battle_animation_sheet(int(tag_value))
+		if bool(sheet.get("ok", false)) and not (sheet.get("frames", []) as Array).is_empty():
+			animation_sheet_found = true
+			break
+	if not animation_sheet_found:
+		push_error("FireRed Ember animation graphics were not decoded")
+		quit(1)
+		return
 	if (content.manifest.get("maps", []) as Array).size() < 50:
 		push_error("ROM map manifest did not expose the selectable map table")
 		quit(1)
@@ -137,12 +152,22 @@ func _init() -> void:
 		push_error("world renderer did not prepare cached ROM compositor layers")
 		quit(1)
 		return
-	var animated_layer_tiles: Array = prepared_result.get("animated_background_tiles", [])
-	animated_layer_tiles.append_array(prepared_result.get("animated_foreground_tiles", []))
-	if animated_layer_tiles.is_empty() or not animated_layer_tiles[0] is Dictionary or content.animated_tile_texture("pallet-town", int(animated_layer_tiles[0].get("entry", 0)), 7) == null:
-		push_error("world renderer did not prepare a ROM-backed animated tile overlay")
+	var animated_background_metatiles: Array = prepared_result.get("animated_background_tiles", [])
+	var animated_foreground_metatiles: Array = prepared_result.get("animated_foreground_tiles", [])
+	var animated_metatile: Dictionary = animated_background_metatiles[0] if not animated_background_metatiles.is_empty() else animated_foreground_metatiles[0] if not animated_foreground_metatiles.is_empty() else {}
+	var animated_metatile_texture: Texture2D = content.animated_metatile_texture("pallet-town", animated_metatile, 7, animated_background_metatiles.is_empty()) if not animated_metatile.is_empty() else null
+	if animated_metatile_texture == null:
+		push_error("world renderer did not prepare a ROM-backed animated metatile replacement")
 		quit(1)
 		return
+	if not animated_background_metatiles.is_empty():
+		var animated_metatile_image: Image = animated_metatile_texture.get_image()
+		for pixel_y in animated_metatile_image.get_height():
+			for pixel_x in animated_metatile_image.get_width():
+				if animated_metatile_image.get_pixel(pixel_x, pixel_y).a < 1.0:
+					push_error("animated background metatile contains transparent flicker pixels")
+					quit(1)
+					return
 	var connected_world: Dictionary = content.prepare_connected_world("pallet-town")
 	var connected_regions: Array = connected_world.get("regions", [])
 	if not bool(connected_world.get("ok", false)) or connected_regions.size() < 3:

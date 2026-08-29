@@ -23,6 +23,7 @@ var player_sprite: TextureRect
 var effects_layer: Control
 var hp_tweens: Dictionary = {}
 var move_tween: Tween
+var hp_tween_delay: float = 0.0
 var state: Dictionary = {}
 var selection_mode: String = ""
 var input_locked: bool = true
@@ -100,9 +101,9 @@ func _build_ui() -> void:
 	stage_root.add_child(opponent_sprite)
 	player_sprite = _make_sprite()
 	player_sprite.anchor_left = 0.12
-	player_sprite.anchor_top = 0.32
+	player_sprite.anchor_top = 0.46
 	player_sprite.anchor_right = 0.48
-	player_sprite.anchor_bottom = 0.78
+	player_sprite.anchor_bottom = 0.88
 	player_sprite.pivot_offset = Vector2(150.0, 110.0)
 	player_sprite.z_index = 1
 	stage_root.add_child(player_sprite)
@@ -310,15 +311,20 @@ func _update_mon_card(name_label: Label, level_label: Label, hp_bar: ProgressBar
 	if not bool(hp_bar.get_meta("initialized", false)):
 		hp_bar.value = target_hp
 		hp_bar.set_meta("initialized", true)
+		hp_bar.set_meta("target_hp", target_hp)
 	else:
-		var previous_tween: Tween = hp_tweens.get(tween_key) as Tween
-		if previous_tween != null:
-			previous_tween.kill()
-		if absf(float(hp_bar.value) - target_hp) > 0.1:
+		var previous_target: float = float(hp_bar.get_meta("target_hp", hp_bar.value))
+		if not is_equal_approx(previous_target, target_hp):
+			var previous_tween: Tween = hp_tweens.get(tween_key) as Tween
+			if previous_tween != null:
+				previous_tween.kill()
+			hp_bar.set_meta("target_hp", target_hp)
 			var tween: Tween = create_tween()
 			hp_tweens[tween_key] = tween
+			if hp_tween_delay > 0.0:
+				tween.tween_interval(hp_tween_delay)
 			tween.tween_method(_set_hp_display.bind(hp_bar, hp_label, max_hp), float(hp_bar.value), target_hp, 0.5).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-		else:
+		elif absf(float(hp_bar.value) - target_hp) <= 0.1:
 			hp_bar.value = target_hp
 	_set_hp_display(hp_bar, hp_label, max_hp, float(hp_bar.value))
 	name_label.text = _battle_mon_name(mon, name_label == opponent_name_label)
@@ -439,7 +445,7 @@ func _choose_pokemon() -> void:
 	_render_actions()
 
 func _render_move_selection() -> void:
-	var moves: Array = _active_move_ids()
+	var moves: Array = _active_moves()
 	if moves.is_empty():
 		var empty := Label.new()
 		empty.text = "No revealed moves are available."
@@ -448,17 +454,24 @@ func _render_move_selection() -> void:
 		return
 	var grid := GridContainer.new()
 	grid.columns = 2
-	for move_id_value in moves:
-		var move_id: int = int(move_id_value)
+	for move_value in moves:
+		var move: Dictionary = move_value if move_value is Dictionary else {"id": int(move_value), "pp": -1}
+		var move_id: int = int(move.get("id", 0))
 		if move_id <= 0:
 			continue
 		var button := Button.new()
 		var move_info: Dictionary = GameState.content.battle_move_info(move_id) if GameState.content != null else {}
 		var move_name: String = str(move_info.get("name", GameState.content.battle_move_name(move_id) if GameState.content != null else "MOVE %d" % move_id))
 		var move_type: String = str(move_info.get("type_name", ""))
-		button.text = "%s\n%s" % [move_name, move_type] if not move_type.is_empty() and move_type != "Unknown" else move_name
-		button.tooltip_text = "Type: %s | Power: %d" % [move_type, int(move_info.get("power", 0))] if not move_type.is_empty() and move_type != "Unknown" else ""
+		var max_pp: int = int(move_info.get("pp", 0))
+		var current_pp: int = int(move.get("pp", -1))
+		if current_pp < 0:
+			current_pp = max_pp
+		var type_line: String = move_type if not move_type.is_empty() and move_type != "Unknown" else "Move"
+		button.text = "%s\n%s    PP %d/%d" % [move_name, type_line, current_pp, max_pp]
+		button.tooltip_text = "Type: %s | Power: %d | Accuracy: %d" % [type_line, int(move_info.get("power", 0)), int(move_info.get("accuracy", 0))]
 		button.custom_minimum_size = Vector2(140, 44)
+		button.disabled = current_pp <= 0
 		button.pressed.connect(_send_move.bind(move_id))
 		grid.add_child(button)
 	action_box.add_child(grid)
@@ -508,15 +521,23 @@ func _cancel_selection() -> void:
 	selection_mode = ""
 	_render_actions()
 
-func _active_move_ids() -> Array:
+func _active_moves() -> Array:
 	var party_value: Variant = state.get("player_party", [])
 	if not party_value is Array:
 		return []
 	var active_slot: int = int(state.get("active_slot", -1))
 	for mon_value in party_value as Array:
 		if mon_value is Dictionary and int((mon_value as Dictionary).get("slot", -1)) == active_slot:
-			var move_value: Variant = (mon_value as Dictionary).get("move_ids", [])
-			return move_value as Array if move_value is Array else []
+			var mon: Dictionary = mon_value
+			var moves_value: Variant = mon.get("moves", [])
+			if moves_value is Array and not (moves_value as Array).is_empty():
+				return (moves_value as Array).duplicate(true)
+			var ids: Array = mon.get("move_ids", []) if mon.get("move_ids", []) is Array else []
+			var pp: Array = mon.get("move_pp", []) if mon.get("move_pp", []) is Array else []
+			var moves: Array = []
+			for index in ids.size():
+				moves.append({"id": int(ids[index]), "pp": int(pp[index]) if index < pp.size() else -1})
+			return moves
 	return []
 
 func _send_move(move_id: int) -> void:
@@ -615,12 +636,24 @@ func _animate_move(event: Dictionary) -> void:
 	if is_zero_approx(direction):
 		direction = 1.0 if attacker == player_sprite else -1.0
 	var move_id: int = int(event.get("source_move", event.get("move_id", 0)))
+	var move_info: Dictionary = GameState.content.battle_move_info(move_id) if GameState.content != null else {}
+	var contact: bool = (int(move_info.get("flags", 0)) & 1) != 0
+	var damaging: bool = int(move_info.get("power", 0)) > 0
+	var animation_plan: Dictionary = GameState.content.battle_move_animation_plan(move_id) if GameState.content != null else {"ok": false}
+	var duration: float = float(animation_plan.get("duration_frames", 48)) / 60.0
+	var hit_delay: float = float(animation_plan.get("hit_frame", 18)) / 60.0
 	move_tween = create_tween()
-	move_tween.tween_property(attacker, "position", base_position + Vector2(72.0 * direction, -4.0), 0.18).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	move_tween.tween_callback(_spawn_move_effect.bind(defender, move_id))
-	move_tween.tween_callback(_blink_sprite.bind(defender))
-	move_tween.tween_interval(0.12)
-	move_tween.tween_property(attacker, "position", base_position, 0.2).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN_OUT)
+	if contact:
+		move_tween.tween_property(attacker, "position", base_position + Vector2(72.0 * direction, -4.0), 0.18).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	else:
+		move_tween.tween_interval(0.08)
+	move_tween.tween_callback(_spawn_move_effect.bind(attacker, defender, animation_plan))
+	move_tween.tween_interval(maxf(0.0, hit_delay))
+	if damaging:
+		move_tween.tween_callback(_blink_sprite.bind(defender))
+	move_tween.tween_interval(maxf(0.12, duration - hit_delay))
+	if contact:
+		move_tween.tween_property(attacker, "position", base_position, 0.2).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN_OUT)
 	move_tween.tween_callback(_finish_move_animation.bind(attacker, base_position, defender, event))
 
 func _blink_sprite(sprite: TextureRect) -> void:
@@ -646,58 +679,69 @@ func _finish_move_animation(attacker: TextureRect, base_position: Vector2, defen
 				fade.parallel().tween_property(defender, "position", defender.position + Vector2(0.0, 18.0), 0.28)
 				return
 
-func _spawn_move_effect(target: TextureRect, move_id: int) -> void:
-	if target == null or effects_layer == null:
+func _spawn_move_effect(attacker: TextureRect, target: TextureRect, plan: Dictionary) -> void:
+	if attacker == null or target == null or effects_layer == null or not bool(plan.get("ok", false)) or GameState.content == null:
 		return
-	var info: Dictionary = GameState.content.battle_move_info(move_id) if GameState.content != null else {}
-	var color: Color = _move_type_color(int(info.get("type", -1)))
-	var center: Vector2 = target.position + target.size * 0.5
-	var burst: ColorRect = ColorRect.new()
-	burst.color = Color(color.r, color.g, color.b, 0.9)
-	burst.size = Vector2(18.0, 18.0)
-	burst.position = center - burst.size * 0.5
-	burst.pivot_offset = burst.size * 0.5
-	burst.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	effects_layer.add_child(burst)
-	var burst_tween: Tween = create_tween()
-	burst_tween.tween_property(burst, "scale", Vector2(2.5, 2.5), 0.12).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-	burst_tween.parallel().tween_property(burst, "modulate", Color(color.r, color.g, color.b, 0.0), 0.28)
-	burst_tween.tween_callback(burst.queue_free)
-	var particle_count: int = 8 if int(info.get("power", 0)) > 0 else 5
-	for index in range(particle_count):
-		var particle: ColorRect = ColorRect.new()
-		particle.color = Color(color.r, color.g, color.b, 0.95)
-		particle.size = Vector2(5.0, 5.0)
-		particle.position = center - particle.size * 0.5
-		particle.pivot_offset = particle.size * 0.5
-		particle.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		effects_layer.add_child(particle)
-		var angle: float = TAU * float(index) / float(particle_count)
-		var distance: float = 24.0 + float(index % 3) * 9.0
-		var particle_tween: Tween = create_tween()
-		particle_tween.tween_property(particle, "position", center + Vector2(cos(angle), sin(angle)) * distance - particle.size * 0.5, 0.3).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
-		particle_tween.parallel().tween_property(particle, "modulate", Color(color.r, color.g, color.b, 0.0), 0.3)
-		particle_tween.tween_callback(particle.queue_free)
+	for spawn_value in plan.get("spawns", []):
+		if not spawn_value is Dictionary:
+			continue
+		var spawn: Dictionary = spawn_value
+		var sheet: Dictionary = GameState.content.battle_animation_sheet(int(spawn.get("tag", 0)))
+		if not bool(sheet.get("ok", false)):
+			continue
+		var delay: float = float(spawn.get("delay", 0)) / 60.0
+		var tween: Tween = create_tween()
+		if delay > 0.0:
+			tween.tween_interval(delay)
+		tween.tween_callback(_create_battle_effect.bind(attacker, target, spawn, sheet))
 
-func _move_type_color(move_type: int) -> Color:
-	match move_type:
-		1: return Color("c878e8")
-		2: return Color("a8c8f8")
-		3: return Color("b878d8")
-		4: return Color("d8b060")
-		5: return Color("b8a078")
-		6: return Color("a8c858")
-		7: return Color("8878c8")
-		8: return Color("a8b8c8")
-		10: return Color("f07838")
-		11: return Color("58a8e8")
-		12: return Color("68c878")
-		13: return Color("f0d050")
-		14: return Color("e878a8")
-		15: return Color("78d8e8")
-		16: return Color("7888e8")
-		17: return Color("786078")
-	return Color("f0f0f0")
+func _create_battle_effect(attacker: TextureRect, target: TextureRect, spawn: Dictionary, sheet: Dictionary) -> void:
+	if effects_layer == null:
+		return
+	var frames: Array = sheet.get("frames", [])
+	if frames.is_empty():
+		return
+	var effect := TextureRect.new()
+	effect.texture = frames[0] as Texture2D
+	effect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	effect.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	effect.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	effect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var display_scale: float = 2.4
+	effect.size = Vector2(float(sheet.get("width", 16)), float(sheet.get("height", 16))) * display_scale
+	effect.pivot_offset = effect.size * 0.5
+	effects_layer.add_child(effect)
+	var attacker_center: Vector2 = attacker.position + attacker.size * 0.5
+	var target_center: Vector2 = target.position + target.size * 0.5
+	var offset: Vector2 = (spawn.get("offset", Vector2.ZERO) as Vector2) * display_scale
+	var kind: String = str(spawn.get("kind", "impact"))
+	var destination: Vector2 = target_center + offset - effect.size * 0.5
+	var lifetime: float = maxf(0.24, float(frames.size()) * 0.06)
+	if kind == "aura":
+		destination = attacker_center + offset - effect.size * 0.5
+	elif kind == "rain":
+		destination.y -= 48.0
+	effect.position = attacker_center - effect.size * 0.5 if kind == "travel" else destination
+	var frame_tween: Tween = create_tween()
+	frame_tween.tween_method(_set_effect_frame.bind(effect, frames), 0.0, float(frames.size()), lifetime)
+	var motion: Tween = create_tween()
+	if kind == "travel":
+		motion.tween_property(effect, "position", destination, lifetime * 0.72).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN_OUT)
+	elif kind == "rain":
+		motion.tween_property(effect, "position", destination + Vector2(0.0, 72.0), lifetime).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	elif kind == "aura":
+		motion.tween_property(effect, "position", destination + Vector2(0.0, -42.0), lifetime).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	else:
+		effect.scale = Vector2(0.65, 0.65)
+		motion.tween_property(effect, "scale", Vector2(1.2, 1.2), lifetime * 0.45).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	motion.parallel().tween_property(effect, "modulate", Color(1.0, 1.0, 1.0, 0.0), lifetime).set_delay(lifetime * 0.55)
+	motion.tween_callback(effect.queue_free)
+
+func _set_effect_frame(value: float, effect: TextureRect, frames: Array) -> void:
+	if effect == null or not is_instance_valid(effect) or frames.is_empty():
+		return
+	var index: int = clampi(floori(value), 0, frames.size() - 1)
+	effect.texture = frames[index] as Texture2D
 
 func _reset_battle_sprite_visuals() -> void:
 	if move_tween != null:
@@ -730,6 +774,8 @@ func _on_battle_event(value: Dictionary) -> void:
 			var event_value: Variant = value.get("event", {})
 			move_event = event_value as Dictionary if event_value is Dictionary else {}
 			var move_id: int = int(move_event.get("source_move", move_event.get("move_id", 0)))
+			var animation_plan: Dictionary = GameState.content.battle_move_animation_plan(move_id) if move_id > 0 and GameState.content != null else {}
+			hp_tween_delay = float(animation_plan.get("hit_frame", 18)) / 60.0
 			var move_name: String = GameState.content.battle_move_name(move_id) if move_id > 0 and GameState.content != null else "Move"
 			_append_log("%s used %s!" % [_battle_entity_name(int(move_event.get("source_entity", 0))), move_name])
 			_trigger_flash(Color(1.0, 0.86, 0.58, 0.32))
@@ -746,5 +792,6 @@ func _on_battle_event(value: Dictionary) -> void:
 			_append_log("Battle scene initialized.")
 			_trigger_flash(Color(1.0, 1.0, 1.0, 0.72))
 	_render_state()
+	hp_tween_delay = 0.0
 	if not move_event.is_empty():
 		_animate_move(move_event)

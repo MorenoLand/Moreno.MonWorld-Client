@@ -987,6 +987,9 @@ func _request_move(direction: int) -> bool:
 	var result: Dictionary = content.movement_result(map_id, player_position.x, player_position.y, direction, player_elevation, occupied)
 	if authoritative_state:
 		if not bool(result.get("ok", false)):
+			var local_error: String = str(result.get("error", ""))
+			if local_error == "water" or local_error == "ledge" or local_error == "jump landing is blocked":
+				return false
 			var predicted_position := player_position + Vector2i(_direction_vector(direction))
 			var movement_map: Dictionary = content.map_data(map_id)
 			var cache_value: Variant = content.get("map_cache")
@@ -1044,7 +1047,7 @@ func _request_move(direction: int) -> bool:
 		door_progress = 0.0
 		movement_active = true
 		movement_animation_active = true
-		sound_requested.emit("door" if movement_door else "step")
+		sound_requested.emit("ledge" if movement_jump else "door" if movement_door else "step")
 		queue_redraw()
 		return true
 	elif not bool(result.get("ok", false)):
@@ -1064,7 +1067,7 @@ func _request_move(direction: int) -> bool:
 	door_progress = 0.0
 	movement_active = true
 	movement_animation_active = true
-	sound_requested.emit("door" if movement_door else "step")
+	sound_requested.emit("ledge" if movement_jump else "door" if movement_door else "step")
 	queue_redraw()
 	return true
 
@@ -1410,13 +1413,13 @@ func _draw() -> void:
 					continue
 				var animated_tile: Dictionary = tile_value
 				var tile_world_position: Vector2 = region_origin + Vector2(int(animated_tile.get("x", 0)), int(animated_tile.get("y", 0)))
-				var tile_rect: Rect2 = Rect2(tile_world_position, Vector2(8.0, 8.0))
+				var tile_rect: Rect2 = Rect2(tile_world_position, Vector2(16.0, 16.0))
 				if not tile_rect.intersects(camera_rect):
 					continue
-				var animated_texture: Texture2D = content.animated_tile_texture(region_id, int(animated_tile.get("entry", 0)), animation_tick, bool(animated_tile.get("transparent_zero", true)))
+				var animated_texture: Texture2D = content.animated_metatile_texture(region_id, animated_tile, animation_tick, false)
 				if animated_texture == null:
 					continue
-				draw_texture_rect(animated_texture, Rect2(destination_position + (tile_world_position - camera_origin) * tile_scale, Vector2(8.0, 8.0) * tile_scale), false)
+				draw_texture_rect(animated_texture, Rect2(destination_position + (tile_world_position - camera_origin) * tile_scale, Vector2(16.0, 16.0) * tile_scale), false)
 			var foreground: Texture2D = region.get("foreground_texture") as Texture2D
 			if foreground != null:
 				var first_row: int = maxi(0, floori((camera_rect.position.y - region_origin.y) / TILE_PIXELS) - 1)
@@ -1431,10 +1434,10 @@ func _draw() -> void:
 					continue
 				var animated_tile: Dictionary = tile_value
 				var tile_world_position: Vector2 = region_origin + Vector2(int(animated_tile.get("x", 0)), int(animated_tile.get("y", 0)))
-				var tile_rect: Rect2 = Rect2(tile_world_position, Vector2(8.0, 8.0))
+				var tile_rect: Rect2 = Rect2(tile_world_position, Vector2(16.0, 16.0))
 				if not tile_rect.intersects(camera_rect):
 					continue
-				var animated_texture: Texture2D = content.animated_tile_texture(region_id, int(animated_tile.get("entry", 0)), animation_tick, bool(animated_tile.get("transparent_zero", true)))
+				var animated_texture: Texture2D = content.animated_metatile_texture(region_id, animated_tile, animation_tick, true)
 				if animated_texture == null:
 					continue
 				drawables.append({"kind": "animated_tile", "texture": animated_texture, "world_position": tile_world_position, "sort_y": float(_region_origin(region_id).y + floori(float(int(animated_tile.get("y", 0))) / TILE_PIXELS) + 1), "sort_order": 3})
@@ -1490,7 +1493,7 @@ func _draw() -> void:
 		if str(drawable.get("kind", "sprite")) == "animated_tile":
 			var animated_drawable_texture: Texture2D = drawable.get("texture") as Texture2D
 			var animated_world_position: Vector2 = drawable.get("world_position", Vector2.ZERO)
-			draw_texture_rect(animated_drawable_texture, Rect2(destination_position + (animated_world_position - camera_origin) * tile_scale, Vector2(8.0, 8.0) * tile_scale), false)
+			draw_texture_rect(animated_drawable_texture, Rect2(destination_position + (animated_world_position - camera_origin) * tile_scale, Vector2(16.0, 16.0) * tile_scale), false)
 			continue
 		if str(drawable.get("kind", "sprite")) == "battle_marker":
 			var marker_world_position: Vector2 = drawable.get("world_position", Vector2.ZERO)
