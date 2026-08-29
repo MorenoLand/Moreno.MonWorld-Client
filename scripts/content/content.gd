@@ -361,6 +361,8 @@ func battle_pokemon_name(species_id: int) -> String:
 	if battle_name_cache.has(cache_key):
 		return str(battle_name_cache[cache_key])
 	var tables: Dictionary = _battle_rom_tables()
+	if bool(tables.get("pending", false)):
+		return "POKEMON #%d" % species_id
 	var name: String = _battle_fixed_name(int(tables.get("species_name_table", -1)), _battle_internal_species_id(species_id), 11, "POKEMON #%d" % species_id)
 	battle_name_cache[cache_key] = name
 	return name
@@ -372,6 +374,8 @@ func battle_move_name(move_id: int) -> String:
 	if battle_move_name_cache.has(cache_key):
 		return str(battle_move_name_cache[cache_key])
 	var tables: Dictionary = _battle_rom_tables()
+	if bool(tables.get("pending", false)):
+		return "MOVE %d" % move_id
 	var name: String = _battle_fixed_name(int(tables.get("move_name_table", -1)), move_id, 13, "MOVE %d" % move_id)
 	battle_move_name_cache[cache_key] = name
 	return name
@@ -459,7 +463,8 @@ func _battle_internal_species_id(species_id: int) -> int:
 func _battle_rom_tables() -> Dictionary:
 	if battle_tables_scanned:
 		return battle_table_cache
-	battle_tables_scanned = true
+	if rom_data.is_empty():
+		return {"pending": true}
 	var names: Array = []
 	match str(source_profile.get("id", "")).to_lower():
 		"pokemon-fire-red": names = ["pokemon firered version", "pokemon fire red version", "pokemon fire version"]
@@ -468,7 +473,11 @@ func _battle_rom_tables() -> Dictionary:
 		"pokemon-ruby": names = ["pokemon ruby version"]
 		"pokemon-sapphire": names = ["pokemon sapphire version"]
 		_:
-			names = ["pokemon emerald version", "pokemon firered version", "pokemon leafgreen version", "pokemon red version", "pokemon green version", "pokemon ruby version", "pokemon sapphire version"]
+			names = []
+	var generic_names: Array = ["pokemon emerald version", "pokemon firered version", "pokemon leafgreen version", "pokemon red version", "pokemon green version", "pokemon ruby version", "pokemon sapphire version", "pokemon fire version", "pokemon leaf version"]
+	for generic_name in generic_names:
+		if not names.has(generic_name):
+			names.append(generic_name)
 	var name_offset: int = -1
 	for game_name in names:
 		name_offset = _find_rom_ascii(str(game_name))
@@ -476,10 +485,14 @@ func _battle_rom_tables() -> Dictionary:
 			break
 	if name_offset < 8:
 		battle_table_cache = {"available": false}
-		return {}
+		battle_tables_scanned = true
+		return battle_table_cache
 	var header_offset: int = name_offset - 8
 	var tables: Dictionary = {"header_offset": header_offset, "front_sprite_table": _read_rom_pointer(header_offset + 40), "back_sprite_table": _read_rom_pointer(header_offset + 44), "palette_table": _read_rom_pointer(header_offset + 48), "species_name_table": _read_rom_pointer(header_offset + 68), "move_name_table": _read_rom_pointer(header_offset + 72), "move_table": _format_int("battle_move_table_offset", -1)}
 	battle_table_cache = tables
+	battle_tables_scanned = true
+	battle_name_cache.clear()
+	battle_move_name_cache.clear()
 	return battle_table_cache
 
 func _find_rom_ascii(value: String) -> int:

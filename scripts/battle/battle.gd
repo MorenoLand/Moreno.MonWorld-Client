@@ -235,7 +235,7 @@ func _update_mon_card(name_label: Label, level_label: Label, hp_bar: ProgressBar
 	name_label.text = _battle_mon_name(mon, name_label == opponent_name_label)
 
 func _update_sprite(sprite: TextureRect, mon: Dictionary, back: bool) -> void:
-	var species_id: int = int(mon.get("species", mon.get("dex_id", 0)))
+	var species_id: int = int(mon.get("species", mon.get("species_id", mon.get("dex_id", 0))))
 	sprite.texture = null
 	if GameState.content == null or species_id <= 0:
 		return
@@ -276,10 +276,13 @@ func _render_party(container: VBoxContainer, party_value: Variant, active_slot: 
 		container.add_child(line)
 
 func _battle_mon_name(mon: Dictionary, opponent: bool) -> String:
-	var resolved_name: String = str(mon.get("nickname", mon.get("name", ""))).strip_edges()
+	var nickname_value: Variant = mon.get("nickname", "")
+	var resolved_name: String = str(nickname_value).strip_edges() if nickname_value != null else ""
+	if resolved_name.is_empty():
+		resolved_name = str(mon.get("name", "")).strip_edges()
 	if not resolved_name.is_empty():
 		return resolved_name
-	var resolved_species: int = int(mon.get("species", mon.get("dex_id", 0)))
+	var resolved_species: int = int(mon.get("species", mon.get("species_id", mon.get("dex_id", 0))))
 	if resolved_species > 0 and GameState.content != null:
 		return GameState.content.battle_pokemon_name(resolved_species)
 	if resolved_species > 0:

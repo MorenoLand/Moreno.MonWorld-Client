@@ -66,10 +66,10 @@ func _build_ui() -> void:
 	info_box.add_child(time_label)
 	party_box = VBoxContainer.new()
 	party_box.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	party_box.offset_left = -88.0
+	party_box.offset_left = -136.0
 	party_box.offset_top = 100.0
 	party_box.offset_right = -16.0
-	party_box.custom_minimum_size = Vector2(72.0, 0.0)
+	party_box.custom_minimum_size = Vector2(120.0, 0.0)
 	party_box.add_theme_constant_override("separation", 5)
 	party_box.mouse_filter = Control.MOUSE_FILTER_PASS
 	add_child(party_box)
@@ -80,7 +80,7 @@ func _build_ui() -> void:
 	party_box.add_child(party_title)
 	for index in range(PARTY_COUNT):
 		var slot: PanelContainer = PanelContainer.new()
-		slot.custom_minimum_size = Vector2(72.0, 52.0)
+		slot.custom_minimum_size = Vector2(120.0, 52.0)
 		slot.mouse_filter = Control.MOUSE_FILTER_STOP
 		slot.add_theme_stylebox_override("panel", _panel_style(Color("10151eb8"), Color("5f7185")))
 		var label: Label = Label.new()
@@ -391,7 +391,7 @@ func _on_party_slot_gui_input(event: InputEvent, party_index: int) -> void:
 	if mouse_event.button_index != MOUSE_BUTTON_RIGHT or not mouse_event.pressed:
 		return
 	var member: Variant = current_party[party_index] if party_index >= 0 and party_index < current_party.size() else {}
-	if not member is Dictionary or int((member as Dictionary).get("dex_id", (member as Dictionary).get("species", 0))) <= 0:
+	if not member is Dictionary or int((member as Dictionary).get("dex_id", (member as Dictionary).get("species_id", (member as Dictionary).get("species", 0)))) <= 0:
 		return
 	party_context_index = party_index
 	party_context_menu.position = Vector2i(get_global_mouse_position())
@@ -418,10 +418,11 @@ func _format_money(value: int) -> String:
 	return "-" + formatted if negative else formatted
 
 func _party_slot_text(member: Dictionary) -> String:
-	var dex_id: int = int(member.get("dex_id", member.get("species", 0)))
+	var dex_id: int = int(member.get("dex_id", member.get("species_id", member.get("species", 0))))
 	if dex_id <= 0:
 		return ""
-	var nickname: String = str(member.get("nickname", "")).strip_edges()
+	var nickname_value: Variant = member.get("nickname", "")
+	var nickname: String = str(nickname_value).strip_edges() if nickname_value != null else ""
 	if nickname.is_empty():
 		nickname = current_content.battle_pokemon_name(dex_id) if current_content != null else "#%03d" % dex_id
-	return "%s\nLv %d" % [nickname.left(7), int(member.get("level", 0))]
+	return "%s\nLv %d" % [nickname.left(12), int(member.get("level", 0))]

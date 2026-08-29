@@ -165,7 +165,7 @@ func _update_follower_texture() -> void:
 	var member_value: Variant = (party_value as Array)[following_party_index]
 	if not member_value is Dictionary:
 		return
-	var species_id: int = int((member_value as Dictionary).get("dex_id", (member_value as Dictionary).get("species", 0)))
+	var species_id: int = int((member_value as Dictionary).get("dex_id", (member_value as Dictionary).get("species_id", (member_value as Dictionary).get("species", 0))))
 	if species_id <= 0:
 		follower_texture = null
 		follower_species_id = 0
