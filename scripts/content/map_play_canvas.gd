@@ -636,6 +636,15 @@ func _movement_objects() -> Array:
 		result.append(object_value)
 	return result
 
+func _movement_destination_occupied(objects_to_check: Array, destination: Vector2i) -> bool:
+	for object_value in objects_to_check:
+		if not object_value is Dictionary:
+			continue
+		var object: Dictionary = object_value
+		if bool(object.get("blocks_movement", true)) and int(object.get("x", -1)) == destination.x and int(object.get("y", -1)) == destination.y:
+			return true
+	return false
+
 func _request_move(direction: int) -> bool:
 	if transition_active or (authoritative_state and GameState.map_transition_pending) or content == null or map_id.is_empty() or not has_spawn:
 		return false
@@ -651,6 +660,9 @@ func _request_move(direction: int) -> bool:
 		var entity: Dictionary = entity_value
 		if bool(entity.get("npc", false)) and bool(entity.get("blocks_movement", true)) and str(entity.get("map_id", "")) == map_id:
 			occupied.append({"x": int(entity.get("x", -1)), "y": int(entity.get("y", -1)), "elevation": int(entity.get("elevation", player_elevation)), "collision": 1, "blocks_movement": true})
+	var destination: Vector2i = player_position + Vector2i(_direction_vector(direction))
+	if _movement_destination_occupied(occupied, destination):
+		return false
 	var result: Dictionary = content.movement_result(map_id, player_position.x, player_position.y, direction, player_elevation, occupied)
 	if authoritative_state:
 		if not bool(result.get("ok", false)):
