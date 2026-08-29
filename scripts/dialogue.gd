@@ -2,6 +2,7 @@ class_name OpenMMODialogue
 extends PanelContainer
 
 signal action_requested
+signal choice_requested(value: int)
 signal closed
 
 const TYPE_INTERVAL: float = 1.0 / 30.0
@@ -9,9 +10,13 @@ const PANEL_HEIGHT: float = 164.0
 const PANEL_WIDTH: float = 430.0
 var text_label: Label
 var arrow_label: Label
+var choice_box: VBoxContainer
+var choice_labels: Array = []
 var current_text: String = ""
 var pages: Array = []
+var choice_options: Array = []
 var page_index: int = 0
+var choice_index: int = 0
 var visible_count: int = 0
 var type_elapsed: float = 0.0
 var open_state: bool = false
@@ -19,6 +24,7 @@ var ignore_next_action: bool = false
 var screen_anchor: Vector2 = Vector2(-1.0, -1.0)
 var actor_anchored: bool = false
 var layout_in_progress: bool = false
+var choice_active: bool = false
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -43,6 +49,10 @@ func _ready() -> void:
 	text_label.add_theme_font_size_override("font_size", 20)
 	text_label.custom_minimum_size = Vector2(0, 112)
 	box.add_child(text_label)
+	choice_box = VBoxContainer.new()
+	choice_box.add_theme_constant_override("separation", 0)
+	choice_box.visible = false
+	box.add_child(choice_box)
 	var arrow_row: HBoxContainer = HBoxContainer.new()
 	arrow_row.alignment = BoxContainer.ALIGNMENT_END
 	box.add_child(arrow_row)
@@ -53,6 +63,11 @@ func _ready() -> void:
 	visible = false
 	set_process(false)
 
+func _panel_height() -> float:
+	if not choice_active:
+		return PANEL_HEIGHT
+	return maxf(PANEL_HEIGHT, PANEL_HEIGHT - 32.0 + choice_options.size() * 28.0)
+
 func _layout_panel() -> void:
 	if layout_in_progress:
 		return
@@ -60,30 +75,36 @@ func _layout_panel() -> void:
 	var viewport_size: Vector2 = get_viewport_rect().size
 	var viewport_width: float = viewport_size.x
 	var viewport_height: float = viewport_size.y
+	var panel_height: float = _panel_height()
 	if actor_anchored and screen_anchor.x >= 0.0:
 		var panel_width: float = minf(PANEL_WIDTH, maxf(viewport_width - 24.0, 240.0))
 		var left: float = clampf(screen_anchor.x - panel_width * 0.5, 12.0, maxf(viewport_width - panel_width - 12.0, 12.0))
-		var top: float = screen_anchor.y - PANEL_HEIGHT - 12.0
-		if top < 12.0:
-			top = minf(screen_anchor.y + 12.0, maxf(viewport_height - PANEL_HEIGHT - 12.0, 12.0))
+		var top: float = screen_anchor.y - panel_height - 12.0
+		var safe_top: float = 88.0
+		var safe_bottom: float = 88.0
+		var max_top: float = maxf(safe_top, viewport_height - panel_height - safe_bottom)
+		if top < safe_top:
+			top = minf(screen_anchor.y + 12.0, maxf(viewport_height - panel_height - 12.0, 12.0))
+		top = clampf(top, safe_top, max_top)
 		set_anchors_preset(Control.PRESET_TOP_LEFT)
 		offset_left = left
 		offset_top = top
 		offset_right = left + panel_width
-		offset_bottom = top + PANEL_HEIGHT
+		offset_bottom = top + panel_height
 	else:
 		var bottom_panel_width: float = minf(PANEL_WIDTH, maxf(viewport_width - 24.0, 240.0))
 		set_anchors_preset(Control.PRESET_CENTER_BOTTOM)
 		offset_left = -bottom_panel_width * 0.5
 		offset_right = bottom_panel_width * 0.5
-		offset_top = -170.0
-		offset_bottom = -28.0
+		offset_top = -panel_height - 88.0
+		offset_bottom = -88.0
 	layout_in_progress = false
 
 func show_text(value: String, suppress_action: bool = false) -> void:
 	show_pages([value], suppress_action)
 
 func show_pages(values: Array, suppress_action: bool = false, anchor: Vector2 = Vector2(-1.0, -1.0)) -> void:
+	_clear_choices()
 	pages = []
 	for value in values:
 		var page: String = str(value)
@@ -102,11 +123,33 @@ func show_pages(values: Array, suppress_action: bool = false, anchor: Vector2 = 
 	_layout_panel()
 	_render()
 
+func show_choice(values: Array, options: Array, suppress_action: bool = false, anchor: Vector2 = Vector2(-1.0, -1.0)) -> void:
+	show_pages(values, suppress_action, anchor)
+	for index in options.size():
+		var option_value: Variant = options[index]
+		var option: Dictionary = option_value if option_value is Dictionary else {"label": str(option_value), "value": index}
+		choice_options.append({"label": str(option.get("label", "")), "value": int(option.get("value", index))})
+		var label: Label = Label.new()
+		label.add_theme_font_size_override("font_size", 18)
+		label.custom_minimum_size = Vector2(0, 26)
+		choice_box.add_child(label)
+		choice_labels.append(label)
+	choice_active = not choice_options.is_empty() and open_state
+	choice_index = 0
+	if choice_active:
+		text_label.custom_minimum_size = Vector2(0, 88)
+		choice_box.visible = true
+	_layout_panel()
+	_render()
+
 func is_open() -> bool:
 	return open_state
 
 func text_complete() -> bool:
 	return open_state and visible_count >= current_text.length()
+
+func is_choice_open() -> bool:
+	return open_state and choice_active
 
 func handle_action() -> bool:
 	if not open_state:
@@ -123,6 +166,9 @@ func handle_action() -> bool:
 		set_process(true)
 		_render()
 		return true
+	if choice_active:
+		choice_requested.emit(int(choice_options[choice_index].get("value", choice_index)))
+		return true
 	close_dialogue()
 	return true
 
@@ -132,6 +178,7 @@ func close_dialogue() -> void:
 	open_state = false
 	visible = false
 	set_process(false)
+	_clear_choices()
 	closed.emit()
 
 func _process(delta: float) -> void:
@@ -149,18 +196,49 @@ func _input(event: InputEvent) -> void:
 	if not open_state or not event is InputEventKey:
 		return
 	var key_event: InputEventKey = event as InputEventKey
-	if not key_event.pressed or key_event.echo or key_event.keycode not in [KEY_F, KEY_E, KEY_Z, KEY_X, KEY_ENTER, KEY_KP_ENTER, KEY_SPACE]:
+	if not key_event.pressed or key_event.echo:
+		return
+	if choice_active and key_event.keycode in [KEY_UP, KEY_DOWN, KEY_LEFT, KEY_RIGHT]:
+		get_viewport().set_input_as_handled()
+		if visible_count < current_text.length():
+			visible_count = current_text.length()
+		else:
+			var delta: int = -1 if key_event.keycode in [KEY_UP, KEY_LEFT] else 1
+			choice_index = wrapi(choice_index + delta, 0, choice_options.size())
+		_render()
+		return
+	if key_event.keycode not in [KEY_F, KEY_E, KEY_Z, KEY_X, KEY_ENTER, KEY_KP_ENTER, KEY_SPACE]:
 		return
 	get_viewport().set_input_as_handled()
 	if ignore_next_action:
 		ignore_next_action = false
 		return
-	action_requested.emit()
+	if choice_active:
+		handle_action()
+	else:
+		action_requested.emit()
+
+func _clear_choices() -> void:
+	choice_active = false
+	choice_options.clear()
+	choice_labels.clear()
+	choice_index = 0
+	if choice_box != null:
+		for child in choice_box.get_children():
+			child.queue_free()
+		choice_box.visible = false
+	if text_label != null:
+		text_label.custom_minimum_size = Vector2(0, 112)
 
 func _render() -> void:
 	if text_label == null:
 		return
 	text_label.text = current_text
 	text_label.visible_characters = visible_count
+	for index in choice_labels.size():
+		var label: Label = choice_labels[index]
+		var option: Dictionary = choice_options[index]
+		label.text = ("▶ " if index == choice_index else "  ") + str(option.get("label", ""))
+		label.modulate = Color(1.0, 0.92, 0.5) if index == choice_index else Color.WHITE
 	if arrow_label != null:
 		arrow_label.visible = open_state and visible_count >= current_text.length()

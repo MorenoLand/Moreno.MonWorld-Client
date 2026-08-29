@@ -75,6 +75,7 @@ func _build_ui() -> void:
 	add_child(chat_box)
 	dialogue_overlay = DIALOGUE_SCRIPT.new()
 	dialogue_overlay.action_requested.connect(_on_dialogue_action)
+	dialogue_overlay.choice_requested.connect(_on_dialogue_choice)
 	add_child(dialogue_overlay)
 	title_label = Label.new()
 	title_label.position = Vector2(24, 18)
@@ -489,7 +490,11 @@ func _on_interaction_requested(dialogue: Dictionary) -> void:
 	if pages.is_empty():
 		pages = [str(dialogue.get("text", ""))]
 	pages = _resolve_dialogue_pages(pages)
-	dialogue_overlay.show_pages(pages, false, map_view.dialogue_anchor_screen(dialogue))
+	var choices: Array = dialogue.get("choices", [])
+	if choices.is_empty():
+		dialogue_overlay.show_pages(pages, false, map_view.dialogue_anchor_screen(dialogue))
+	else:
+		dialogue_overlay.show_choice(pages, choices, false, map_view.dialogue_anchor_screen(dialogue))
 	map_view.set_dialogue_active(true)
 	audio.play_effect("dialogue")
 
@@ -521,8 +526,36 @@ func _on_dialog_action_received(action: Dictionary) -> void:
 	server_dialogue_active = true
 	server_dialogue_sequence = int(action.get("flags", 0)) & 0xFF
 	map_view.set_dialogue_active(true)
-	dialogue_overlay.show_pages(pages, false, map_view.dialogue_anchor_screen({"object": actor}))
+	var anchor: Vector2 = map_view.dialogue_anchor_screen({"object": actor})
+	var choices: Array = _server_dialogue_choices(action_type, action.get("detail", PackedByteArray()))
+	if choices.is_empty():
+		dialogue_overlay.show_pages(pages, false, anchor)
+	else:
+		dialogue_overlay.show_choice(pages, choices, false, anchor)
 	audio.play_effect("dialogue")
+
+func _server_dialogue_choices(action_type: int, detail_value: Variant) -> Array:
+	if action_type == 0x05:
+		return [{"label": "Yes", "value": 1}, {"label": "No", "value": 0}]
+	if action_type != 0x23 or not detail_value is PackedByteArray:
+		return []
+	var detail: PackedByteArray = detail_value
+	var count: int = int(detail[0]) if not detail.is_empty() else 0
+	var choices: Array = []
+	for index in mini(count, 6):
+		var offset: int = 1 + index * 2
+		if offset + 1 >= detail.size():
+			break
+		var species_id: int = int(detail[offset]) | (int(detail[offset + 1]) << 8)
+		choices.append({"label": _pokemon_choice_name(species_id), "value": index + 1})
+	if choices.is_empty():
+		for index in 3:
+			choices.append({"label": "POKéMON %d" % (index + 1), "value": index + 1})
+	return choices
+
+func _pokemon_choice_name(species_id: int) -> String:
+	var names: Dictionary = {1: "BULBASAUR", 4: "CHARMANDER", 7: "SQUIRTLE", 252: "TREECKO", 255: "TORCHIC", 258: "MUDKIP"}
+	return str(names.get(species_id, "POKéMON #%d" % species_id))
 
 func _resolve_dialogue_pages(pages: Array) -> Array:
 	var character_name: String = str(GameState.current_character.get("name", ""))
@@ -575,6 +608,19 @@ func _on_dialogue_action() -> void:
 	if dialogue_overlay != null and dialogue_overlay.handle_action() and not dialogue_overlay.is_open():
 		map_view.set_dialogue_active(false)
 		map_view.restore_interaction_facing()
+
+func _on_dialogue_choice(value: int) -> void:
+	audio.play_effect("dialogue")
+	if server_dialogue_active:
+		if GameState.send_dialogue_action_response(server_dialogue_sequence, value):
+			if dialogue_overlay != null:
+				dialogue_overlay.close_dialogue()
+			map_view.restore_interaction_facing()
+		return
+	if dialogue_overlay != null:
+		dialogue_overlay.close_dialogue()
+	map_view.set_dialogue_active(false)
+	map_view.restore_interaction_facing()
 
 func _on_sound_requested(effect: String) -> void:
 	audio.play_effect(effect)

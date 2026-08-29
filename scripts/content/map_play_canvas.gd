@@ -433,6 +433,22 @@ func apply_server_position(x: int, y: int, elevation: int = 3, facing: int = 1) 
 	if authoritative_state:
 		authoritative_probe_pending = false
 		authoritative_probe_elapsed = 0.0
+		if movement_scripted:
+			if pending_map_id == map_id and next_position == pending_position:
+				movement_unvalidated = false
+				player_elevation = elevation
+				player_facing = facing
+				_update_player_texture()
+				queue_redraw()
+				return
+			if next_position == player_position:
+				player_elevation = elevation
+				player_facing = facing
+				has_spawn = true
+				_update_player_texture()
+				queue_redraw()
+				return
+			return
 		if movement_active and next_position == player_position:
 			_reset_movement_state()
 			authoritative_probe_pending = true
