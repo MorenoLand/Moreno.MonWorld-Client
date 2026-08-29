@@ -125,6 +125,29 @@ func set_authoritative_state(value: bool) -> void:
 	authoritative_probe_pending = false
 	authoritative_probe_elapsed = 0.0
 
+func _reset_movement_state(clear_direction: bool = false) -> void:
+	movement_active = false
+	movement_start = Vector2.ZERO
+	movement_target = Vector2.ZERO
+	movement_jump = false
+	movement_stair = false
+	movement_stair_behavior = 0
+	movement_door = false
+	door_progress = 0.0
+	movement_elapsed = 0.0
+	pending_map_id = ""
+	pending_position = player_position
+	pending_elevation = player_elevation
+	pending_warp = {}
+	movement_prediction_pending = false
+	move_request_pending = false
+	move_request_elapsed = 0.0
+	authoritative_probe_pending = false
+	authoritative_probe_elapsed = 0.0
+	movement_retry_elapsed = 0.0
+	if clear_direction:
+		held_direction = 0
+
 func set_animation_tick(value: int) -> void:
 	animation_tick = value
 	queue_redraw()
@@ -171,7 +194,6 @@ func set_map(texture: Texture2D, map_width: int, map_height: int, map_objects: A
 
 func set_world(world_value: Dictionary, selected_map_id: String = "") -> void:
 	var previous_map_id: String = map_id
-	var previous_regions: Dictionary = region_origins.duplicate()
 	regions = world_value.get("regions", []) if world_value.get("regions", []) is Array else []
 	region_origins = {}
 	for region_value in regions:
@@ -189,10 +211,8 @@ func set_world(world_value: Dictionary, selected_map_id: String = "") -> void:
 	map_id = next_map_id
 	_set_active_region(map_id)
 	var changed: bool = previous_map_id != map_id
-	if changed and not previous_regions.has(map_id):
-		movement_active = false
-		pending_map_id = ""
-		pending_warp = {}
+	if changed:
+		_reset_movement_state(true)
 		if authoritative_state:
 			has_spawn = false
 		elif not has_spawn:
@@ -210,7 +230,12 @@ func set_active_map(selected_map_id: String) -> bool:
 		return false
 	if not _ensure_region_rendered(selected_map_id):
 		return false
+	var changed: bool = map_id != selected_map_id
 	map_id = selected_map_id
+	if changed:
+		_reset_movement_state(true)
+		if authoritative_state:
+			has_spawn = false
 	_set_active_region(map_id)
 	_update_player_texture()
 	queue_redraw()
@@ -686,7 +711,12 @@ func _load_map(next_map_id: String, reset_spawn: bool = false) -> void:
 			_set_spawn()
 		call_deferred("_preload_connected_regions", connected_world, next_map_id, generation)
 		return
+	var changed: bool = map_id != next_map_id
 	map_id = next_map_id
+	if changed:
+		_reset_movement_state(true)
+		if authoritative_state:
+			has_spawn = false
 	var server_map: Dictionary = content._server_map_for_local_map(map_id, GameState.server_maps)
 	var result: Dictionary = content.prepare_server_map(map_id, server_map, GameState.server_maps) if content._is_server_custom_map(server_map) else content.prepare_map(map_id)
 	if not bool(result.get("ok", false)):
