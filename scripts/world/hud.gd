@@ -8,8 +8,6 @@ var location_label: Label
 var money_label: Label
 var time_label: Label
 var party_box: VBoxContainer
-var party_labels: Array = []
-var party_level_labels: Array = []
 var party_hp_bars: Array = []
 var party_icons: Array = []
 var party_hp_tweens: Dictionary = {}
@@ -70,63 +68,52 @@ func _build_ui() -> void:
 	info_box.add_child(time_label)
 	party_box = VBoxContainer.new()
 	party_box.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	party_box.offset_left = -156.0
+	party_box.offset_left = -68.0
 	party_box.offset_top = 100.0
 	party_box.offset_right = -16.0
-	party_box.custom_minimum_size = Vector2(140.0, 0.0)
-	party_box.add_theme_constant_override("separation", 5)
+	party_box.custom_minimum_size = Vector2(52.0, 0.0)
+	party_box.add_theme_constant_override("separation", 3)
 	party_box.mouse_filter = Control.MOUSE_FILTER_PASS
 	add_child(party_box)
 	var party_title: Label = Label.new()
 	party_title.text = "PARTY"
-	party_title.add_theme_font_size_override("font_size", 11)
+	party_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	party_title.add_theme_font_size_override("font_size", 9)
 	party_title.add_theme_color_override("font_color", Color("b8cbe0"))
 	party_box.add_child(party_title)
 	for index in range(PARTY_COUNT):
 		var slot: PanelContainer = PanelContainer.new()
-		slot.custom_minimum_size = Vector2(140.0, 58.0)
+		slot.custom_minimum_size = Vector2(52.0, 52.0)
 		slot.mouse_filter = Control.MOUSE_FILTER_STOP
-		slot.add_theme_stylebox_override("panel", _panel_style(Color("10151eb8"), Color("5f7185")))
+		var slot_style: StyleBoxFlat = _panel_style(Color("10151eb8"), Color("5f7185"))
+		slot_style.content_margin_left = 0.0
+		slot_style.content_margin_top = 0.0
+		slot_style.content_margin_right = 0.0
+		slot_style.content_margin_bottom = 0.0
+		slot.add_theme_stylebox_override("panel", slot_style)
 		var margin: MarginContainer = MarginContainer.new()
-		margin.add_theme_constant_override("margin_left", 5)
+		margin.add_theme_constant_override("margin_left", 4)
 		margin.add_theme_constant_override("margin_top", 4)
-		margin.add_theme_constant_override("margin_right", 5)
+		margin.add_theme_constant_override("margin_right", 4)
 		margin.add_theme_constant_override("margin_bottom", 4)
 		slot.add_child(margin)
-		var row: HBoxContainer = HBoxContainer.new()
-		row.add_theme_constant_override("separation", 4)
-		margin.add_child(row)
+		var stack: VBoxContainer = VBoxContainer.new()
+		stack.add_theme_constant_override("separation", 0)
+		margin.add_child(stack)
 		var icon: TextureRect = TextureRect.new()
-		icon.custom_minimum_size = Vector2(36.0, 36.0)
+		icon.custom_minimum_size = Vector2(44.0, 40.0)
 		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 		icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		row.add_child(icon)
-		var details: VBoxContainer = VBoxContainer.new()
-		details.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		details.add_theme_constant_override("separation", 0)
-		details.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		row.add_child(details)
-		var label: Label = Label.new()
-		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-		label.add_theme_font_size_override("font_size", 10)
-		details.add_child(label)
-		var level_label: Label = Label.new()
-		level_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		level_label.add_theme_font_size_override("font_size", 9)
-		level_label.add_theme_color_override("font_color", Color("b8cbe0"))
-		details.add_child(level_label)
+		stack.add_child(icon)
 		var hp_bar: ProgressBar = ProgressBar.new()
 		hp_bar.show_percentage = false
-		hp_bar.custom_minimum_size = Vector2(0.0, 6.0)
+		hp_bar.custom_minimum_size = Vector2(44.0, 4.0)
 		hp_bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		hp_bar.add_theme_stylebox_override("background", _panel_style(Color("26303d"), Color("26303d"), 3, 0))
-		hp_bar.add_theme_stylebox_override("fill", _panel_style(Color("5ccf77"), Color("5ccf77"), 3, 0))
-		details.add_child(hp_bar)
-		party_labels.append(label)
-		party_level_labels.append(level_label)
+		hp_bar.add_theme_stylebox_override("background", _panel_style(Color("26303d"), Color("26303d"), 2, 0))
+		hp_bar.add_theme_stylebox_override("fill", _panel_style(Color("5ccf77"), Color("5ccf77"), 2, 0))
+		stack.add_child(hp_bar)
 		party_hp_bars.append(hp_bar)
 		party_icons.append(icon)
 		party_slots.append(slot)
@@ -458,14 +445,12 @@ func _format_money(value: int) -> String:
 func _refresh_party_slot(index: int, member: Dictionary) -> void:
 	if index < 0 or index >= party_slots.size():
 		return
-	var label: Label = party_labels[index] as Label
-	var level_label: Label = party_level_labels[index] as Label
+	var slot: PanelContainer = party_slots[index] as PanelContainer
 	var hp_bar: ProgressBar = party_hp_bars[index] as ProgressBar
 	var icon: TextureRect = party_icons[index] as TextureRect
 	var species_id: int = _party_species_id(member)
 	if species_id <= 0:
-		label.text = ""
-		level_label.text = ""
+		slot.tooltip_text = ""
 		icon.texture = null
 		icon.visible = false
 		hp_bar.value = 0.0
@@ -480,8 +465,7 @@ func _refresh_party_slot(index: int, member: Dictionary) -> void:
 	if max_hp <= 0:
 		max_hp = maxi(current_hp, 1)
 	var target_hp: float = clampf(float(current_hp), 0.0, float(max_hp))
-	label.text = name.left(12)
-	level_label.text = "Lv %d" % level if level > 0 else ""
+	slot.tooltip_text = "%s\nLv %d\n%d / %d HP" % [name, level, current_hp, max_hp]
 	var sprite: Dictionary = current_content.battle_pokemon_sprite(species_id, false) if current_content != null else {}
 	icon.texture = sprite.get("texture") as Texture2D
 	icon.visible = icon.texture != null
@@ -489,7 +473,7 @@ func _refresh_party_slot(index: int, member: Dictionary) -> void:
 	hp_bar.max_value = max_hp
 	var fill_color: Color = Color("d94c5a") if target_hp * 5.0 <= max_hp else Color("e6bd5a") if target_hp * 2.0 <= max_hp else Color("5ccf77")
 	hp_bar.add_theme_stylebox_override("fill", _panel_style(fill_color, fill_color, 3, 0))
-	hp_bar.tooltip_text = "%s\n%d / %d HP" % [name, current_hp, max_hp]
+	hp_bar.tooltip_text = slot.tooltip_text
 	if not bool(hp_bar.get_meta("initialized", false)):
 		hp_bar.value = target_hp
 		hp_bar.set_meta("initialized", true)

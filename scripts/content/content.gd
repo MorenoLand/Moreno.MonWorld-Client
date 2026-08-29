@@ -65,7 +65,6 @@ var battle_move_name_cache: Dictionary = {}
 var battle_move_info_cache: Dictionary = {}
 var follower_sprite_cache: Dictionary = {}
 var string_catalog: Dictionary = {}
-var rom_ascii_cache: String = ""
 
 static func from_rom_path(path: String) -> Dictionary:
 	var file: FileAccess = FileAccess.open(path, FileAccess.READ)
@@ -485,42 +484,21 @@ func _battle_rom_tables() -> Dictionary:
 		return battle_table_cache
 	if rom_data.is_empty():
 		return {"pending": true}
-	var names: Array = []
-	match str(source_profile.get("id", "")).to_lower():
-		"pokemon-fire-red": names = ["pokemon firered version", "pokemon fire red version", "pokemon fire version"]
-		"pokemon-leaf-green": names = ["pokemon leafgreen version", "pokemon leaf green version", "pokemon leaf version"]
-		"pokemon-emerald": names = ["pokemon emerald version"]
-		"pokemon-ruby": names = ["pokemon ruby version"]
-		"pokemon-sapphire": names = ["pokemon sapphire version"]
-		_:
-			names = []
-	var generic_names: Array = ["pokemon emerald version", "pokemon firered version", "pokemon leafgreen version", "pokemon red version", "pokemon green version", "pokemon ruby version", "pokemon sapphire version", "pokemon fire version", "pokemon leaf version"]
-	for generic_name in generic_names:
-		if not names.has(generic_name):
-			names.append(generic_name)
-	var name_offset: int = -1
-	for game_name in names:
-		name_offset = _find_rom_ascii(str(game_name))
-		if name_offset >= 0:
-			break
-	if name_offset < 8:
+	var header_offset: int = 0x100
+	if not _valid_range(header_offset, 76):
 		battle_table_cache = {"available": false}
 		battle_tables_scanned = true
 		return battle_table_cache
-	var header_offset: int = name_offset - 8
 	var tables: Dictionary = {"header_offset": header_offset, "front_sprite_table": _read_rom_pointer(header_offset + 40), "back_sprite_table": _read_rom_pointer(header_offset + 44), "palette_table": _read_rom_pointer(header_offset + 48), "species_name_table": _read_rom_pointer(header_offset + 68), "move_name_table": _read_rom_pointer(header_offset + 72), "move_table": _format_int("battle_move_table_offset", -1)}
+	if not _valid_range(int(tables.get("front_sprite_table", -1)), 8) or not _valid_range(int(tables.get("back_sprite_table", -1)), 8) or not _valid_range(int(tables.get("palette_table", -1)), 8) or not _valid_range(int(tables.get("species_name_table", -1)), 11) or not _valid_range(int(tables.get("move_name_table", -1)), 13):
+		battle_table_cache = {"available": false}
+		battle_tables_scanned = true
+		return battle_table_cache
 	battle_table_cache = tables
 	battle_tables_scanned = true
 	battle_name_cache.clear()
 	battle_move_name_cache.clear()
 	return battle_table_cache
-
-func _find_rom_ascii(value: String) -> int:
-	if value.is_empty() or rom_data.is_empty():
-		return -1
-	if rom_ascii_cache.is_empty():
-		rom_ascii_cache = rom_data.get_string_from_ascii().to_lower()
-	return rom_ascii_cache.find(value.to_lower())
 
 func _battle_move_type_name(move_type: int) -> String:
 	match move_type:

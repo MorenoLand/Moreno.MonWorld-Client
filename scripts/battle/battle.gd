@@ -44,63 +44,66 @@ func _build_ui() -> void:
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	var world_tint := ColorRect.new()
 	world_tint.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	world_tint.color = Color(0.02, 0.04, 0.07, 0.18)
+	world_tint.color = Color(0.01, 0.025, 0.035, 0.64)
 	world_tint.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(world_tint)
 	var stage := Control.new()
-	stage.set_anchors_preset(Control.PRESET_CENTER)
 	stage.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	stage.mouse_filter = Control.MOUSE_FILTER_STOP
 	add_child(stage)
-	stage_root = Control.new()
-	stage_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	stage_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	stage.add_child(stage_root)
-	var title := Label.new()
-	title.text = "BATTLE"
-	title.position = Vector2(28.0, 18.0)
-	title.add_theme_font_size_override("font_size", 22)
-	stage_root.add_child(title)
+	var field := Panel.new()
+	field.anchor_left = 0.11
+	field.anchor_top = 0.18
+	field.anchor_right = 0.89
+	field.anchor_bottom = 0.95
+	field.clip_contents = true
+	field.mouse_filter = Control.MOUSE_FILTER_STOP
+	field.add_theme_stylebox_override("panel", _panel_style(Color("0b1820"), Color("6c8493"), 5, 2))
+	stage.add_child(field)
+	stage_root = field
+	var backdrop := TextureRect.new()
+	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	backdrop.texture = _make_battle_backdrop()
+	backdrop.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	backdrop.stretch_mode = TextureRect.STRETCH_SCALE
+	backdrop.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stage_root.add_child(backdrop)
+	var field_shade := ColorRect.new()
+	field_shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	field_shade.color = Color(0.02, 0.035, 0.025, 0.06)
+	field_shade.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stage_root.add_child(field_shade)
 	state_label = Label.new()
-	state_label.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	state_label.offset_left = -300.0
-	state_label.offset_top = 18.0
-	state_label.offset_right = 300.0
-	state_label.offset_bottom = 48.0
-	state_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	state_label.add_theme_font_size_override("font_size", 14)
-	state_label.add_theme_color_override("font_color", Color("c8d7e8"))
+	state_label.visible = false
+	stage_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	stage_root.add_child(state_label)
 	var opponent_card := _make_mon_card(true)
-	opponent_card.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	opponent_card.offset_left = -306.0
-	opponent_card.offset_top = 70.0
-	opponent_card.offset_right = -28.0
-	opponent_card.offset_bottom = 176.0
+	opponent_card.anchor_left = 0.025
+	opponent_card.anchor_top = 0.07
+	opponent_card.anchor_right = 0.39
+	opponent_card.anchor_bottom = 0.26
 	stage_root.add_child(opponent_card)
 	var player_card := _make_mon_card(false)
-	player_card.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	player_card.offset_left = 28.0
-	player_card.offset_top = -168.0
-	player_card.offset_right = 350.0
-	player_card.offset_bottom = -42.0
+	player_card.anchor_left = 0.58
+	player_card.anchor_top = 0.55
+	player_card.anchor_right = 0.975
+	player_card.anchor_bottom = 0.76
 	stage_root.add_child(player_card)
 	opponent_sprite = _make_sprite()
-	opponent_sprite.set_anchors_preset(Control.PRESET_CENTER)
-	opponent_sprite.offset_left = 135.0
-	opponent_sprite.offset_top = -195.0
-	opponent_sprite.offset_right = 415.0
-	opponent_sprite.offset_bottom = 30.0
-	opponent_sprite.pivot_offset = Vector2(140.0, 112.0)
+	opponent_sprite.anchor_left = 0.64
+	opponent_sprite.anchor_top = 0.11
+	opponent_sprite.anchor_right = 0.94
+	opponent_sprite.anchor_bottom = 0.53
+	opponent_sprite.pivot_offset = Vector2(130.0, 100.0)
 	opponent_sprite.z_index = 1
 	stage_root.add_child(opponent_sprite)
 	player_sprite = _make_sprite()
-	player_sprite.set_anchors_preset(Control.PRESET_CENTER)
-	player_sprite.offset_left = -415.0
-	player_sprite.offset_top = -30.0
-	player_sprite.offset_right = -135.0
-	player_sprite.offset_bottom = 195.0
-	player_sprite.pivot_offset = Vector2(140.0, 112.0)
+	player_sprite.anchor_left = 0.12
+	player_sprite.anchor_top = 0.32
+	player_sprite.anchor_right = 0.48
+	player_sprite.anchor_bottom = 0.78
+	player_sprite.pivot_offset = Vector2(150.0, 110.0)
 	player_sprite.z_index = 1
 	stage_root.add_child(player_sprite)
 	effects_layer = Control.new()
@@ -109,27 +112,25 @@ func _build_ui() -> void:
 	effects_layer.z_index = 2
 	stage_root.add_child(effects_layer)
 	var log_panel := PanelContainer.new()
-	log_panel.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
-	log_panel.offset_left = 350.0
-	log_panel.offset_top = -112.0
-	log_panel.offset_right = 700.0
-	log_panel.offset_bottom = -30.0
-	log_panel.add_theme_stylebox_override("panel", _panel_style(Color(0.02, 0.04, 0.07, 0.72), Color("536a84"), 8, 1))
+	log_panel.anchor_left = 0.55
+	log_panel.anchor_top = 0.78
+	log_panel.anchor_right = 0.975
+	log_panel.anchor_bottom = 0.97
+	log_panel.add_theme_stylebox_override("panel", _panel_style(Color(0.035, 0.055, 0.04, 0.88), Color("536a64"), 5, 1))
 	stage_root.add_child(log_panel)
 	log_view = RichTextLabel.new()
 	log_view.bbcode_enabled = false
 	log_view.fit_content = false
 	log_view.scroll_active = false
-	log_view.custom_minimum_size = Vector2(0.0, 80.0)
+	log_view.custom_minimum_size = Vector2(0.0, 72.0)
 	log_view.add_theme_font_size_override("normal_font_size", 13)
 	log_panel.add_child(log_view)
 	var action_panel := PanelContainer.new()
-	action_panel.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
-	action_panel.offset_left = -306.0
-	action_panel.offset_top = -202.0
-	action_panel.offset_right = -28.0
-	action_panel.offset_bottom = -30.0
-	action_panel.add_theme_stylebox_override("panel", _panel_style(Color(0.02, 0.04, 0.07, 0.94), Color("7186a2"), 8, 1))
+	action_panel.anchor_left = 0.025
+	action_panel.anchor_top = 0.74
+	action_panel.anchor_right = 0.535
+	action_panel.anchor_bottom = 0.97
+	action_panel.add_theme_stylebox_override("panel", _panel_style(Color(0.035, 0.055, 0.04, 0.94), Color("71866f"), 5, 1))
 	stage_root.add_child(action_panel)
 	action_box = VBoxContainer.new()
 	action_box.add_theme_constant_override("separation", 5)
@@ -137,11 +138,12 @@ func _build_ui() -> void:
 	close_button = _make_button("Return to world")
 	close_button.set_anchors_preset(Control.PRESET_TOP_RIGHT)
 	close_button.offset_left = -184.0
-	close_button.offset_top = 16.0
-	close_button.offset_right = -28.0
-	close_button.offset_bottom = 50.0
+	close_button.offset_top = 12.0
+	close_button.offset_right = -12.0
+	close_button.offset_bottom = 46.0
 	close_button.pressed.connect(_return_to_world)
 	close_button.disabled = true
+	close_button.visible = false
 	stage_root.add_child(close_button)
 	flash_overlay = ColorRect.new()
 	flash_overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -149,6 +151,43 @@ func _build_ui() -> void:
 	flash_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	flash_overlay.z_index = 20
 	add_child(flash_overlay)
+
+func _make_battle_backdrop() -> Texture2D:
+	var width: int = 320
+	var height: int = 180
+	var image := Image.create(width, height, false, Image.FORMAT_RGBA8)
+	for y in range(78):
+		var amount: float = float(y) / 77.0
+		image.fill_rect(Rect2i(0, y, width, 1), Color("31bcea").lerp(Color("b9e9df"), amount))
+	image.fill_rect(Rect2i(0, 78, width, 12), Color("6dbd6b"))
+	for x in range(-8, width + 16, 16):
+		_paint_ellipse(image, Vector2i(x + 8, 78 + int(x / 16) % 3), Vector2i(13, 11), Color("346b51"))
+		_paint_ellipse(image, Vector2i(x + 8, 73 + int(x / 16) % 2), Vector2i(9, 10), Color("4d8760"))
+	for y in range(90, height):
+		var amount: float = float(y - 90) / float(height - 90)
+		image.fill_rect(Rect2i(0, y, width, 1), Color("dce8ad").lerp(Color("769754"), amount))
+	image.fill_rect(Rect2i(0, 88, width, 3), Color("4cae55"))
+	_paint_ellipse(image, Vector2i(249, 102), Vector2i(62, 18), Color("174e2d"))
+	_paint_ellipse(image, Vector2i(249, 99), Vector2i(58, 15), Color("278744"))
+	_paint_ellipse(image, Vector2i(249, 98), Vector2i(47, 11), Color("5ec05b"))
+	_paint_ellipse(image, Vector2i(249, 98), Vector2i(37, 8), Color("b5ad78"))
+	_paint_ellipse(image, Vector2i(98, 177), Vector2i(96, 38), Color("133e27"))
+	_paint_ellipse(image, Vector2i(98, 170), Vector2i(91, 32), Color("237c3b"))
+	_paint_ellipse(image, Vector2i(98, 166), Vector2i(76, 26), Color("49af50"))
+	_paint_ellipse(image, Vector2i(98, 164), Vector2i(59, 20), Color("a9a16e"))
+	return ImageTexture.create_from_image(image)
+
+func _paint_ellipse(image: Image, center: Vector2i, radii: Vector2i, color: Color) -> void:
+	var left: int = maxi(0, center.x - radii.x)
+	var top: int = maxi(0, center.y - radii.y)
+	var right: int = mini(image.get_width() - 1, center.x + radii.x)
+	var bottom: int = mini(image.get_height() - 1, center.y + radii.y)
+	for y in range(top, bottom + 1):
+		var normalized_y: float = float(y - center.y) / float(radii.y)
+		for x in range(left, right + 1):
+			var normalized_x: float = float(x - center.x) / float(radii.x)
+			if normalized_x * normalized_x + normalized_y * normalized_y <= 1.0:
+				image.set_pixel(x, y, color)
 
 func _make_mon_card(opponent: bool) -> PanelContainer:
 	var card := PanelContainer.new()
@@ -244,7 +283,9 @@ func _render_state() -> void:
 	_update_mon_card(player_name_label, player_level_label, player_hp_bar, player_hp_label, player, "player")
 	_update_sprite(opponent_sprite, opponent, false)
 	_update_sprite(player_sprite, player, true)
-	close_button.disabled = not bool(state.get("battle_complete", false))
+	var battle_complete: bool = bool(state.get("battle_complete", false))
+	close_button.disabled = not battle_complete
+	close_button.visible = battle_complete
 	_render_actions()
 
 func _active_mon(party: Array, active_slot: int) -> Dictionary:
