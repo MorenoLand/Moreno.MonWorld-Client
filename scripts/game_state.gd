@@ -182,6 +182,10 @@ func send_input(direction: String, source_x: int = -1, source_y: int = -1, runni
 	var payload: PackedByteArray = GAME_PROTOCOL_SCRIPT.encode_movement(x, y, direction, running)
 	return not payload.is_empty() and game_session.send_packet(GAME_PROTOCOL_SCRIPT.MOVEMENT, payload)
 
+func send_face_direction(direction: String) -> bool:
+	var payload: PackedByteArray = GAME_PROTOCOL_SCRIPT.encode_face_direction(direction)
+	return not payload.is_empty() and game_session.send_packet(GAME_PROTOCOL_SCRIPT.FACE_DIRECTION, payload)
+
 func send_entity_interact(entity_id: int, token: int = 0) -> bool:
 	return game_session.send_packet(GAME_PROTOCOL_SCRIPT.ENTITY_INTERACT, GAME_PROTOCOL_SCRIPT.encode_entity_interact(entity_id, token))
 

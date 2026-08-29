@@ -589,11 +589,15 @@ func interact() -> void:
 			if not bool(entity.get("npc", false)) or str(entity.get("map_id", "")) != map_id or int(entity.get("x", -1)) != npc_target.x or int(entity.get("y", -1)) != npc_target.y:
 				continue
 			if authoritative_state:
+				if not GameState.send_face_direction(_direction_name(player_facing)):
+					return
 				if not GameState.send_entity_interact(int(entity.get("entity_id", 0)), 0):
 					return
 			_face_world_entity(index, player_facing)
 			return
 	if authoritative_state:
+		if not GameState.send_face_direction(_direction_name(player_facing)):
+			return
 		GameState.send_tile_interact()
 		return
 	var interaction: Dictionary = content.interaction_at(map_id, player_position.x, player_position.y, player_facing, player_elevation, objects)
