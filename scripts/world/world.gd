@@ -22,6 +22,7 @@ var transition_overlay: ColorRect
 var transition_tween: Tween
 var transition_reveal_pending: bool = false
 var transition_map_ready: bool = false
+var transition_screen_ready: bool = false
 var animation_tick: int = 0
 var animation_elapsed: float = 0.0
 var held_input: String = ""
@@ -54,6 +55,7 @@ func _build_ui() -> void:
 	map_view.set_authoritative_state(true)
 	map_view.interaction_requested.connect(_on_interaction_requested)
 	map_view.sound_requested.connect(_on_sound_requested)
+	map_view.location_changed.connect(_on_local_location_changed)
 	add_child(map_view)
 	map_view.set_input_enabled(true)
 	audio = AUDIO_SCRIPT.new()
@@ -126,7 +128,7 @@ func _on_map_load(value: Dictionary) -> void:
 		status_label.text = "OpenMMO did not provide a renderable map"
 		return
 	snapshot = {"map_id": map_id, "server_map": value, "party": GameState.current_character.get("party", []), "players": []}
-	entities.clear()
+	_retain_server_entities_for_map(map_id)
 	if hud != null:
 		hud.set_state(GameState.content, map_id, snapshot, snapshot.party)
 	if not _load_map_texture(map_id, int(value.get("width", 0)), int(value.get("height", 0))):
@@ -135,8 +137,7 @@ func _on_map_load(value: Dictionary) -> void:
 	_sync_map_entities()
 	GameState.call_deferred("complete_map_load", str(value.get("key", "")))
 	transition_map_ready = true
-	if transition_reveal_pending:
-		_reveal_screen_transition()
+	_try_reveal_screen_transition()
 
 func _load_map_texture(map_id: String, expected_width: int = 0, expected_height: int = 0) -> bool:
 	if GameState.content == null or map_id.is_empty():
@@ -197,42 +198,93 @@ func _preload_connected_regions(world_value: Dictionary, root_map_id: String, ge
 		region["ready"] = true
 		if map_view != null:
 			map_view.refresh_world_bounds()
+		_sync_map_entities()
 
 func _on_entity_update(value: Dictionary) -> void:
+	if value.has("remove_entity_id"):
+		var removed_entity_id: int = int(value.get("remove_entity_id", 0))
+		var remove_keys: Array = []
+		for key in entities:
+			var stored_value: Variant = entities[key]
+			if stored_value is Dictionary and int((stored_value as Dictionary).get("entity_id", (stored_value as Dictionary).get("character_id", 0))) == removed_entity_id:
+				remove_keys.append(key)
+		for key in remove_keys:
+			entities.erase(key)
+		_sync_map_entities()
+		return
 	var player: Variant = value.get("player")
 	if player is Dictionary:
 		var entity: Dictionary = player
 		var key := str(entity.get("entity_id", entity.get("character_id", entity.get("user_id", 0))))
 		var is_local: bool = bool(value.get("local", false)) or int(entity.get("character_id", 0)) == selected_character_id
-		var incoming_map_id: String = str(entity.get("map_id", ""))
 		var merged: Dictionary = {}
 		var existing: Variant = entities.get(key, {})
 		if existing is Dictionary:
 			merged = (existing as Dictionary).duplicate(true)
 		merged.merge(entity, true)
 		entities[key] = merged
-		if is_local and not incoming_map_id.is_empty() and map_view != null and incoming_map_id != map_view.map_id:
-			if map_view.set_active_map(incoming_map_id) or _load_map_texture(incoming_map_id):
-				snapshot["map_id"] = incoming_map_id
-				title_label.text = "Map: %s" % incoming_map_id
+		if is_local and map_view != null:
+			var local_elevation: int = map_view.player_elevation
+			map_view.set_player_state(int(entity.get("x", 0)), int(entity.get("y", 0)), int(entity.get("elevation", local_elevation)), int(entity.get("facing", 1)))
 		_sync_map_entities()
+
+func _on_local_location_changed(next_map_id: String, x: int, y: int) -> void:
+	var facing: int = map_view.player_facing if map_view != null else int(GameState.current_character.get("facing", 1))
+	var elevation: int = map_view.player_elevation if map_view != null else int(GameState.current_character.get("elevation", 3))
+	var updated: bool = false
+	for key in entities:
+		var value: Variant = entities[key]
+		if not value is Dictionary:
+			continue
+		var entity: Dictionary = value
+		if int(entity.get("character_id", 0)) != selected_character_id:
+			continue
+		entity = entity.duplicate(true)
+		entity["x"] = x
+		entity["y"] = y
+		entity["map_id"] = next_map_id
+		entity["elevation"] = elevation
+		entity["facing"] = facing
+		entities[key] = entity
+		updated = true
+	if not updated:
+		entities[str(selected_character_id)] = {"entity_id": selected_character_id, "character_id": selected_character_id, "map_id": next_map_id, "x": x, "y": y, "elevation": elevation, "facing": facing}
+	GameState.current_character["x"] = x
+	GameState.current_character["y"] = y
+	GameState.current_character["facing"] = facing
+	if map_view != null:
+		map_view.set_player_state(x, y, elevation, facing)
 
 func _on_render_screen(visible: bool) -> void:
 	if not visible:
+		if map_view != null:
+			map_view.set_transition_active(true)
+			map_view.set_input_enabled(false)
 		transition_reveal_pending = true
 		transition_map_ready = false
+		transition_screen_ready = false
 		_cover_screen_transition()
 		return
 	if transition_reveal_pending:
-		if transition_map_ready:
-			_reveal_screen_transition()
+		transition_screen_ready = true
+		_try_reveal_screen_transition()
 		return
 	if transition_overlay != null:
 		transition_overlay.visible = false
 	if map_view != null:
 		map_view.visible = true
+		map_view.set_transition_active(false)
+		map_view.set_input_enabled(true)
 	if hud != null:
 		hud.visible = true
+
+func _try_reveal_screen_transition() -> void:
+	if not transition_reveal_pending or not transition_map_ready or not transition_screen_ready:
+		return
+	_reveal_screen_transition()
+	if map_view != null:
+		map_view.set_transition_active(false)
+		map_view.set_input_enabled(true)
 
 func _cover_screen_transition() -> void:
 	if transition_overlay == null:
@@ -240,18 +292,16 @@ func _cover_screen_transition() -> void:
 	if transition_tween != null:
 		transition_tween.kill()
 	transition_overlay.visible = true
-	transition_tween = create_tween()
-	transition_tween.tween_property(transition_overlay, "color", Color(0.0, 0.0, 0.0, 1.0), 0.10)
-	transition_tween.tween_callback(func() -> void:
-		if map_view != null:
-			map_view.visible = false
-		if hud != null:
-			hud.visible = false
-	)
+	transition_overlay.color = Color(0.0, 0.0, 0.0, 1.0)
+	if map_view != null:
+		map_view.visible = false
+	if hud != null:
+		hud.visible = false
 
 func _reveal_screen_transition() -> void:
 	transition_reveal_pending = false
 	transition_map_ready = false
+	transition_screen_ready = false
 	if map_view != null:
 		map_view.visible = true
 	if hud != null:
@@ -276,9 +326,18 @@ func _sync_map_entities() -> void:
 	for key in entities:
 		var entity: Dictionary = entities[key]
 		players.append(entity)
-		if int(entity.get("character_id", 0)) == selected_character_id:
-			map_view.set_player_state(int(entity.get("x", 0)), int(entity.get("y", 0)), int(entity.get("elevation", 3)), int(entity.get("facing", 1)))
 	map_view.set_world_entities(players, selected_character_id)
+
+func _retain_server_entities_for_map(target_map_id: String) -> void:
+	var retained: Dictionary = {}
+	for key in entities:
+		var value: Variant = entities[key]
+		if not value is Dictionary:
+			continue
+		var entity: Dictionary = value
+		if str(entity.get("map_id", "")) == target_map_id:
+			retained[key] = entity
+	entities = retained
 
 func _process(_delta: float) -> void:
 	return

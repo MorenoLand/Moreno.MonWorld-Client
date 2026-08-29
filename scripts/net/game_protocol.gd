@@ -9,6 +9,7 @@ const MOVEMENT: int = 0x06
 const MAP_LOADED_ACK: int = 0x33
 const FACE_DIRECTION: int = 0x07
 const CHAT_SEND: int = 0x08
+const ENTITY_LEAVE: int = 0x08
 const CHAT_MESSAGE: int = 0x09
 const DIALOG_STATE: int = 0x0E
 const SERVER_NOTICE: int = 0x74
@@ -257,11 +258,16 @@ static func decode_entity_face_turn(payload: PackedByteArray) -> Dictionary:
 		entity["facing"] = direction_ordinal + 1
 	return {"ok": not reader.failed and reader.remaining() == 0, "error": "OpenMMO face-turn packet is malformed" if reader.failed or reader.remaining() != 0 else "", "entity": entity}
 
+static func decode_entity_leave(payload: PackedByteArray) -> Dictionary:
+	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
+	var entity: Dictionary = {"entity_id": reader.read_s64_le()}
+	return {"ok": not reader.failed and reader.remaining() == 0, "error": "OpenMMO entity-leave packet is malformed" if reader.failed or reader.remaining() != 0 else "", "entity": entity}
+
 static func decode_npc_spawn(payload: PackedByteArray) -> Dictionary:
 	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
 	var entity: Dictionary = {"entity_id": reader.read_s64_le(), "sprite_region_id": reader.read_u8(), "graphics_id": reader.read_u16_le(), "unk3": reader.read_u16_le(), "unk4": reader.read_u16_le(), "region_id": reader.read_u8(), "bank_id": reader.read_u8(), "wire_map_id": reader.read_u8(), "x": reader.read_u16_le(), "y": reader.read_u16_le()}
-	var raw_facing: int = reader.read_u8()
 	entity["unk5"] = reader.read_u8()
+	var raw_facing: int = reader.read_u8()
 	entity["facing"] = raw_facing + 1 if raw_facing <= 3 else 1
 	entity["unk6"] = reader.read_u16_le()
 	entity["npc"] = true
@@ -271,9 +277,9 @@ static func decode_npc_spawn(payload: PackedByteArray) -> Dictionary:
 static func decode_npc_update(payload: PackedByteArray) -> Dictionary:
 	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
 	var entity: Dictionary = {"entity_id": reader.read_s64_le(), "region_id": reader.read_u8(), "bank_id": reader.read_u8(), "wire_map_id": reader.read_u8(), "x": reader.read_u16_le(), "y": reader.read_u16_le()}
+	entity["movement_mode"] = reader.read_u8()
 	var raw_facing: int = reader.read_u8()
 	entity["facing"] = raw_facing + 1 if raw_facing <= 3 else 1
-	entity["unk"] = reader.read_u8()
 	entity["npc"] = true
 	entity["blocks_movement"] = true
 	return {"ok": not reader.failed and reader.remaining() == 0, "error": "OpenMMO NPC update packet is malformed" if reader.failed or reader.remaining() != 0 else "", "entity": entity}

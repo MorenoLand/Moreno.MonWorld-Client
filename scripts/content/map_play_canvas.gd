@@ -52,13 +52,11 @@ var input_enabled: bool = false
 var player_facing: int = 1
 var held_direction: int = 0
 var movement_retry_elapsed: float = 0.0
-var move_request_pending: bool = false
-var move_request_elapsed: float = 0.0
-var movement_prediction_pending: bool = false
 var authoritative_probe_pending: bool = false
 var authoritative_probe_elapsed: float = 0.0
 var world_entities: Array = []
 var authoritative_state: bool = false
+var transition_active: bool = false
 var dialogue_active: bool = false
 var resize_redraw_pending: bool = false
 var connected_preload_generation: int = 0
@@ -96,10 +94,21 @@ func set_input_enabled(value: bool) -> void:
 	if value:
 		call_deferred("_restore_input_focus")
 	else:
-		held_direction = 0
-		movement_retry_elapsed = 0.0
+		_reset_movement_state(true)
 		authoritative_probe_pending = false
 		authoritative_probe_elapsed = 0.0
+
+func set_transition_active(value: bool) -> void:
+	if transition_active == value:
+		return
+	transition_active = value
+	if value:
+		_reset_movement_state(true)
+		if authoritative_state:
+			has_spawn = false
+	else:
+		if input_enabled:
+			call_deferred("_restore_input_focus")
 
 func _restore_input_focus() -> void:
 	if input_enabled and is_inside_tree():
@@ -120,8 +129,6 @@ func set_dialogue_active(value: bool) -> void:
 func set_authoritative_state(value: bool) -> void:
 	authoritative_state = value
 	held_direction = 0
-	move_request_pending = false
-	move_request_elapsed = 0.0
 	authoritative_probe_pending = false
 	authoritative_probe_elapsed = 0.0
 
@@ -139,9 +146,6 @@ func _reset_movement_state(clear_direction: bool = false) -> void:
 	pending_position = player_position
 	pending_elevation = player_elevation
 	pending_warp = {}
-	movement_prediction_pending = false
-	move_request_pending = false
-	move_request_elapsed = 0.0
 	authoritative_probe_pending = false
 	authoritative_probe_elapsed = 0.0
 	movement_retry_elapsed = 0.0
@@ -234,6 +238,8 @@ func set_active_map(selected_map_id: String) -> bool:
 	map_id = selected_map_id
 	if changed:
 		_reset_movement_state(true)
+		if authoritative_state:
+			has_spawn = false
 	_set_active_region(map_id)
 	_update_player_texture()
 	queue_redraw()
@@ -364,42 +370,23 @@ func _camera_origin(world_position: Vector2, camera_world_size: Vector2) -> Vect
 func set_player_state(x: int, y: int, elevation: int = 3, facing: int = 1) -> void:
 	var next_position: Vector2i = Vector2i(x, y)
 	if authoritative_state:
-		move_request_pending = false
-		move_request_elapsed = 0.0
 		authoritative_probe_pending = false
 		authoritative_probe_elapsed = 0.0
-	if authoritative_state and has_spawn and next_position == pending_position and movement_active:
-		movement_prediction_pending = false
-		pending_elevation = elevation
-		return
-	if authoritative_state and has_spawn and next_position == player_position and movement_active and movement_prediction_pending:
-		return
-	if authoritative_state and has_spawn and next_position == player_position:
-		player_elevation = elevation
-		if not movement_active:
-			player_facing = facing
-		else:
-			pending_elevation = elevation
-		queue_redraw()
-		return
-	if authoritative_state and has_spawn and not movement_active and absi(next_position.x - player_position.x) + absi(next_position.y - player_position.y) == 1:
-		player_facing = _direction_between(player_position, next_position)
-		movement_start = Vector2(player_position)
-		movement_target = Vector2(next_position)
-		pending_map_id = map_id
-		pending_position = next_position
-		pending_elevation = elevation
-		movement_elapsed = 0.0
-		movement_duration = NORMAL_STEP_DURATION
-		movement_active = true
-	else:
+	if authoritative_state:
+		_reset_movement_state()
 		player_position = next_position
 		player_elevation = elevation
 		player_facing = facing
-		movement_start = Vector2(player_position)
-		movement_target = movement_start
-		movement_active = false
-		movement_prediction_pending = false
+		has_spawn = true
+		_update_player_texture()
+		queue_redraw()
+		return
+	player_position = next_position
+	player_elevation = elevation
+	player_facing = facing
+	movement_start = Vector2(player_position)
+	movement_target = movement_start
+	movement_active = false
 	has_spawn = true
 	_update_player_texture()
 	queue_redraw()
@@ -492,7 +479,7 @@ func _set_spawn() -> void:
 	warp_cooldown = 0.0
 
 func _input(event: InputEvent) -> void:
-	if not input_enabled or not visible:
+	if not input_enabled or not visible or transition_active:
 		return
 	if not event is InputEventKey:
 		return
@@ -526,7 +513,6 @@ func _input(event: InputEvent) -> void:
 	get_viewport().set_input_as_handled()
 	if not movement_active:
 		movement_retry_elapsed = 0.0
-		_request_move(direction)
 
 func interact() -> void:
 	if content == null or map_id.is_empty() or dialogue_active:
@@ -569,7 +555,7 @@ func _key_direction(event: InputEventKey) -> int:
 	return 0
 
 func _physical_direction() -> int:
-	if not input_enabled or not visible or dialogue_active:
+	if not input_enabled or not visible or transition_active or dialogue_active:
 		return 0
 	var direction: int = 0
 	if Input.is_key_pressed(KEY_UP) or Input.is_key_pressed(KEY_W):
@@ -582,15 +568,23 @@ func _physical_direction() -> int:
 		direction = 4
 	return direction
 
+func _movement_objects() -> Array:
+	var result: Array = []
+	for object_value in objects:
+		if object_value is Dictionary and authoritative_state and str((object_value as Dictionary).get("kind", "")) == "object":
+			continue
+		result.append(object_value)
+	return result
+
 func _request_move(direction: int) -> bool:
-	if content == null or map_id.is_empty() or not has_spawn:
+	if transition_active or (authoritative_state and GameState.map_transition_pending) or content == null or map_id.is_empty() or not has_spawn:
 		return false
 	if authoritative_state and movement_active:
 		return false
 	player_facing = direction
 	_update_player_texture()
 	queue_redraw()
-	var occupied: Array = objects.duplicate()
+	var occupied: Array = _movement_objects()
 	for entity_value in world_entities:
 		if not entity_value is Dictionary:
 			continue
@@ -614,20 +608,17 @@ func _request_move(direction: int) -> bool:
 		pending_elevation = int(result.get("elevation", player_elevation))
 		movement_stair = bool(result.get("stair", false))
 		movement_stair_behavior = int(result.get("stair_behavior", 0))
-		movement_door = bool(result.get("door", false)) and not movement_stair
-		pending_warp = result.get("warp", {}) if movement_stair or movement_door else {}
+		movement_door = false
+		pending_warp = {}
 		movement_start = Vector2(player_position)
 		movement_target = movement_start + _direction_vector(direction) if pending_map_id != map_id else Vector2(pending_position)
 		movement_jump = bool(result.get("jump", false))
 		movement_elapsed = 0.0
 		movement_duration = 0.24 if movement_stair else DOOR_ANIMATION_DURATION if movement_door else 0.32 if movement_jump else NORMAL_STEP_DURATION
 		door_progress = 0.0
-		movement_prediction_pending = true
 		movement_active = true
 		sound_requested.emit("door" if movement_door else "step")
 		queue_redraw()
-		move_request_pending = true
-		move_request_elapsed = 0.0
 		return true
 	elif not bool(result.get("ok", false)):
 		return false
@@ -650,6 +641,9 @@ func _request_move(direction: int) -> bool:
 	return true
 
 func _process(delta: float) -> void:
+	if transition_active:
+		held_direction = 0
+		return
 	if _text_input_has_focus():
 		held_direction = 0
 		movement_retry_elapsed = 0.0

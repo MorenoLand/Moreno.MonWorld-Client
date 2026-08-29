@@ -313,6 +313,12 @@ func _on_game_packet(opcode: int, payload: PackedByteArray) -> void:
 			chat_received.emit(notice)
 		else:
 			connection_error.emit(str(response.get("error", "OpenMMO server notice is malformed")))
+	elif opcode == GAME_PROTOCOL_SCRIPT.ENTITY_LEAVE:
+		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_entity_leave(payload)
+		if response.ok:
+			entity_update_received.emit({"remove_entity_id": int(response.entity.get("entity_id", 0))})
+		else:
+			connection_error.emit(str(response.get("error", "OpenMMO entity-leave packet is malformed")))
 	elif opcode == GAME_PROTOCOL_SCRIPT.MAP_TRANSITION:
 		map_transition_pending = true
 		pending_map_load.clear()
@@ -384,6 +390,9 @@ func _on_game_packet(opcode: int, payload: PackedByteArray) -> void:
 		player["map_id"] = content.map_id_for_location(int(player.get("bank_id", -1)), int(player.get("wire_map_id", -1))) if content != null else ""
 		player["character_id"] = int(player.get("entity_id", 0))
 		var is_local: bool = awaiting_local_entity
+		var current_character_id: int = int(current_character.get("id", 0))
+		if current_character_id > 0:
+			is_local = int(player.get("entity_id", 0)) == current_character_id
 		if is_local:
 			awaiting_local_entity = false
 			player["user_id"] = int(current_character.get("user_id", 0))

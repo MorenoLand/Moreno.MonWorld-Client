@@ -963,7 +963,7 @@ func default_spawn(map_id: String) -> Dictionary:
 		elevation = 3
 	return {"ok": true, "map_id": map_id, "x": best_position.x, "y": best_position.y, "elevation": elevation}
 
-func can_walk(map_id: String, from_x: int, from_y: int, to_x: int, to_y: int, elevation: int = 3, occupied: Array = []) -> bool:
+func can_walk(map_id: String, from_x: int, from_y: int, to_x: int, to_y: int, elevation: int = 3, occupied: Variant = null) -> bool:
 	var cached_map: Dictionary = _get_or_build_map_cache(map_id)
 	if not bool(cached_map.get("ok", false)):
 		return false
@@ -978,7 +978,8 @@ func can_walk(map_id: String, from_x: int, from_y: int, to_x: int, to_y: int, el
 	var destination_warp: Dictionary = _warp_record_at(cached_map, to_x, to_y, elevation)
 	if not _cell_can_stand_for_direction(destination, direction) and destination_warp.is_empty():
 		return false
-	if _position_occupied(cached_map.get("objects", []) if occupied.is_empty() else occupied, to_x, to_y):
+	var occupied_objects: Array = cached_map.get("objects", []) if occupied == null else occupied
+	if _position_occupied(occupied_objects, to_x, to_y):
 		return false
 	if not _elevations_compatible(elevation, int(destination.get("elevation", 0))):
 		return false
@@ -989,7 +990,7 @@ func can_walk(map_id: String, from_x: int, from_y: int, to_x: int, to_y: int, el
 		return false
 	return true
 
-func movement_result(map_id: String, x: int, y: int, direction: int, elevation: int = 3, occupied: Array = []) -> Dictionary:
+func movement_result(map_id: String, x: int, y: int, direction: int, elevation: int = 3, occupied: Variant = null) -> Dictionary:
 	var vector: Vector2i = _direction_vector(direction)
 	if vector == Vector2i.ZERO:
 		return {"ok": false, "error": "invalid movement direction"}
@@ -1000,7 +1001,7 @@ func movement_result(map_id: String, x: int, y: int, direction: int, elevation: 
 	var width: int = int(map_value.get("width", 0))
 	var height: int = int(map_value.get("height", 0))
 	if destination.x < 0 or destination.y < 0 or destination.x >= width or destination.y >= height:
-		return _movement_through_connection(map_id, x, y, direction, elevation)
+		return _movement_through_connection(map_id, x, y, direction, elevation, occupied)
 	var source_cell: Dictionary = map_cell(map_id, x, y)
 	var source_behavior: int = int(source_cell.get("behavior", 0))
 	if _is_directional_stair_warp_behavior(source_behavior, direction):
@@ -1047,7 +1048,7 @@ func interaction_at(map_id: String, x: int, y: int, direction: int, elevation: i
 		return {"ok": true, "kind": str(object.get("kind", "object")), "dialogue_id": str(object.get("dialogue_id", "")), "pages": pages, "text": text, "object": object}
 	return {"ok": false, "error": "nothing to interact with"}
 
-func _movement_through_connection(map_id: String, x: int, y: int, direction: int, elevation: int) -> Dictionary:
+func _movement_through_connection(map_id: String, x: int, y: int, direction: int, elevation: int, occupied: Variant = null) -> Dictionary:
 	var cached_map: Dictionary = _get_or_build_map_cache(map_id)
 	if not bool(cached_map.get("ok", false)):
 		return cached_map
@@ -1077,7 +1078,8 @@ func _movement_through_connection(map_id: String, x: int, y: int, direction: int
 				target_x = x - offset
 				target_y = int(target_cache.get("height", 0)) - 1
 		var target_cell: Dictionary = _map_cell_from_cache(target_cache, target_x, target_y)
-		if not _cell_can_stand(target_cell) or _position_occupied(target_cache.get("objects", []), target_x, target_y):
+		var target_occupied: Array = target_cache.get("objects", []) if occupied == null else occupied
+		if not _cell_can_stand(target_cell) or _position_occupied(target_occupied, target_x, target_y):
 			continue
 		var target_elevation: int = int(target_cell.get("elevation", elevation))
 		if target_elevation == 0 or target_elevation == 15:
