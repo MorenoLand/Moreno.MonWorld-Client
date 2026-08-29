@@ -168,7 +168,8 @@ func _expand_connected_world(root_map_id: String, generation: int) -> void:
 		await get_tree().process_frame
 		if generation != connected_world_generation or map_view == null or map_view.map_id != root_map_id:
 			return
-		var connected_world: Dictionary = GameState.content.prepare_connected_world(root_map_id, map_limit, 0, GameState.server_maps)
+		var preload_depth: int = 1
+		var connected_world: Dictionary = GameState.content.prepare_connected_world(root_map_id, map_limit, preload_depth, GameState.server_maps)
 		if not bool(connected_world.get("ok", false)) or generation != connected_world_generation:
 			return
 		var regions: Array = connected_world.get("regions", [])
@@ -206,7 +207,7 @@ func _preload_connected_regions(world_value: Dictionary, root_map_id: String, ge
 		region["animated_foreground_tiles"] = prepared.get("animated_foreground_tiles", [])
 		region["ready"] = true
 		if map_view != null:
-			map_view.queue_redraw()
+			map_view.refresh_world_bounds()
 
 func _on_entity_update(value: Dictionary) -> void:
 	var player: Variant = value.get("player")

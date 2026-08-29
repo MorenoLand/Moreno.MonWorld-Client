@@ -240,8 +240,13 @@ func _ensure_region_rendered(selected_map_id: String) -> bool:
 		region["ready"] = true
 		regions[region_index] = region
 		_refresh_object_list(region.get("objects", []))
+		_rebuild_world_bounds()
 		return true
 	return false
+
+func refresh_world_bounds() -> void:
+	_rebuild_world_bounds()
+	queue_redraw()
 
 func _set_active_region(selected_map_id: String) -> void:
 	for region_value in regions:
@@ -267,6 +272,8 @@ func _rebuild_world_bounds() -> void:
 		if not region_value is Dictionary:
 			continue
 		var region: Dictionary = region_value
+		if not bool(region.get("ready", false)) or bool(region.get("corner_filler", false)):
+			continue
 		var origin: Vector2i = _region_origin(str(region.get("map_id", "")))
 		var extent: Vector2i = origin + Vector2i(int(region.get("width", 0)), int(region.get("height", 0)))
 		if not has_bounds:
@@ -841,6 +848,8 @@ func _draw() -> void:
 		if not region_value is Dictionary:
 			continue
 		var region: Dictionary = region_value
+		if not bool(region.get("ready", false)):
+			continue
 		var region_id: String = str(region.get("map_id", ""))
 		var region_origin: Vector2 = Vector2(_region_origin(region_id)) * TILE_PIXELS
 		var region_size: Vector2 = Vector2(int(region.get("width", 0)), int(region.get("height", 0))) * TILE_PIXELS

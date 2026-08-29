@@ -38,6 +38,9 @@ const CONNECTION_SOUTH: int = 1
 const CONNECTION_NORTH: int = 2
 const CONNECTION_WEST: int = 3
 const CONNECTION_EAST: int = 4
+const MAP_TYPE_INSIDE: int = 8
+const MAP_TYPE_SECRET_BASE: int = 9
+const MAX_CORNER_FILLER_SIZE: int = 128
 const ROCK_STAIRS_BEHAVIOR: int = 0x2A
 const FLOOR_ROOFTOP: int = 127
 const MAP_GROUP_DUNGEONS: int = 1
@@ -431,7 +434,227 @@ func prepare_connected_world(root_map_id: String, max_maps: int = 96, preload_de
 			pending.append({"map_id": target_map_id, "origin": target_origin, "depth": depth + 1})
 	if regions.is_empty():
 		return {"ok": false, "error": "connected-world root map is not renderable"}
+	var corner_regions: Array = _build_corner_filler_regions(regions, root_map_id)
+	for corner_value in corner_regions:
+		if not corner_value is Dictionary:
+			continue
+		var corner_region: Dictionary = corner_value
+		regions.append(corner_region)
+		placed[str(corner_region.get("map_id", ""))] = corner_region.get("origin", Vector2i.ZERO)
 	return {"ok": true, "root_map_id": root_map_id, "regions": regions, "map_origins": placed}
+
+func _build_corner_filler_regions(source_regions: Array, root_map_id: String) -> Array:
+	var placed_regions: Array = []
+	for region_value in source_regions:
+		if not region_value is Dictionary:
+			continue
+		var region: Dictionary = region_value
+		if bool(region.get("corner_filler", false)):
+			continue
+		if int(region.get("map_type", -1)) == MAP_TYPE_INSIDE or int(region.get("map_type", -1)) == MAP_TYPE_SECRET_BASE:
+			continue
+		if str(region.get("map_id", "")).is_empty():
+			continue
+		if int(region.get("width", 0)) <= 0 or int(region.get("height", 0)) <= 0:
+			continue
+		placed_regions.append(region)
+	var gaps: Array = []
+	var gap_keys: Dictionary = {}
+	for center_value in placed_regions:
+		var center: Dictionary = center_value
+		var center_rect: Rect2i = _corner_region_rect(center)
+		var top_regions: Array = _corner_touching_regions(center_rect, placed_regions, CONNECTION_NORTH)
+		var bottom_regions: Array = _corner_touching_regions(center_rect, placed_regions, CONNECTION_SOUTH)
+		var left_regions: Array = _corner_touching_regions(center_rect, placed_regions, CONNECTION_WEST)
+		var right_regions: Array = _corner_touching_regions(center_rect, placed_regions, CONNECTION_EAST)
+		for top_value in top_regions:
+			var top: Dictionary = top_value
+			var top_rect: Rect2i = _corner_region_rect(top)
+			for side_value in left_regions:
+				var side: Dictionary = side_value
+				var side_rect: Rect2i = _corner_region_rect(side)
+				_add_corner_gap(gaps, gap_keys, Rect2i(Vector2i(side_rect.position.x, top_rect.position.y), Vector2i(mini(center_rect.position.x, top_rect.position.x) - side_rect.position.x, mini(center_rect.position.y, side_rect.position.y) - top_rect.position.y)), placed_regions)
+			for side_value in right_regions:
+				var side: Dictionary = side_value
+				var side_rect: Rect2i = _corner_region_rect(side)
+				_add_corner_gap(gaps, gap_keys, Rect2i(Vector2i(maxi(center_rect.end.x, top_rect.end.x), top_rect.position.y), Vector2i(side_rect.end.x - maxi(center_rect.end.x, top_rect.end.x), mini(center_rect.position.y, side_rect.position.y) - top_rect.position.y)), placed_regions)
+		for bottom_value in bottom_regions:
+			var bottom: Dictionary = bottom_value
+			var bottom_rect: Rect2i = _corner_region_rect(bottom)
+			for side_value in left_regions:
+				var side: Dictionary = side_value
+				var side_rect: Rect2i = _corner_region_rect(side)
+				_add_corner_gap(gaps, gap_keys, Rect2i(Vector2i(side_rect.position.x, maxi(center_rect.end.y, bottom_rect.end.y)), Vector2i(mini(center_rect.position.x, bottom_rect.position.x) - side_rect.position.x, bottom_rect.end.y - maxi(center_rect.end.y, side_rect.end.y))), placed_regions)
+			for side_value in right_regions:
+				var side: Dictionary = side_value
+				var side_rect: Rect2i = _corner_region_rect(side)
+				_add_corner_gap(gaps, gap_keys, Rect2i(Vector2i(maxi(center_rect.end.x, bottom_rect.end.x), maxi(center_rect.end.y, side_rect.end.y)), Vector2i(side_rect.end.x - maxi(center_rect.end.x, bottom_rect.end.x), bottom_rect.end.y - maxi(center_rect.end.y, side_rect.end.y))), placed_regions)
+		for left_value in left_regions:
+			var left_neighbor: Dictionary = left_value
+			var left_neighbor_rect: Rect2i = _corner_region_rect(left_neighbor)
+			for right_value in right_regions:
+				var right_neighbor: Dictionary = right_value
+				var right_neighbor_rect: Rect2i = _corner_region_rect(right_neighbor)
+				var horizontal_gap_x: int = right_neighbor_rect.position.x - left_neighbor_rect.end.x
+				var upper_gap_y: int = maxi(left_neighbor_rect.position.y, right_neighbor_rect.position.y)
+				_add_corner_gap(gaps, gap_keys, Rect2i(Vector2i(left_neighbor_rect.end.x, upper_gap_y), Vector2i(horizontal_gap_x, center_rect.position.y - upper_gap_y)), placed_regions)
+				var lower_gap_y: int = center_rect.end.y
+				_add_corner_gap(gaps, gap_keys, Rect2i(Vector2i(left_neighbor_rect.end.x, lower_gap_y), Vector2i(horizontal_gap_x, mini(left_neighbor_rect.end.y, right_neighbor_rect.end.y) - lower_gap_y)), placed_regions)
+		for top_value in top_regions:
+			var top_neighbor: Dictionary = top_value
+			var top_neighbor_rect: Rect2i = _corner_region_rect(top_neighbor)
+			for bottom_value in bottom_regions:
+				var bottom_neighbor: Dictionary = bottom_value
+				var bottom_neighbor_rect: Rect2i = _corner_region_rect(bottom_neighbor)
+				var vertical_gap_y: int = bottom_neighbor_rect.position.y - top_neighbor_rect.end.y
+				var left_gap_x: int = maxi(top_neighbor_rect.position.x, bottom_neighbor_rect.position.x)
+				_add_corner_gap(gaps, gap_keys, Rect2i(Vector2i(left_gap_x, top_neighbor_rect.end.y), Vector2i(center_rect.position.x - left_gap_x, vertical_gap_y)), placed_regions)
+				_add_corner_gap(gaps, gap_keys, Rect2i(Vector2i(center_rect.end.x, top_neighbor_rect.end.y), Vector2i(mini(top_neighbor_rect.end.x, bottom_neighbor_rect.end.x) - center_rect.end.x, vertical_gap_y)), placed_regions)
+	var filler_regions: Array = []
+	var filler_index: int = 0
+	for gap_value in gaps:
+		if not gap_value is Rect2i:
+			continue
+		var gap: Rect2i = gap_value
+		var links: Array = _corner_adjacent_links(gap, placed_regions)
+		if links.is_empty():
+			continue
+		var donor_link: Dictionary = links[0]
+		for link_value in links:
+			var link: Dictionary = link_value
+			if int(link.get("overlap", 0)) > int(donor_link.get("overlap", 0)):
+				donor_link = link
+		var donor: Dictionary = donor_link.get("region", {})
+		var filler_id: String = "corner-filler:%s:%d:%d:%d:%d" % [root_map_id, gap.position.x, gap.position.y, gap.end.x, gap.end.y]
+		var filler: Dictionary = _create_corner_filler_region(filler_id, gap, donor, filler_index)
+		if filler.is_empty():
+			continue
+		filler_regions.append(filler)
+		filler_index += 1
+	return filler_regions
+
+func _corner_region_rect(region: Dictionary) -> Rect2i:
+	var origin: Vector2i = region.get("origin", Vector2i.ZERO)
+	return Rect2i(origin, Vector2i(int(region.get("width", 0)), int(region.get("height", 0))))
+
+func _corner_touching_regions(center: Rect2i, regions: Array, direction: int) -> Array:
+	var result: Array = []
+	for region_value in regions:
+		if not region_value is Dictionary:
+			continue
+		var region: Dictionary = region_value
+		var candidate: Rect2i = _corner_region_rect(region)
+		var overlap: int = 0
+		match direction:
+			CONNECTION_NORTH, CONNECTION_SOUTH:
+				overlap = _corner_x_overlap(center, candidate)
+			CONNECTION_WEST, CONNECTION_EAST:
+				overlap = _corner_y_overlap(center, candidate)
+		if overlap <= 0:
+			continue
+		var touches: bool = false
+		match direction:
+			CONNECTION_NORTH:
+				touches = candidate.end.y == center.position.y
+			CONNECTION_SOUTH:
+				touches = candidate.position.y == center.end.y
+			CONNECTION_WEST:
+				touches = candidate.end.x == center.position.x
+			CONNECTION_EAST:
+				touches = candidate.position.x == center.end.x
+		if touches:
+			result.append(region)
+	return result
+
+func _corner_x_overlap(first: Rect2i, second: Rect2i) -> int:
+	return maxi(0, mini(first.end.x, second.end.x) - maxi(first.position.x, second.position.x))
+
+func _corner_y_overlap(first: Rect2i, second: Rect2i) -> int:
+	return maxi(0, mini(first.end.y, second.end.y) - maxi(first.position.y, second.position.y))
+
+func _corner_rect_intersects(first: Rect2i, second: Rect2i) -> bool:
+	return _corner_x_overlap(first, second) > 0 and _corner_y_overlap(first, second) > 0
+
+func _add_corner_gap(gaps: Array, gap_keys: Dictionary, gap: Rect2i, regions: Array) -> void:
+	if gap.size.x <= 0 or gap.size.y <= 0 or gap.size.x > MAX_CORNER_FILLER_SIZE or gap.size.y > MAX_CORNER_FILLER_SIZE:
+		return
+	for region_value in regions:
+		if not region_value is Dictionary:
+			continue
+		if _corner_rect_intersects(gap, _corner_region_rect(region_value)):
+			return
+	if _corner_adjacent_links(gap, regions).is_empty():
+		return
+	var key: String = "%d:%d:%d:%d" % [gap.position.x, gap.position.y, gap.end.x, gap.end.y]
+	if gap_keys.has(key):
+		return
+	gap_keys[key] = true
+	gaps.append(gap)
+
+func _corner_adjacent_links(gap: Rect2i, regions: Array) -> Array:
+	var result: Array = []
+	for region_value in regions:
+		if not region_value is Dictionary:
+			continue
+		var region: Dictionary = region_value
+		var host: Rect2i = _corner_region_rect(region)
+		if host.end.y == gap.position.y:
+			var overlap: int = _corner_x_overlap(host, gap)
+			if overlap > 0:
+				result.append({"region": region, "direction": CONNECTION_SOUTH, "offset": gap.position.x - host.position.x, "overlap": overlap})
+		elif host.position.y == gap.end.y:
+			var overlap: int = _corner_x_overlap(host, gap)
+			if overlap > 0:
+				result.append({"region": region, "direction": CONNECTION_NORTH, "offset": gap.position.x - host.position.x, "overlap": overlap})
+		elif host.end.x == gap.position.x:
+			var overlap: int = _corner_y_overlap(host, gap)
+			if overlap > 0:
+				result.append({"region": region, "direction": CONNECTION_EAST, "offset": gap.position.y - host.position.y, "overlap": overlap})
+		elif host.position.x == gap.end.x:
+			var overlap: int = _corner_y_overlap(host, gap)
+			if overlap > 0:
+				result.append({"region": region, "direction": CONNECTION_WEST, "offset": gap.position.y - host.position.y, "overlap": overlap})
+	return result
+
+func _create_corner_filler_region(filler_id: String, gap: Rect2i, donor: Dictionary, filler_index: int) -> Dictionary:
+	var donor_id: String = str(donor.get("map_id", ""))
+	var donor_cache: Dictionary = _get_or_build_map_cache(donor_id)
+	if not bool(donor_cache.get("ok", false)):
+		return {}
+	var border_tiles: PackedInt32Array = donor_cache.get("border_tiles", PackedInt32Array())
+	var border_width: int = int(donor_cache.get("border_width", 0))
+	var border_height: int = int(donor_cache.get("border_height", 0))
+	if border_width <= 0 or border_height <= 0 or border_tiles.size() < border_width * border_height:
+		return {}
+	var width: int = gap.size.x
+	var height: int = gap.size.y
+	var background_image: Image = Image.create(width * 16, height * 16, false, Image.FORMAT_RGBA8)
+	background_image.fill(Color.BLACK)
+	var foreground_image: Image = Image.create(width * 16, height * 16, false, Image.FORMAT_RGBA8)
+	foreground_image.fill(Color(0.0, 0.0, 0.0, 0.0))
+	var animated_background_tiles: Array = []
+	var animated_foreground_tiles: Array = []
+	var primary: Dictionary = donor_cache.get("primary", {})
+	var secondary: Dictionary = donor_cache.get("secondary", {})
+	var primary_metatile_count: int = _format_int("primary_metatile_count", PRIMARY_METATILE_COUNT)
+	var metatile_id_mask: int = _format_int("map_grid_metatile_id_mask", MAPGRID_METATILE_ID_MASK)
+	for map_y in range(height):
+		for map_x in range(width):
+			var border_index: int = (map_y % border_height) * border_width + (map_x % border_width)
+			var metatile_id: int = int(border_tiles[border_index]) & metatile_id_mask
+			if metatile_id == _format_int("map_grid_undefined", MAPGRID_UNDEFINED):
+				continue
+			var tileset: Dictionary = primary
+			var metatile_index: int = metatile_id
+			if metatile_id >= primary_metatile_count:
+				tileset = secondary
+				metatile_index = metatile_id - primary_metatile_count
+			_draw_metatile_layers(background_image, foreground_image, map_x * 16, map_y * 16, tileset, metatile_index, primary, secondary, animated_background_tiles, animated_foreground_tiles)
+	var background_texture: ImageTexture = ImageTexture.create_from_image(background_image)
+	var foreground_texture: ImageTexture = ImageTexture.create_from_image(foreground_image)
+	var filler_cache: Dictionary = {"ok": true, "base_image": background_image, "base_background_image": background_image, "base_foreground_image": foreground_image, "primary": primary, "secondary": secondary, "primary_tiles": donor_cache.get("primary_tiles", PackedByteArray()), "primary_animation_enabled": bool(donor_cache.get("primary_animation_enabled", false)), "animated_tiles": [], "animated_background_tiles": animated_background_tiles, "animated_foreground_tiles": animated_foreground_tiles, "animated_primary_tiles": PackedByteArray(), "animated_tile_phase": -1, "animated_tile_textures": {}, "map_cells": PackedInt32Array(), "objects": [], "warps": [], "connections": [], "textures": {}, "images": {}, "background_textures": {}, "foreground_textures": {}, "width": width, "height": height, "header_offset": -1, "layout_offset": -1, "border_offset": -1, "border_width": border_width, "border_height": border_height, "border_tiles": border_tiles, "map_group": -1, "map_index": filler_index, "music_id": 0, "map_type": int(donor_cache.get("map_type", 0))}
+	map_cache[filler_id] = filler_cache
+	return {"map_id": filler_id, "origin": gap.position, "width": width, "height": height, "background_texture": background_texture, "foreground_texture": foreground_texture, "objects": [], "warps": [], "connections": [], "animated_background_tiles": animated_background_tiles, "animated_foreground_tiles": animated_foreground_tiles, "music_id": 0, "map_type": int(donor_cache.get("map_type", 0)), "ready": true, "corner_filler": true}
 
 func _is_server_custom_map(server_map: Dictionary) -> bool:
 	var custom_value: Variant = server_map.get("custom_map_gzip", PackedByteArray())
@@ -456,7 +679,10 @@ func _server_connections(server_map: Dictionary, server_maps: Dictionary) -> Arr
 		var target_map_id: String = _client_map_id_for_server_location(int(connection.get("bank_id", -1)), int(connection.get("map_id", -1)), server_maps)
 		if target_map_id.is_empty():
 			continue
-		connections.append({"direction": int(connection.get("direction", 0)), "offset": int(connection.get("offset", 0)), "map_id": target_map_id})
+		var direction: int = int(connection.get("direction", 0))
+		if direction < CONNECTION_SOUTH or direction > CONNECTION_EAST:
+			continue
+		connections.append({"direction": direction, "offset": int(connection.get("offset", 0)), "map_id": target_map_id})
 	return connections
 
 func _client_map_id_for_server_location(bank_id: int, map_index: int, server_maps: Dictionary) -> String:
@@ -669,7 +895,15 @@ func _build_map_cache(map_id: String, map_value: Dictionary) -> Dictionary:
 			_draw_metatile_layers(background_image, foreground_image, map_x * 16, map_y * 16, tileset, metatile_index, primary, secondary, animated_background_tiles, animated_foreground_tiles)
 	var objects: Array = _read_map_objects(header_offset, map_id)
 	objects.append_array(_read_map_background_events(header_offset, map_id))
-	return {"ok": true, "base_image": image, "base_background_image": background_image, "base_foreground_image": foreground_image, "primary": primary, "secondary": secondary, "primary_tiles": primary.get("tiles", PackedByteArray()), "primary_animation_enabled": bool(primary.get("animation_enabled", false)), "animated_tiles": animated_tiles, "animated_background_tiles": animated_background_tiles, "animated_foreground_tiles": animated_foreground_tiles, "map_cells": map_cells, "objects": objects, "warps": _read_map_warps(header_offset), "connections": _read_map_connections(header_offset), "textures": {}, "images": {}, "background_textures": {}, "foreground_textures": {}, "width": width, "height": height, "header_offset": header_offset, "layout_offset": layout_offset, "border_offset": int(descriptor.get("border_offset", -1)), "border_width": int(descriptor.get("border_width", 0)), "border_height": int(descriptor.get("border_height", 0)), "map_group": int(map_value.get("map_group", -1)), "map_index": int(map_value.get("map_index", -1)), "music_id": int(map_value.get("music_id", 0))}
+	var border_offset: int = int(descriptor.get("border_offset", -1))
+	var border_width: int = int(descriptor.get("border_width", 0))
+	var border_height: int = int(descriptor.get("border_height", 0))
+	var border_tiles: PackedInt32Array = PackedInt32Array()
+	var border_bytes: int = border_width * border_height * 2
+	if border_width > 0 and border_height > 0 and border_offset >= 0 and _valid_range(border_offset, border_bytes):
+		for border_index in range(border_width * border_height):
+			border_tiles.append(_read_u16(border_offset + border_index * 2))
+	return {"ok": true, "base_image": image, "base_background_image": background_image, "base_foreground_image": foreground_image, "primary": primary, "secondary": secondary, "primary_tiles": primary.get("tiles", PackedByteArray()), "primary_animation_enabled": bool(primary.get("animation_enabled", false)), "animated_tiles": animated_tiles, "animated_background_tiles": animated_background_tiles, "animated_foreground_tiles": animated_foreground_tiles, "map_cells": map_cells, "objects": objects, "warps": _read_map_warps(header_offset), "connections": _read_map_connections(header_offset), "textures": {}, "images": {}, "background_textures": {}, "foreground_textures": {}, "width": width, "height": height, "header_offset": header_offset, "layout_offset": layout_offset, "border_offset": border_offset, "border_width": border_width, "border_height": border_height, "border_tiles": border_tiles, "map_group": int(map_value.get("map_group", -1)), "map_index": int(map_value.get("map_index", -1)), "music_id": int(map_value.get("music_id", 0))}
 
 func map_cell(map_id: String, x: int, y: int) -> Dictionary:
 	var cached_map: Dictionary = _get_or_build_map_cache(map_id)
