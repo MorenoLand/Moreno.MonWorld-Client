@@ -310,6 +310,21 @@ func _movement_world_position() -> Vector2:
 		target_world = start_world + _direction_vector(player_facing)
 	return start_world.lerp(target_world, clampf(movement_elapsed / movement_duration, 0.0, 1.0))
 
+func _camera_origin(world_position: Vector2, camera_world_size: Vector2) -> Vector2:
+	var camera_center: Vector2 = (world_position + Vector2(0.5, 0.5)) * TILE_PIXELS
+	var camera_origin: Vector2 = camera_center - camera_world_size * 0.5
+	if world_bounds.size.x > 0.0:
+		if world_bounds.size.x <= camera_world_size.x:
+			camera_origin.x = world_bounds.position.x - (camera_world_size.x - world_bounds.size.x) * 0.5
+		else:
+			camera_origin.x = clampf(camera_origin.x, world_bounds.position.x, world_bounds.end.x - camera_world_size.x)
+	if world_bounds.size.y > 0.0:
+		if world_bounds.size.y <= camera_world_size.y:
+			camera_origin.y = world_bounds.position.y - (camera_world_size.y - world_bounds.size.y) * 0.5
+		else:
+			camera_origin.y = clampf(camera_origin.y, world_bounds.position.y, world_bounds.end.y - camera_world_size.y)
+	return camera_origin
+
 func set_player_state(x: int, y: int, elevation: int = 3, facing: int = 1) -> void:
 	var next_position: Vector2i = Vector2i(x, y)
 	if authoritative_state:
@@ -728,8 +743,7 @@ func dialogue_anchor_screen(dialogue: Dictionary) -> Vector2:
 	var tile_scale: float = _tile_scale()
 	var camera_world_size: Vector2 = size / tile_scale
 	var world_player: Vector2 = _movement_world_position()
-	var camera_center: Vector2 = (world_player + Vector2(0.5, 0.5)) * TILE_PIXELS
-	var camera_origin: Vector2 = camera_center - camera_world_size * 0.5
+	var camera_origin: Vector2 = _camera_origin(world_player, camera_world_size)
 	var object: Dictionary = dialogue.get("object", {})
 	var object_map_id: String = str(object.get("map_id", map_id))
 	var object_position: Vector2 = _world_position(object_map_id, Vector2(int(object.get("x", player_position.x)), int(object.get("y", player_position.y))))
@@ -834,12 +848,7 @@ func _draw() -> void:
 	var world_player: Vector2 = _movement_world_position()
 	if movement_active and movement_jump:
 		world_player.y -= sin(clampf(movement_elapsed / movement_duration, 0.0, 1.0) * PI) * 0.75
-	var camera_center: Vector2 = (world_player + Vector2(0.5, 0.5)) * TILE_PIXELS
-	var camera_origin: Vector2 = camera_center - camera_world_size * 0.5
-	if world_bounds.size.x > 0.0:
-		camera_origin.x = clampf(camera_origin.x, world_bounds.position.x, maxf(world_bounds.end.x - camera_world_size.x, world_bounds.position.x))
-	if world_bounds.size.y > 0.0:
-		camera_origin.y = clampf(camera_origin.y, world_bounds.position.y, maxf(world_bounds.end.y - camera_world_size.y, world_bounds.position.y))
+	var camera_origin: Vector2 = _camera_origin(world_player, camera_world_size)
 	var destination_size: Vector2 = camera_world_size * tile_scale
 	var destination_position: Vector2 = (size - destination_size) * 0.5
 	var drawables: Array = []
