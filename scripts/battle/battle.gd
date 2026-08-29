@@ -311,9 +311,3 @@ func _on_battle_event(value: Dictionary) -> void:
 		"start_scene":
 			_append_log("Battle scene initialized.")
 	_render_state()
-
-func _on_battle_event(value: Dictionary) -> void:
-	if str(value.get("battle_id", "")) != battle_id:
-		return
-	state_label.text = "Turn %s · active side %s" % [value.get("turn", "?"), value.get("active_side", "?")]
-	log_view.append_text("event: %s\n" % str(value.get("event", "update")))
