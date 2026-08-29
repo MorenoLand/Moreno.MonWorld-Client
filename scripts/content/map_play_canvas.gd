@@ -33,6 +33,7 @@ var player_texture_key: String = ""
 var animation_tick: int = 0
 var animation_elapsed: float = 0.0
 var movement_active: bool = false
+var movement_unvalidated: bool = false
 var movement_start: Vector2 = Vector2.ZERO
 var movement_target: Vector2 = Vector2.ZERO
 var movement_jump: bool = false
@@ -131,9 +132,11 @@ func set_authoritative_state(value: bool) -> void:
 	held_direction = 0
 	authoritative_probe_pending = false
 	authoritative_probe_elapsed = 0.0
+	movement_unvalidated = false
 
 func _reset_movement_state(clear_direction: bool = false) -> void:
 	movement_active = false
+	movement_unvalidated = false
 	movement_start = Vector2.ZERO
 	movement_target = Vector2.ZERO
 	movement_jump = false
@@ -186,6 +189,7 @@ func set_map(texture: Texture2D, map_width: int, map_height: int, map_objects: A
 		if authoritative_state:
 			has_spawn = false
 			movement_active = false
+			movement_unvalidated = false
 			pending_map_id = ""
 			pending_warp = {}
 		else:
@@ -387,6 +391,7 @@ func set_player_state(x: int, y: int, elevation: int = 3, facing: int = 1) -> vo
 	movement_start = Vector2(player_position)
 	movement_target = movement_start
 	movement_active = false
+	movement_unvalidated = false
 	has_spawn = true
 	_update_player_texture()
 	queue_redraw()
@@ -396,7 +401,18 @@ func apply_server_position(x: int, y: int, elevation: int = 3, facing: int = 1) 
 	if authoritative_state:
 		authoritative_probe_pending = false
 		authoritative_probe_elapsed = 0.0
+		if movement_active and next_position == player_position:
+			_reset_movement_state()
+			authoritative_probe_pending = true
+			authoritative_probe_elapsed = 0.0
+			player_elevation = elevation
+			player_facing = facing
+			has_spawn = true
+			_update_player_texture()
+			queue_redraw()
+			return
 		if movement_active and pending_map_id == map_id and next_position == pending_position:
+			movement_unvalidated = false
 			player_elevation = elevation
 			player_facing = facing
 			_update_player_texture()
@@ -499,6 +515,7 @@ func _set_spawn() -> void:
 	player_facing = 1
 	has_spawn = true
 	movement_active = false
+	movement_unvalidated = false
 	movement_stair = false
 	movement_stair_behavior = 0
 	movement_door = false
@@ -622,15 +639,44 @@ func _request_move(direction: int) -> bool:
 	var result: Dictionary = content.movement_result(map_id, player_position.x, player_position.y, direction, player_elevation, occupied)
 	if authoritative_state:
 		if not bool(result.get("ok", false)):
-			if authoritative_probe_pending:
-				return false
+			var predicted_position := player_position + Vector2i(_direction_vector(direction))
+			var movement_map: Dictionary = content.map_data(map_id)
+			var cache_value: Variant = content.get("map_cache")
+			if movement_map.is_empty() and cache_value is Dictionary:
+				var cached_map: Variant = (cache_value as Dictionary).get(map_id, {})
+				if cached_map is Dictionary and bool(cached_map.get("ok", false)):
+					movement_map = {"width": int(cached_map.get("width", 0)), "height": int(cached_map.get("height", 0))}
+			var can_predict_same_map := not movement_map.is_empty() and predicted_position.x >= 0 and predicted_position.y >= 0 and predicted_position.x < int(movement_map.get("width", 0)) and predicted_position.y < int(movement_map.get("height", 0))
+			if not can_predict_same_map:
+				if authoritative_probe_pending:
+					return false
+				if not GameState.send_input(_direction_name(direction), player_position.x, player_position.y):
+					return false
+				authoritative_probe_pending = true
+				authoritative_probe_elapsed = 0.0
+				return true
 			if not GameState.send_input(_direction_name(direction), player_position.x, player_position.y):
 				return false
-			authoritative_probe_pending = true
-			authoritative_probe_elapsed = 0.0
+			pending_map_id = map_id
+			pending_position = predicted_position
+			pending_elevation = player_elevation
+			pending_warp = {}
+			movement_start = Vector2(player_position)
+			movement_target = Vector2(predicted_position)
+			movement_jump = false
+			movement_stair = false
+			movement_stair_behavior = 0
+			movement_door = false
+			movement_elapsed = 0.0
+			movement_duration = NORMAL_STEP_DURATION
+			movement_active = true
+			movement_unvalidated = true
+			sound_requested.emit("step")
+			queue_redraw()
 			return true
 		if not GameState.send_input(_direction_name(direction), player_position.x, player_position.y):
 			return false
+		movement_unvalidated = false
 		var destination_map_id: String = str(result.get("map_id", map_id))
 		var map_transition: bool = destination_map_id != map_id
 		var server_traversal: bool = bool(result.get("stair", false)) or bool(result.get("door", false)) or map_transition
@@ -713,6 +759,7 @@ func _process(delta: float) -> void:
 	var completed_elevation: int = pending_elevation
 	var completed_warp: Dictionary = pending_warp
 	movement_active = false
+	movement_unvalidated = false
 	movement_stair = false
 	movement_stair_behavior = 0
 	movement_door = false
