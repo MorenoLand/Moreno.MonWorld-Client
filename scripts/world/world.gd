@@ -170,6 +170,7 @@ func _expand_connected_world(root_map_id: String, generation: int) -> void:
 	if not bool(connected_world.get("ok", false)) or generation != connected_world_generation:
 		return
 	map_view.set_world(connected_world, root_map_id)
+	call_deferred("_preload_connected_regions", connected_world, root_map_id, generation)
 
 func _preload_connected_regions(world_value: Dictionary, root_map_id: String, generation: int) -> void:
 	var regions: Array = world_value.get("regions", [])
@@ -178,7 +179,7 @@ func _preload_connected_regions(world_value: Dictionary, root_map_id: String, ge
 			return
 		var region: Dictionary = region_value
 		var region_id: String = str(region.get("map_id", ""))
-		if region_id.is_empty() or region_id == root_map_id or bool(region.get("ready", false)):
+		if region_id.is_empty() or region_id == root_map_id or bool(region.get("ready", false)) or int(region.get("depth", 1)) > 1:
 			continue
 		await get_tree().process_frame
 		if generation != connected_world_generation:
@@ -204,16 +205,16 @@ func _on_entity_update(value: Dictionary) -> void:
 		var key := str(entity.get("entity_id", entity.get("character_id", entity.get("user_id", 0))))
 		var is_local: bool = bool(value.get("local", false)) or int(entity.get("character_id", 0)) == selected_character_id
 		var incoming_map_id: String = str(entity.get("map_id", ""))
-		if is_local and not incoming_map_id.is_empty() and map_view != null and incoming_map_id != map_view.map_id:
-			if map_view.set_active_map(incoming_map_id) or _load_map_texture(incoming_map_id):
-				snapshot["map_id"] = incoming_map_id
-				title_label.text = "Map: %s" % incoming_map_id
 		var merged: Dictionary = {}
 		var existing: Variant = entities.get(key, {})
 		if existing is Dictionary:
 			merged = (existing as Dictionary).duplicate(true)
 		merged.merge(entity, true)
 		entities[key] = merged
+		if is_local and not incoming_map_id.is_empty() and map_view != null and incoming_map_id != map_view.map_id:
+			if map_view.set_active_map(incoming_map_id) or _load_map_texture(incoming_map_id):
+				snapshot["map_id"] = incoming_map_id
+				title_label.text = "Map: %s" % incoming_map_id
 		_sync_map_entities()
 
 func _on_render_screen(visible: bool) -> void:

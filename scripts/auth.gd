@@ -40,13 +40,6 @@ func _build_ui() -> void:
 	background.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(background)
 	move_child(background, 0)
-	var glow := ColorRect.new()
-	glow.color = Color("172842")
-	glow.anchor_right = 1.0
-	glow.offset_bottom = 220.0
-	glow.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(glow)
-	move_child(glow, 1)
 	var center := CenterContainer.new()
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(center)

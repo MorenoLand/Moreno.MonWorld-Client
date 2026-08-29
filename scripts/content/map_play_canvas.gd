@@ -234,8 +234,6 @@ func set_active_map(selected_map_id: String) -> bool:
 	map_id = selected_map_id
 	if changed:
 		_reset_movement_state(true)
-		if authoritative_state:
-			has_spawn = false
 	_set_active_region(map_id)
 	_update_player_texture()
 	queue_redraw()

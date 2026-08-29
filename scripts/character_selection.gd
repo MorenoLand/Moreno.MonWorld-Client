@@ -5,10 +5,14 @@ signal logout_requested
 
 var card_grid: GridContainer
 var status_label: Label
-var play_buttons: Array[Button] = []
+var character_cards: Array[PanelContainer] = []
 var selecting: bool = false
 var warmed_map_ids: Dictionary = {}
 var warming_map_ids: Dictionary = {}
+var selected_character_id: int = 0
+var last_click_character_id: int = 0
+var last_click_msec: int = 0
+const DOUBLE_CLICK_WINDOW_MSEC: int = 400
 
 func _ready() -> void:
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
@@ -24,13 +28,6 @@ func _build_ui() -> void:
 	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	background.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(background)
-	var glow := ColorRect.new()
-	glow.color = Color("172842")
-	glow.anchor_right = 1.0
-	glow.offset_bottom = 220.0
-	glow.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(glow)
-	move_child(glow, 1)
 	var center := CenterContainer.new()
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(center)
@@ -59,16 +56,12 @@ func _build_ui() -> void:
 	var separator := HSeparator.new()
 	separator.add_theme_color_override("separator", Color("2a384b"))
 	box.add_child(separator)
-	var scroll := ScrollContainer.new()
-	scroll.custom_minimum_size = Vector2(0, 278)
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	box.add_child(scroll)
 	card_grid = GridContainer.new()
 	card_grid.columns = 2
 	card_grid.add_theme_constant_override("h_separation", 12)
 	card_grid.add_theme_constant_override("v_separation", 12)
 	card_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.add_child(card_grid)
+	box.add_child(card_grid)
 	status_label = Label.new()
 	status_label.custom_minimum_size = Vector2(0, 30)
 	status_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -101,7 +94,10 @@ func _on_characters_changed(value: Array) -> void:
 		return
 	for child in card_grid.get_children():
 		child.queue_free()
-	play_buttons.clear()
+	character_cards.clear()
+	selected_character_id = 0
+	last_click_character_id = 0
+	last_click_msec = 0
 	if value.is_empty():
 		var empty_label := Label.new()
 		empty_label.text = "No characters are available on this account."
@@ -205,20 +201,59 @@ func _add_character_card(character: Dictionary) -> void:
 		slot_label.text = _party_slot_text(party[index]) if index < party.size() and party[index] is Dictionary else ""
 		slot.add_child(slot_label)
 		party_box.add_child(slot)
-	var play_button := Button.new()
-	play_button.text = "PLAY"
 	var local_map_id: String = GameState.content.map_id_for_location(int(character.get("bank_id", -1)), int(character.get("map_id", -1))) if GameState.content != null else ""
-	play_button.set_meta("map_id", local_map_id)
-	play_button.disabled = not local_map_id.is_empty() and not warmed_map_ids.has(local_map_id)
-	play_button.pressed.connect(_select_character.bind(int(character.get("id", 0))))
-	_style_button(play_button, true)
-	box.add_child(play_button)
-	play_buttons.append(play_button)
+	var character_id: int = int(character.get("id", 0))
+	card.set_meta("character_id", character_id)
+	card.set_meta("map_id", local_map_id)
+	card.set_meta("available", _character_location_available(character))
+	card.set_meta("ready", local_map_id.is_empty() or warmed_map_ids.has(local_map_id))
+	card.mouse_filter = Control.MOUSE_FILTER_STOP
+	card.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if bool(card.get_meta("available", false)) and bool(card.get_meta("ready", false)) else Control.CURSOR_ARROW
+	card.gui_input.connect(_on_character_card_gui_input.bind(card, character_id))
+	character_cards.append(card)
+	_refresh_card_style(card)
+
+func _on_character_card_gui_input(event: InputEvent, card: PanelContainer, character_id: int) -> void:
+	if selecting or not bool(card.get_meta("available", false)) or not bool(card.get_meta("ready", false)):
+		return
+	var mouse_event: InputEventMouseButton = event as InputEventMouseButton
+	if mouse_event == null or mouse_event.button_index != MOUSE_BUTTON_LEFT or not mouse_event.pressed:
+		return
+	var now: int = Time.get_ticks_msec()
+	var double_click: bool = last_click_character_id == character_id and now - last_click_msec <= DOUBLE_CLICK_WINDOW_MSEC
+	selected_character_id = character_id
+	last_click_character_id = character_id
+	last_click_msec = now
+	status_label.text = "Opening character..." if double_click else "Character selected. Double-click to enter the world."
+	for candidate in character_cards:
+		_refresh_card_style(candidate)
+	card.accept_event()
+	if double_click:
+		_select_character(character_id)
+
+func _refresh_card_style(card: PanelContainer) -> void:
+	var available: bool = bool(card.get_meta("available", false)) and bool(card.get_meta("ready", false))
+	var selected: bool = int(card.get_meta("character_id", 0)) == selected_character_id
+	var fill: Color = Color("243653") if selected else Color("1b2635")
+	var border: Color = Color("6b8fff") if selected else Color("405873")
+	if not available:
+		fill = Color("101722")
+		border = Color("1d2938")
+	card.add_theme_stylebox_override("panel", _panel_style(fill, border, 10, 1))
 
 func _set_map_ready(map_id: String) -> void:
-	for button in play_buttons:
-		if str(button.get_meta("map_id", "")) == map_id:
-			button.disabled = false
+	for card in character_cards:
+		if str(card.get_meta("map_id", "")) == map_id:
+			card.set_meta("ready", true)
+			_refresh_card_style(card)
+
+func _character_location_available(character: Dictionary) -> bool:
+	if GameState.content == null:
+		return false
+	var local_map_id: String = GameState.content.map_id_for_location(int(character.get("bank_id", -1)), int(character.get("map_id", -1)))
+	if local_map_id.is_empty():
+		return false
+	return not GameState.content.map_data(local_map_id).is_empty()
 
 func _character_texture() -> Texture2D:
 	if GameState.content == null:
@@ -249,8 +284,8 @@ func _select_character(character_id: int) -> void:
 		status_label.modulate = Color("ff9a9a")
 		return
 	selecting = true
-	for button in play_buttons:
-		button.disabled = true
+	for card in character_cards:
+		card.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	status_label.modulate = Color("b8c7d9")
 	status_label.text = "Entering the world…"
 	character_selected.emit()
@@ -263,9 +298,9 @@ func _logout() -> void:
 
 func _on_connection_error(message: String) -> void:
 	selecting = false
-	for button in play_buttons:
-		var map_id: String = str(button.get_meta("map_id", ""))
-		button.disabled = not map_id.is_empty() and not warmed_map_ids.has(map_id)
+	for card in character_cards:
+		card.mouse_filter = Control.MOUSE_FILTER_STOP
+		_refresh_card_style(card)
 	if status_label != null:
 		status_label.modulate = Color("ff9a9a")
 		status_label.text = message
