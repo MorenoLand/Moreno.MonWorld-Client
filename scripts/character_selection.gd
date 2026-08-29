@@ -314,9 +314,15 @@ func _unhandled_input(event: InputEvent) -> void:
 	if key_event.keycode == KEY_ESCAPE:
 		get_viewport().set_input_as_handled()
 		_logout()
-	elif key_event.keycode == KEY_ENTER and play_buttons.size() == 1:
-		get_viewport().set_input_as_handled()
-		play_buttons[0].pressed.emit()
+	elif key_event.keycode == KEY_ENTER:
+		var character_id: int = selected_character_id
+		if character_id == 0 and character_cards.size() == 1:
+			var only_card: PanelContainer = character_cards[0]
+			if bool(only_card.get_meta("available", false)) and bool(only_card.get_meta("ready", false)):
+				character_id = int(only_card.get_meta("character_id", 0))
+		if character_id != 0:
+			get_viewport().set_input_as_handled()
+			_select_character(character_id)
 
 func _panel_style(background: Color, border: Color, radius: int, border_width: int) -> StyleBoxFlat:
 	var style := StyleBoxFlat.new()
