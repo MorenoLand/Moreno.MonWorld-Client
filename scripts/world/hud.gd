@@ -1,12 +1,17 @@
 class_name OpenMMOHud
 extends Control
 
+signal follow_requested(party_index: int)
+
 const PARTY_COUNT: int = 6
 var location_label: Label
 var money_label: Label
 var time_label: Label
 var party_box: VBoxContainer
 var party_labels: Array = []
+var party_slots: Array = []
+var party_context_menu: PopupMenu
+var party_context_index: int = -1
 var action_bar: HBoxContainer
 var action_panel: PanelContainer
 var hotbar_panel: PanelContainer
@@ -66,7 +71,7 @@ func _build_ui() -> void:
 	party_box.offset_right = -16.0
 	party_box.custom_minimum_size = Vector2(72.0, 0.0)
 	party_box.add_theme_constant_override("separation", 5)
-	party_box.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	party_box.mouse_filter = Control.MOUSE_FILTER_PASS
 	add_child(party_box)
 	var party_title: Label = Label.new()
 	party_title.text = "PARTY"
@@ -76,14 +81,24 @@ func _build_ui() -> void:
 	for index in range(PARTY_COUNT):
 		var slot: PanelContainer = PanelContainer.new()
 		slot.custom_minimum_size = Vector2(72.0, 52.0)
+		slot.mouse_filter = Control.MOUSE_FILTER_STOP
 		slot.add_theme_stylebox_override("panel", _panel_style(Color("10151eb8"), Color("5f7185")))
 		var label: Label = Label.new()
+		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		label.add_theme_font_size_override("font_size", 10)
 		slot.add_child(label)
 		party_labels.append(label)
+		party_slots.append(slot)
+		slot.gui_input.connect(_on_party_slot_gui_input.bind(index))
 		party_box.add_child(slot)
+	party_context_menu = PopupMenu.new()
+	party_context_menu.add_item("Follow", 1)
+	party_context_menu.add_item("Stop following", 2)
+	party_context_menu.id_pressed.connect(_on_party_context_menu_pressed)
+	party_context_menu.z_index = 20
+	add_child(party_context_menu)
 	action_panel = PanelContainer.new()
 	action_panel.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
 	action_panel.offset_left = -286.0
@@ -370,6 +385,29 @@ func _refresh_time() -> void:
 	var weekday: String = str(weekdays[clampi(int(now.get("weekday", 0)), 0, weekdays.size() - 1)])
 	time_label.text = "%s, %02d:%02d" % [weekday, int(now.get("hour", 0)), int(now.get("minute", 0))]
 
+func _on_party_slot_gui_input(event: InputEvent, party_index: int) -> void:
+	if not event is InputEventMouseButton:
+		return
+	var mouse_event: InputEventMouseButton = event
+	if mouse_event.button_index != MOUSE_BUTTON_RIGHT or not mouse_event.pressed:
+		return
+	var member: Variant = current_party[party_index] if party_index >= 0 and party_index < current_party.size() else {}
+	if not member is Dictionary or int((member as Dictionary).get("dex_id", (member as Dictionary).get("species", 0))) <= 0:
+		return
+	party_context_index = party_index
+	party_context_menu.position = Vector2i(get_global_mouse_position())
+	party_context_menu.popup()
+	get_viewport().set_input_as_handled()
+
+func _on_party_context_menu_pressed(menu_id: int) -> void:
+	if party_context_index < 0:
+		return
+	if menu_id == 1:
+		follow_requested.emit(party_context_index)
+	elif menu_id == 2:
+		follow_requested.emit(-1)
+	party_context_index = -1
+
 func _format_money(value: int) -> String:
 	var negative: bool = value < 0
 	var digits: String = str(absi(value))
@@ -381,10 +419,10 @@ func _format_money(value: int) -> String:
 	return "-" + formatted if negative else formatted
 
 func _party_slot_text(member: Dictionary) -> String:
-	var dex_id: int = int(member.get("dex_id", 0))
+	var dex_id: int = int(member.get("dex_id", member.get("species", 0)))
 	if dex_id <= 0:
 		return ""
 	var nickname: String = str(member.get("nickname", "")).strip_edges()
 	if nickname.is_empty():
-		nickname = "#%03d" % dex_id
+		nickname = current_content.battle_pokemon_name(dex_id) if current_content != null else "#%03d" % dex_id
 	return "%s\nLv %d" % [nickname.left(7), int(member.get("level", 0))]

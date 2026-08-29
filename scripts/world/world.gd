@@ -52,6 +52,7 @@ func _ready() -> void:
 	GameState.connection_error.connect(_on_connection_error)
 	GameState.dialog_action_received.connect(_on_dialog_action_received)
 	GameState.dialog_state_received.connect(_on_dialog_state_received)
+	GameState.battle_event_received.connect(_on_battle_event)
 	_build_ui()
 	if not GameState.pending_map_load.is_empty():
 		call_deferred("_consume_pending_map_load")
@@ -72,6 +73,7 @@ func _build_ui() -> void:
 	add_child(audio)
 	hud = HUD_SCRIPT.new()
 	hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	hud.follow_requested.connect(_on_follow_requested)
 	add_child(hud)
 	chat_box = CHAT_SCRIPT.new()
 	chat_box.message_submitted.connect(_send_chat)
@@ -455,9 +457,23 @@ func _sync_map_entities() -> void:
 		return
 	var players: Array = []
 	for key in entities:
-		var entity: Dictionary = entities[key]
+		var entity: Dictionary = (entities[key] as Dictionary).duplicate()
+		var entity_id: int = int(entity.get("entity_id", entity.get("character_id", entity.get("user_id", 0))))
+		entity["battle"] = bool(GameState.battle_presence.get(str(entity_id), false))
 		players.append(entity)
 	map_view.set_world_entities(players, selected_character_id)
+
+func _on_battle_event(value: Dictionary) -> void:
+	if str(value.get("type", "")) == "presence":
+		_sync_map_entities()
+
+func _on_follow_requested(party_index: int) -> void:
+	if map_view != null:
+		map_view.set_following_party_index(party_index)
+
+func set_battle_overlay_active(value: bool) -> void:
+	if map_view != null:
+		map_view.set_input_enabled(not value)
 
 func _retain_server_entities_for_map(target_map_id: String) -> void:
 	var retained: Dictionary = {}
@@ -562,8 +578,9 @@ func _server_dialogue_choices(action_type: int, detail_value: Variant) -> Array:
 	return choices
 
 func _pokemon_choice_name(species_id: int) -> String:
-	var names: Dictionary = {1: "BULBASAUR", 4: "CHARMANDER", 7: "SQUIRTLE", 252: "TREECKO", 255: "TORCHIC", 258: "MUDKIP"}
-	return str(names.get(species_id, "POKEMON #%d" % species_id))
+	if GameState.content != null and species_id > 0:
+		return GameState.content.battle_pokemon_name(species_id)
+	return "POKEMON #%d" % species_id
 
 func _resolve_dialogue_pages(pages: Array) -> Array:
 	var values: Dictionary = _dialogue_placeholder_values()

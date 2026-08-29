@@ -43,6 +43,7 @@ var map_transition_pending: bool = false
 var active_map_key: String = ""
 var battle_state: Dictionary = {}
 var battle_in_progress: bool = false
+var battle_presence: Dictionary = {}
 
 func _ready() -> void:
 	login_session = SESSION_SCRIPT.new()
@@ -158,6 +159,7 @@ func select_character(character_id: int) -> bool:
 	map_transition_pending = false
 	battle_state.clear()
 	battle_in_progress = false
+	battle_presence.clear()
 	return game_session.send_packet(GAME_PROTOCOL_SCRIPT.SELECT_CHARACTER, GAME_PROTOCOL_SCRIPT.encode_select_character(character_id))
 
 func complete_map_load(load_key: String) -> bool:
@@ -222,6 +224,7 @@ func disconnect_game() -> void:
 	map_transition_pending = false
 	battle_state.clear()
 	battle_in_progress = false
+	battle_presence.clear()
 	game_session.close()
 
 func _on_login_established() -> void:
@@ -302,6 +305,7 @@ func _on_game_packet(opcode: int, payload: PackedByteArray) -> void:
 			connection_error.emit(str(response.get("error", "OpenMMO entity presence packet is malformed")))
 			return
 		var presence: Dictionary = response.presence
+		battle_presence[str(int(presence.get("entity_id", 0)))] = int(presence.get("status", 0)) != 0
 		if int(presence.get("entity_id", 0)) == int(current_character.get("id", 0)):
 			battle_in_progress = int(presence.get("status", 0)) != 0
 			battle_state["in_progress"] = battle_in_progress

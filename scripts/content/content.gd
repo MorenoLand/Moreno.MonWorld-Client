@@ -57,6 +57,10 @@ var source_profile: Dictionary = {}
 var map_cache: Dictionary = {}
 var map_topology_cache: Dictionary = {}
 var sprite_cache: Dictionary = {}
+var battle_table_cache: Dictionary = {}
+var battle_sprite_cache: Dictionary = {}
+var battle_name_cache: Dictionary = {}
+var battle_move_name_cache: Dictionary = {}
 var string_catalog: Dictionary = {}
 
 static func from_rom_path(path: String) -> Dictionary:
@@ -347,6 +351,127 @@ func string_catalog_id() -> String:
 	if profile_id.is_empty():
 		profile_id = content_id()
 	return region.path_join(profile_id)
+
+func battle_pokemon_name(species_id: int) -> String:
+	if species_id <= 0:
+		return "Pokemon"
+	var cache_key: String = str(species_id)
+	if battle_name_cache.has(cache_key):
+		return str(battle_name_cache[cache_key])
+	var tables: Dictionary = _battle_rom_tables()
+	var name: String = _battle_fixed_name(int(tables.get("species_name_table", -1)), _battle_internal_species_id(species_id), 11, "POKEMON #%d" % species_id)
+	battle_name_cache[cache_key] = name
+	return name
+
+func battle_move_name(move_id: int) -> String:
+	if move_id <= 0:
+		return "Move"
+	var cache_key: String = str(move_id)
+	if battle_move_name_cache.has(cache_key):
+		return str(battle_move_name_cache[cache_key])
+	var tables: Dictionary = _battle_rom_tables()
+	var name: String = _battle_fixed_name(int(tables.get("move_name_table", -1)), move_id, 13, "MOVE %d" % move_id)
+	battle_move_name_cache[cache_key] = name
+	return name
+
+func battle_pokemon_sprite(species_id: int, back: bool = false) -> Dictionary:
+	if species_id <= 0:
+		return {"ok": false}
+	var cache_key: String = "%d:%s" % [species_id, "back" if back else "front"]
+	if battle_sprite_cache.has(cache_key):
+		return battle_sprite_cache[cache_key]
+	var tables: Dictionary = _battle_rom_tables()
+	var table_offset: int = int(tables.get("back_sprite_table" if back else "front_sprite_table", -1))
+	var palette_table_offset: int = int(tables.get("palette_table", -1))
+	var internal_id: int = _battle_internal_species_id(species_id)
+	var sprite_entry: int = table_offset + internal_id * 8
+	var palette_entry: int = palette_table_offset + internal_id * 8
+	if table_offset < 0 or palette_table_offset < 0 or not _valid_range(sprite_entry, 8) or not _valid_range(palette_entry, 4):
+		return {"ok": false}
+	var sprite_offset: int = _read_rom_pointer(sprite_entry)
+	var sprite_size: int = _read_u16(sprite_entry + 4)
+	var sprite_data: PackedByteArray = _read_lz77(sprite_offset)
+	if sprite_data.size() < 2048 and sprite_size > 0 and _valid_range(sprite_offset, sprite_size):
+		sprite_data = rom_data.slice(sprite_offset, sprite_offset + sprite_size)
+	if sprite_data.size() < 2048:
+		return {"ok": false}
+	var palette_offset: int = _read_rom_pointer(palette_entry)
+	var palette_data: PackedByteArray = _read_lz77(palette_offset)
+	if palette_data.size() < 32 and _valid_range(palette_offset, 32):
+		palette_data = rom_data.slice(palette_offset, palette_offset + 32)
+	if palette_data.size() < 32:
+		return {"ok": false}
+	var image: Image = Image.create(64, 64, false, Image.FORMAT_RGBA8)
+	for y in range(64):
+		for x in range(64):
+			var tile_offset: int = ((y / 8) * 8 + (x / 8)) * 32
+			var pixel_offset: int = tile_offset + (y % 8) * 4 + (x % 8) / 2
+			var packed: int = int(sprite_data[pixel_offset])
+			var palette_index: int = (packed & 0x0F) if x % 2 == 0 else ((packed >> 4) & 0x0F)
+			var color_value: int = int(palette_data[palette_index * 2]) | (int(palette_data[palette_index * 2 + 1]) << 8)
+			var color := _rgb555_color(color_value)
+			if palette_index == 0:
+				color.a = 0.0
+			image.set_pixel(x, y, color)
+	var result: Dictionary = {"ok": true, "texture": ImageTexture.create_from_image(image), "width": 64, "height": 64, "species_id": species_id, "back": back}
+	battle_sprite_cache[cache_key] = result
+	return result
+
+func _battle_internal_species_id(species_id: int) -> int:
+	return species_id if species_id <= 251 else species_id + 25
+
+func _battle_rom_tables() -> Dictionary:
+	if not battle_table_cache.is_empty():
+		return battle_table_cache
+	var names: Array = ["pokemon emerald version", "pokemon firered version", "pokemon leafgreen version", "pokemon red version", "pokemon green version", "pokemon ruby version", "pokemon sapphire version"]
+	var name_offset: int = -1
+	for game_name in names:
+		name_offset = _find_rom_ascii(str(game_name))
+		if name_offset >= 0:
+			break
+	if name_offset < 8:
+		return {}
+	var header_offset: int = name_offset - 8
+	var tables: Dictionary = {"header_offset": header_offset, "front_sprite_table": _read_rom_pointer(header_offset + 40), "back_sprite_table": _read_rom_pointer(header_offset + 44), "palette_table": _read_rom_pointer(header_offset + 48), "species_name_table": _read_rom_pointer(header_offset + 68), "move_name_table": _read_rom_pointer(header_offset + 72), "move_table": _format_int("battle_move_table_offset", -1)}
+	battle_table_cache = tables
+	return battle_table_cache
+
+func _find_rom_ascii(value: String) -> int:
+	var needle: PackedByteArray = value.to_ascii_buffer()
+	if needle.is_empty() or rom_data.size() < needle.size():
+		return -1
+	for offset in range(rom_data.size() - needle.size() + 1):
+		var matched: bool = true
+		for index in range(needle.size()):
+			var actual: int = int(rom_data[offset + index])
+			var expected: int = int(needle[index])
+			if actual >= 65 and actual <= 90:
+				actual += 32
+			if expected >= 65 and expected <= 90:
+				expected += 32
+			if actual != expected:
+				matched = false
+				break
+		if matched:
+			return offset
+	return -1
+
+func _battle_fixed_name(table_offset: int, index: int, width: int, fallback: String) -> String:
+	var offset: int = table_offset + index * width
+	if table_offset < 0 or index < 0 or not _valid_range(offset, width):
+		return fallback
+	var output: String = ""
+	for position in range(width):
+		var value: int = int(rom_data[offset + position])
+		if value == 0xFF:
+			break
+		if value != 0:
+			output += _decode_rom_character(value)
+	output = output.strip_edges()
+	return output if not output.is_empty() else fallback
+
+func _rgb555_color(value: int) -> Color:
+	return Color(float(value & 0x1F) / 31.0, float((value >> 5) & 0x1F) / 31.0, float((value >> 10) & 0x1F) / 31.0, 1.0)
 
 func map_data(map_id: String) -> Dictionary:
 	for map_value in manifest.get("maps", []):

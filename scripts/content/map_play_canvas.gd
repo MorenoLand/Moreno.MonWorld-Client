@@ -66,6 +66,11 @@ var world_entities: Array = []
 var authoritative_state: bool = false
 var transition_active: bool = false
 var dialogue_active: bool = false
+var following_party_index: int = -1
+var follower_texture: Texture2D
+var follower_species_id: int = 0
+var follower_position: Vector2 = Vector2.ZERO
+var follower_initialized: bool = false
 var resize_redraw_pending: bool = false
 var connected_preload_generation: int = 0
 
@@ -133,6 +138,54 @@ func set_dialogue_active(value: bool) -> void:
 		movement_retry_elapsed = 0.0
 	else:
 		_restore_interaction_facing()
+
+func set_following_party_index(index: int) -> void:
+	following_party_index = index
+	follower_initialized = false
+	follower_texture = null
+	follower_species_id = 0
+	if index >= 0:
+		_update_follower_texture()
+	queue_redraw()
+
+func _update_follower_texture() -> void:
+	if following_party_index < 0 or content == null:
+		return
+	var party_value: Variant = GameState.current_character.get("party", [])
+	if not party_value is Array or following_party_index >= (party_value as Array).size():
+		follower_texture = null
+		follower_species_id = 0
+		return
+	var member_value: Variant = (party_value as Array)[following_party_index]
+	if not member_value is Dictionary:
+		return
+	var species_id: int = int((member_value as Dictionary).get("dex_id", (member_value as Dictionary).get("species", 0)))
+	if species_id <= 0:
+		follower_texture = null
+		follower_species_id = 0
+		return
+	if species_id == follower_species_id and follower_texture != null:
+		return
+	var sprite: Dictionary = content.battle_pokemon_sprite(species_id, false)
+	follower_texture = sprite.get("texture") as Texture2D
+	follower_species_id = species_id if follower_texture != null else 0
+
+func _update_follower(delta: float) -> void:
+	if following_party_index < 0 or not has_spawn or content == null:
+		return
+	_update_follower_texture()
+	if follower_texture == null:
+		return
+	var player_world: Vector2 = _movement_world_position()
+	var direction: Vector2 = _direction_vector(player_facing)
+	if direction == Vector2.ZERO:
+		direction = Vector2.UP
+	var target: Vector2 = player_world - direction
+	if not follower_initialized or follower_position.distance_to(target) > 2.5:
+		follower_position = target
+		follower_initialized = true
+		return
+	follower_position = follower_position.move_toward(target, delta * 5.0)
 
 func set_local_entity_id(value: int) -> void:
 	local_entity_id = value
@@ -549,6 +602,7 @@ func set_world_entities(values: Array, local_character_id: int) -> void:
 		if texture == null and not is_npc:
 			continue
 		var stored_entity: Dictionary = {"entity_key": entity_key, "entity_id": entity_id, "npc": is_npc, "map_id": entity_map_id, "texture": texture, "width": texture.get_width() if texture != null else 0, "height": texture.get_height() if texture != null else 0, "x": resolved_x, "y": resolved_y, "elevation": int(entity.get("elevation", 3)), "facing": resolved_facing, "default_facing": int(entity.get("facing", 1)), "graphics_id": graphics_id, "sprite_region_id": sprite_region_id, "blocks_movement": bool(entity.get("blocks_movement", is_npc)), "visible": true, "movement_scripted": script_busy, "movement_active": false, "movement_start": Vector2.ZERO, "movement_target": Vector2.ZERO, "movement_elapsed": 0.0, "movement_duration": 0.0, "movement_action": -1, "movement_animation": false, "movement_frame": -1, "movement_queue": []}
+		stored_entity["battle"] = bool(entity.get("battle", false))
 		for dynamic_key in ["visible", "movement_scripted", "movement_active", "movement_start", "movement_target", "movement_elapsed", "movement_duration", "movement_action", "movement_animation", "movement_frame", "movement_queue"]:
 			if previous.has(dynamic_key):
 				stored_entity[dynamic_key] = previous.get(dynamic_key)
@@ -1002,6 +1056,7 @@ func _process(delta: float) -> void:
 		held_direction = 0
 		return
 	_process_world_entity_movements(delta)
+	_update_follower(delta)
 	if _text_input_has_focus():
 		held_direction = 0
 		movement_retry_elapsed = 0.0
@@ -1392,11 +1447,15 @@ func _draw() -> void:
 		if not bool(entity.get("visible", true)):
 			continue
 		var entity_texture: Texture2D = entity.get("texture") as Texture2D
-		if entity_texture == null:
-			continue
 		var entity_map_id: String = str(entity.get("map_id", ""))
 		var entity_world: Vector2 = _world_position(entity_map_id, _world_entity_render_position(entity))
+		if bool(entity.get("battle", false)):
+			drawables.append({"kind": "battle_marker", "world_position": Vector2((entity_world.x + 0.5) * TILE_PIXELS, entity_world.y * TILE_PIXELS - 3.0), "sort_y": entity_world.y + 0.1, "sort_order": 3})
+		if entity_texture == null:
+			continue
 		drawables.append({"kind": "sprite", "texture": entity_texture, "width": float(entity.get("width", 0)), "height": float(entity.get("height", 0)), "world_anchor": Vector2((entity_world.x + 0.5) * TILE_PIXELS, (entity_world.y + 1.0) * TILE_PIXELS), "sort_y": entity_world.y + 1.0, "sort_order": 0})
+	if follower_texture != null and following_party_index >= 0 and follower_initialized:
+		drawables.append({"kind": "sprite", "texture": follower_texture, "width": 32.0, "height": 32.0, "world_anchor": (follower_position + Vector2(0.5, 1.0)) * TILE_PIXELS, "sort_y": follower_position.y + 1.0, "sort_order": 0})
 	if player_texture != null and player_visible:
 		var player_size: Vector2 = Vector2(player_texture.get_width(), player_texture.get_height())
 		var player_anchor: Vector2 = (world_player + Vector2(0.5, 1.0)) * TILE_PIXELS
@@ -1415,6 +1474,16 @@ func _draw() -> void:
 			var animated_drawable_texture: Texture2D = drawable.get("texture") as Texture2D
 			var animated_world_position: Vector2 = drawable.get("world_position", Vector2.ZERO)
 			draw_texture_rect(animated_drawable_texture, Rect2(destination_position + (animated_world_position - camera_origin) * tile_scale, Vector2(8.0, 8.0) * tile_scale), false)
+			continue
+		if str(drawable.get("kind", "sprite")) == "battle_marker":
+			var marker_world_position: Vector2 = drawable.get("world_position", Vector2.ZERO)
+			var marker_position: Vector2 = destination_position + (marker_world_position - camera_origin) * tile_scale
+			var marker_radius: float = maxf(4.0 * tile_scale, 3.0)
+			draw_circle(marker_position, marker_radius, Color("f5f7fb"))
+			draw_arc(marker_position, marker_radius - 0.5, PI, TAU, 16, Color("e45763"), maxf(tile_scale, 1.0), true)
+			draw_line(marker_position + Vector2(-marker_radius, 0.0), marker_position + Vector2(marker_radius, 0.0), Color("202633"), maxf(tile_scale, 1.0), true)
+			draw_circle(marker_position, marker_radius * 0.28, Color("202633"))
+			draw_circle(marker_position, marker_radius * 0.13, Color("f5f7fb"))
 			continue
 		var drawable_texture: Texture2D = drawable.get("texture") as Texture2D
 		var drawable_size: Vector2 = Vector2(float(drawable.get("width", 0.0)), float(drawable.get("height", 0.0)))
