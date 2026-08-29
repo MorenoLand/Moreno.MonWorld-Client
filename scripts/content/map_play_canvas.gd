@@ -631,10 +631,12 @@ func _request_move(direction: int) -> bool:
 			return true
 		if not GameState.send_input(_direction_name(direction), player_position.x, player_position.y):
 			return false
-		var server_traversal: bool = bool(result.get("stair", false)) or bool(result.get("door", false)) or str(result.get("map_id", map_id)) != map_id
-		pending_map_id = map_id
-		pending_position = player_position + Vector2i(_direction_vector(direction)) if server_traversal else Vector2i(int(result.get("x", player_position.x)), int(result.get("y", player_position.y)))
-		pending_elevation = player_elevation if server_traversal else int(result.get("elevation", player_elevation))
+		var destination_map_id: String = str(result.get("map_id", map_id))
+		var map_transition: bool = destination_map_id != map_id
+		var server_traversal: bool = bool(result.get("stair", false)) or bool(result.get("door", false)) or map_transition
+		pending_map_id = destination_map_id
+		pending_position = Vector2i(int(result.get("x", player_position.x)), int(result.get("y", player_position.y))) if map_transition else player_position + Vector2i(_direction_vector(direction)) if server_traversal else Vector2i(int(result.get("x", player_position.x)), int(result.get("y", player_position.y)))
+		pending_elevation = int(result.get("elevation", player_elevation)) if map_transition else player_elevation if server_traversal else int(result.get("elevation", player_elevation))
 		movement_stair = false if server_traversal else bool(result.get("stair", false))
 		movement_stair_behavior = 0 if server_traversal else int(result.get("stair_behavior", 0))
 		movement_door = false

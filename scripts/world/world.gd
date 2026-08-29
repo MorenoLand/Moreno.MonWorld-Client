@@ -20,6 +20,10 @@ var dialogue_overlay
 var audio
 var transition_overlay: ColorRect
 var transition_tween: Tween
+var debug_panel: PanelContainer
+var debug_label: Label
+var debug_dragging: bool = false
+var debug_drag_offset: Vector2 = Vector2.ZERO
 var transition_reveal_pending: bool = false
 var transition_map_ready: bool = false
 var transition_screen_ready: bool = false
@@ -33,6 +37,7 @@ var server_dialogue_sequence: int = 0
 var connected_world_generation: int = 0
 
 func _ready() -> void:
+	set_process_input(true)
 	set_process_unhandled_input(true)
 	selected_character_id = int(GameState.current_character.get("id", 0))
 	GameState.map_load_received.connect(_on_map_load)
@@ -84,6 +89,7 @@ func _build_ui() -> void:
 	transition_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	transition_overlay.visible = false
 	add_child(transition_overlay)
+	_build_debug_panel()
 	resized.connect(_layout_ui)
 	_layout_ui()
 
@@ -94,6 +100,107 @@ func _layout_ui() -> void:
 	chat_box.offset_top = -214
 	chat_box.offset_right = 444
 	chat_box.offset_bottom = -24
+	_clamp_debug_panel_position()
+
+func _build_debug_panel() -> void:
+	debug_panel = PanelContainer.new()
+	debug_panel.name = "DebugPanel"
+	debug_panel.position = Vector2(24.0, 120.0)
+	debug_panel.custom_minimum_size = Vector2(340.0, 0.0)
+	debug_panel.z_index = 1000
+	debug_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	var panel_style: StyleBoxFlat = StyleBoxFlat.new()
+	panel_style.bg_color = Color("10151ef2")
+	panel_style.border_color = Color("5f7185")
+	panel_style.set_border_width_all(1)
+	panel_style.set_corner_radius_all(3)
+	panel_style.content_margin_left = 10.0
+	panel_style.content_margin_top = 8.0
+	panel_style.content_margin_right = 10.0
+	panel_style.content_margin_bottom = 8.0
+	debug_panel.add_theme_stylebox_override("panel", panel_style)
+	add_child(debug_panel)
+	var content: VBoxContainer = VBoxContainer.new()
+	content.add_theme_constant_override("separation", 6)
+	debug_panel.add_child(content)
+	var title_bar: HBoxContainer = HBoxContainer.new()
+	title_bar.custom_minimum_size = Vector2(0.0, 28.0)
+	title_bar.mouse_filter = Control.MOUSE_FILTER_STOP
+	title_bar.gui_input.connect(_on_debug_title_input)
+	content.add_child(title_bar)
+	var title: Label = Label.new()
+	title.text = "DEBUG  Ctrl+Shift+;"
+	title.add_theme_font_size_override("font_size", 15)
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title_bar.add_child(title)
+	var close_button: Button = Button.new()
+	close_button.text = "X"
+	close_button.custom_minimum_size = Vector2(28.0, 28.0)
+	close_button.focus_mode = Control.FOCUS_NONE
+	close_button.pressed.connect(_toggle_debug_panel)
+	title_bar.add_child(close_button)
+	debug_label = Label.new()
+	debug_label.add_theme_font_size_override("font_size", 13)
+	debug_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	content.add_child(debug_label)
+	debug_panel.visible = false
+
+func _clamp_debug_panel_position() -> void:
+	if debug_panel == null:
+		return
+	var viewport_size: Vector2 = get_viewport_rect().size
+	var max_position := Vector2(maxf(viewport_size.x - debug_panel.size.x, 0.0), maxf(viewport_size.y - debug_panel.size.y, 0.0))
+	debug_panel.position = Vector2(clampf(debug_panel.position.x, 0.0, max_position.x), clampf(debug_panel.position.y, 0.0, max_position.y))
+
+func _toggle_debug_panel() -> void:
+	if debug_panel == null:
+		return
+	debug_panel.visible = not debug_panel.visible
+	if debug_panel.visible:
+		_update_debug_panel(0.0)
+
+func _update_debug_panel(delta: float) -> void:
+	if debug_label == null:
+		return
+	var map_id: String = "-"
+	var position_text: String = "-"
+	var elevation: int = -1
+	var facing: int = -1
+	var movement_status: String = "idle"
+	var target_text: String = "-"
+	var transition_status: String = "no"
+	var spawn_status: String = "no"
+	var input_status: String = "off"
+	if map_view != null:
+		map_id = str(map_view.map_id)
+		position_text = "%d, %d" % [map_view.player_position.x, map_view.player_position.y]
+		elevation = int(map_view.player_elevation)
+		facing = int(map_view.player_facing)
+		if bool(map_view.movement_active):
+			movement_status = "active"
+			target_text = "%d, %d" % [map_view.movement_target.x, map_view.movement_target.y]
+		transition_status = "yes" if bool(map_view.transition_active) or transition_reveal_pending else "no"
+		spawn_status = "yes" if bool(map_view.has_spawn) else "no"
+		input_status = "on" if bool(map_view.input_enabled) else "off"
+	var server_location: String = "%s/%s" % [str(GameState.current_character.get("bank_id", "-")), str(GameState.current_character.get("map_id", "-"))]
+	var viewport_size: Vector2 = get_viewport_rect().size
+	debug_label.text = "FPS: %d\nFrame: %.1f ms\nMap: %s\nServer bank/map: %s\nPosition: %s\nElevation: %d  Facing: %d\nMovement: %s\nTarget: %s\nTransition: %s\nSpawn ready: %s\nInput: %s\nHeld: %s\nEntities: %d\nViewport: %d x %d" % [Engine.get_frames_per_second(), delta * 1000.0, map_id, server_location, position_text, elevation, facing, movement_status, target_text, transition_status, spawn_status, input_status, held_input if not held_input.is_empty() else "-", entities.size(), int(viewport_size.x), int(viewport_size.y)]
+
+func _on_debug_title_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton:
+		var button_event: InputEventMouseButton = event as InputEventMouseButton
+		if button_event.button_index == MOUSE_BUTTON_LEFT:
+			debug_dragging = button_event.pressed
+			if debug_dragging:
+				debug_drag_offset = debug_panel.position - get_global_mouse_position()
+			get_viewport().set_input_as_handled()
+		return
+	if event is InputEventMouseMotion and debug_dragging:
+		var pointer_position: Vector2 = get_global_mouse_position() + debug_drag_offset
+		var viewport_size: Vector2 = get_viewport_rect().size
+		var max_position := Vector2(maxf(viewport_size.x - debug_panel.size.x, 0.0), maxf(viewport_size.y - debug_panel.size.y, 0.0))
+		debug_panel.position = Vector2(clampf(pointer_position.x, 0.0, max_position.x), clampf(pointer_position.y, 0.0, max_position.y))
+		get_viewport().set_input_as_handled()
 
 func _consume_pending_map_load() -> void:
 	if not GameState.pending_map_load.is_empty():
@@ -349,8 +456,9 @@ func _retain_server_entities_for_map(target_map_id: String) -> void:
 			retained[key] = entity
 	entities = retained
 
-func _process(_delta: float) -> void:
-	return
+func _process(delta: float) -> void:
+	if debug_panel != null and debug_panel.visible:
+		_update_debug_panel(delta)
 
 func _on_chat(value: Dictionary) -> void:
 	if chat_box != null:
@@ -432,8 +540,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	var key_event: InputEventKey = event as InputEventKey
 	if key_event.keycode == KEY_F3 and key_event.pressed and not key_event.echo:
-		if hud != null:
-			hud.toggle_stats()
+		_toggle_debug_panel()
 		get_viewport().set_input_as_handled()
 		return
 	if key_event.keycode == KEY_B and key_event.pressed and not key_event.echo:
@@ -464,6 +571,15 @@ func _unhandled_input(event: InputEvent) -> void:
 	if dialogue_overlay != null and dialogue_overlay.is_open():
 		return
 	return
+
+func _input(event: InputEvent) -> void:
+	if not event is InputEventKey:
+		return
+	var key_event: InputEventKey = event as InputEventKey
+	var is_semicolon: bool = key_event.keycode == KEY_SEMICOLON or key_event.physical_keycode == KEY_SEMICOLON
+	if is_semicolon and key_event.ctrl_pressed and key_event.shift_pressed and key_event.pressed and not key_event.echo:
+		_toggle_debug_panel()
+		get_viewport().set_input_as_handled()
 
 func _hotkey_slot_for_key(keycode: int) -> int:
 	match keycode:

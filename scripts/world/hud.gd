@@ -2,12 +2,9 @@ class_name OpenMMOHud
 extends Control
 
 const PARTY_COUNT: int = 6
-const STATS_UPDATE_INTERVAL: float = 0.25
 var location_label: Label
 var money_label: Label
 var time_label: Label
-var stats_panel: PanelContainer
-var stats_label: Label
 var party_box: VBoxContainer
 var party_labels: Array = []
 var action_bar: HBoxContainer
@@ -25,8 +22,6 @@ var current_map_id: String = ""
 var current_state: Dictionary = {}
 var current_party: Array = []
 var clock_elapsed: float = 0.0
-var stats_elapsed: float = 0.0
-var stats_open: bool = true
 var bag_open: bool = false
 var menu_open: bool = false
 
@@ -35,7 +30,6 @@ func _ready() -> void:
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	_build_ui()
 	_refresh()
-	_refresh_stats()
 
 func set_state(content, map_id: String, state: Dictionary = {}, party: Array = []) -> void:
 	current_content = content
@@ -90,19 +84,6 @@ func _build_ui() -> void:
 		slot.add_child(label)
 		party_labels.append(label)
 		party_box.add_child(slot)
-	stats_panel = PanelContainer.new()
-	stats_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	stats_panel.offset_left = -196.0
-	stats_panel.offset_top = 16.0
-	stats_panel.offset_right = -16.0
-	stats_panel.offset_bottom = 88.0
-	stats_panel.add_theme_stylebox_override("panel", _panel_style(Color("10151ed9"), Color("5f7185")))
-	add_child(stats_panel)
-	stats_label = Label.new()
-	stats_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	stats_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	stats_label.add_theme_font_size_override("font_size", 13)
-	stats_panel.add_child(stats_label)
 	action_panel = PanelContainer.new()
 	action_panel.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
 	action_panel.offset_left = -286.0
@@ -273,18 +254,9 @@ func _panel_style(background: Color, border: Color) -> StyleBoxFlat:
 
 func _process(delta: float) -> void:
 	clock_elapsed += delta
-	stats_elapsed += delta
 	if clock_elapsed >= 1.0:
 		clock_elapsed = 0.0
 		_refresh_time()
-	if stats_elapsed >= STATS_UPDATE_INTERVAL:
-		stats_elapsed = 0.0
-		_refresh_stats()
-
-func toggle_stats() -> void:
-	stats_open = not stats_open
-	if stats_panel != null:
-		stats_panel.visible = stats_open
 
 func toggle_bag() -> void:
 	bag_open = not bag_open
@@ -370,13 +342,6 @@ func _bag_item_matches_category(item: Dictionary, category_container: bool) -> b
 		"TMs": return raw_category in ["tm", "tms", "hm", "tm_hm"]
 		"Berries": return raw_category in ["berry", "berries"]
 	return raw_category in ["item", "items", "medicine", "held"]
-
-func _refresh_stats() -> void:
-	if stats_label == null:
-		return
-	var fps: int = Engine.get_frames_per_second()
-	var process_ms: float = float(Performance.get_monitor(Performance.TIME_PROCESS)) * 1000.0
-	stats_label.text = "FPS %d\nFrame %.1f ms" % [fps, process_ms]
 
 func _refresh() -> void:
 	if location_label == null:
