@@ -382,7 +382,7 @@ func set_player_state(x: int, y: int, elevation: int = 3, facing: int = 1) -> vo
 			pending_elevation = elevation
 		queue_redraw()
 		return
-	if authoritative_state and has_spawn and absi(next_position.x - player_position.x) + absi(next_position.y - player_position.y) == 1:
+	if authoritative_state and has_spawn and not movement_active and absi(next_position.x - player_position.x) + absi(next_position.y - player_position.y) == 1:
 		player_facing = _direction_between(player_position, next_position)
 		movement_start = Vector2(player_position)
 		movement_target = Vector2(next_position)
@@ -399,6 +399,7 @@ func set_player_state(x: int, y: int, elevation: int = 3, facing: int = 1) -> vo
 		movement_start = Vector2(player_position)
 		movement_target = movement_start
 		movement_active = false
+		movement_prediction_pending = false
 	has_spawn = true
 	_update_player_texture()
 	queue_redraw()
@@ -427,6 +428,13 @@ func _direction_vector(direction: int) -> Vector2:
 	return Vector2.ZERO
 
 func set_world_entities(values: Array, local_character_id: int) -> void:
+	var previous_entities: Dictionary = {}
+	for old_value in world_entities:
+		if not old_value is Dictionary:
+			continue
+		var old_entity: Dictionary = old_value
+		var old_key: String = str(old_entity.get("entity_key", old_entity.get("entity_id", 0)))
+		previous_entities[old_key] = old_entity
 	world_entities = []
 	if content == null:
 		return
@@ -439,11 +447,17 @@ func set_world_entities(values: Array, local_character_id: int) -> void:
 			continue
 		var is_npc: bool = bool(entity.get("npc", false))
 		var graphics_id: int = int(entity.get("graphics_id", 19)) if is_npc else 19
-		var sprite: Dictionary = content.render_facing_object_sprite(graphics_id, int(entity.get("facing", 1)), false, 0)
-		var texture: Texture2D = sprite.get("texture") as Texture2D
+		var facing: int = int(entity.get("facing", 1))
+		var entity_key: String = "%s:%s" % [str(entity.get("entity_id", entity.get("character_id", entity.get("user_id", 0)))), entity_map_id]
+		var previous_value: Variant = previous_entities.get(entity_key, {})
+		var previous: Dictionary = previous_value as Dictionary if previous_value is Dictionary else {}
+		var texture: Texture2D = previous.get("texture") as Texture2D
+		if texture == null or int(previous.get("graphics_id", -1)) != graphics_id or int(previous.get("facing", -1)) != facing:
+			var sprite: Dictionary = content.render_facing_object_sprite(graphics_id, facing, false, 0)
+			texture = sprite.get("texture") as Texture2D
 		if texture == null:
 			continue
-		world_entities.append({"entity_id": int(entity.get("entity_id", 0)), "npc": is_npc, "map_id": entity_map_id, "texture": texture, "width": texture.get_width(), "height": texture.get_height(), "x": int(entity.get("x", 0)), "y": int(entity.get("y", 0)), "elevation": int(entity.get("elevation", 3)), "facing": int(entity.get("facing", 1)), "default_facing": int(entity.get("facing", 1)), "graphics_id": graphics_id, "blocks_movement": bool(entity.get("blocks_movement", is_npc))})
+		world_entities.append({"entity_key": entity_key, "entity_id": int(entity.get("entity_id", 0)), "npc": is_npc, "map_id": entity_map_id, "texture": texture, "width": texture.get_width(), "height": texture.get_height(), "x": int(entity.get("x", 0)), "y": int(entity.get("y", 0)), "elevation": int(entity.get("elevation", 3)), "facing": facing, "default_facing": int(entity.get("facing", 1)), "graphics_id": graphics_id, "blocks_movement": bool(entity.get("blocks_movement", is_npc))})
 	queue_redraw()
 
 func _apply_map(result: Dictionary, reset_spawn: bool) -> void:
@@ -696,7 +710,7 @@ func _process(delta: float) -> void:
 			_load_map(completed_map_id)
 	else:
 		_update_player_texture()
-	var warp: Dictionary = completed_warp if not completed_warp.is_empty() else content.warp_at(completed_map_id, completed_position.x, completed_position.y, completed_elevation)
+	var warp: Dictionary = completed_warp
 	if bool(warp.get("ok", false)) and warp_cooldown <= 0.0:
 		map_id = str(warp.get("map_id", map_id))
 		player_position = Vector2i(int(warp.get("x", player_position.x)), int(warp.get("y", player_position.y)))
