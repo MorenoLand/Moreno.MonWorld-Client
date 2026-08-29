@@ -948,7 +948,7 @@ func _direction_name(direction: int) -> String:
 
 func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO, size), Color.BLACK, true)
-	if regions.is_empty():
+	if regions.is_empty() or (authoritative_state and not has_spawn):
 		return
 	var tile_scale: float = _tile_scale()
 	var camera_world_size: Vector2 = size / tile_scale
