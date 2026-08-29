@@ -202,10 +202,17 @@ func send_chat(text: String, channel: String = "Normal") -> bool:
 	if trimmed.is_empty():
 		return false
 	if trimmed.begins_with("/"):
+		trimmed = _normalize_chat_command(trimmed)
 		var command_payload: PackedByteArray = GAME_PROTOCOL_SCRIPT.encode_chat_send(4, "", trimmed)
 		return not command_payload.is_empty() and game_session.send_packet(GAME_PROTOCOL_SCRIPT.CHAT_SEND, command_payload)
 	var payload: PackedByteArray = GAME_PROTOCOL_SCRIPT.encode_chat_message(trimmed, 0, 0)
 	return not payload.is_empty() and game_session.send_packet(GAME_PROTOCOL_SCRIPT.CHAT_MESSAGE, payload)
+
+func _normalize_chat_command(command: String) -> String:
+	var parts: PackedStringArray = command.split(" ", false, 1)
+	if parts.is_empty() or parts[0].to_lower() != "/jump":
+		return command
+	return "/story" + (" " + parts[1] if parts.size() > 1 else "")
 
 func send_battle_action(_battle_id: String, _action: String) -> bool:
 	return false
