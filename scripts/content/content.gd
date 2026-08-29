@@ -997,6 +997,10 @@ func movement_result(map_id: String, x: int, y: int, direction: int, elevation: 
 	var destination: Vector2i = Vector2i(x, y) + vector
 	var map_value: Dictionary = map_data(map_id)
 	if map_value.is_empty():
+		var cached_map: Variant = map_cache.get(map_id, {})
+		if cached_map is Dictionary and bool((cached_map as Dictionary).get("ok", false)):
+			map_value = {"id": map_id, "width": int((cached_map as Dictionary).get("width", 0)), "height": int((cached_map as Dictionary).get("height", 0))}
+	if map_value.is_empty():
 		return {"ok": false, "error": "unknown map"}
 	var width: int = int(map_value.get("width", 0))
 	var height: int = int(map_value.get("height", 0))
