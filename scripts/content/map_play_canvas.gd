@@ -69,6 +69,9 @@ var dialogue_active: bool = false
 var following_party_index: int = -1
 var follower_texture: Texture2D
 var follower_species_id: int = 0
+var follower_texture_key: String = ""
+var follower_width: float = 0.0
+var follower_height: float = 0.0
 var follower_position: Vector2 = Vector2.ZERO
 var follower_initialized: bool = false
 var resize_redraw_pending: bool = false
@@ -144,6 +147,9 @@ func set_following_party_index(index: int) -> void:
 	follower_initialized = false
 	follower_texture = null
 	follower_species_id = 0
+	follower_texture_key = ""
+	follower_width = 0.0
+	follower_height = 0.0
 	if index >= 0:
 		_update_follower_texture()
 	queue_redraw()
@@ -163,12 +169,23 @@ func _update_follower_texture() -> void:
 	if species_id <= 0:
 		follower_texture = null
 		follower_species_id = 0
+		follower_texture_key = ""
+		follower_width = 0.0
+		follower_height = 0.0
 		return
-	if species_id == follower_species_id and follower_texture != null:
+	var member: Dictionary = member_value as Dictionary
+	var gender: int = int(member.get("gender", -1))
+	var shiny: bool = bool(member.get("shiny", member.get("is_shiny", false)))
+	var form: int = int(member.get("form", member.get("forme", member.get("form_id", 0))))
+	var texture_key: String = "%d:%d:%d:%d" % [species_id, gender, int(shiny), form]
+	if texture_key == follower_texture_key:
 		return
-	var sprite: Dictionary = content.battle_pokemon_sprite(species_id, false)
+	follower_texture_key = texture_key
+	var sprite: Dictionary = content.follower_pokemon_sprite(species_id, gender, shiny, form)
 	follower_texture = sprite.get("texture") as Texture2D
 	follower_species_id = species_id if follower_texture != null else 0
+	follower_width = float(sprite.get("width", 0)) if follower_texture != null else 0.0
+	follower_height = float(sprite.get("height", 0)) if follower_texture != null else 0.0
 
 func _update_follower(delta: float) -> void:
 	if following_party_index < 0 or not has_spawn or content == null:
@@ -1455,7 +1472,7 @@ func _draw() -> void:
 			continue
 		drawables.append({"kind": "sprite", "texture": entity_texture, "width": float(entity.get("width", 0)), "height": float(entity.get("height", 0)), "world_anchor": Vector2((entity_world.x + 0.5) * TILE_PIXELS, (entity_world.y + 1.0) * TILE_PIXELS), "sort_y": entity_world.y + 1.0, "sort_order": 0})
 	if follower_texture != null and following_party_index >= 0 and follower_initialized:
-		drawables.append({"kind": "sprite", "texture": follower_texture, "width": 32.0, "height": 32.0, "world_anchor": (follower_position + Vector2(0.5, 1.0)) * TILE_PIXELS, "sort_y": follower_position.y + 1.0, "sort_order": 0})
+		drawables.append({"kind": "sprite", "texture": follower_texture, "width": follower_width, "height": follower_height, "world_anchor": (follower_position + Vector2(0.5, 1.0)) * TILE_PIXELS, "sort_y": follower_position.y + 1.0, "sort_order": 0})
 	if player_texture != null and player_visible:
 		var player_size: Vector2 = Vector2(player_texture.get_width(), player_texture.get_height())
 		var player_anchor: Vector2 = (world_player + Vector2(0.5, 1.0)) * TILE_PIXELS

@@ -58,9 +58,11 @@ var map_cache: Dictionary = {}
 var map_topology_cache: Dictionary = {}
 var sprite_cache: Dictionary = {}
 var battle_table_cache: Dictionary = {}
+var battle_tables_scanned: bool = false
 var battle_sprite_cache: Dictionary = {}
 var battle_name_cache: Dictionary = {}
 var battle_move_name_cache: Dictionary = {}
+var follower_sprite_cache: Dictionary = {}
 var string_catalog: Dictionary = {}
 
 static func from_rom_path(path: String) -> Dictionary:
@@ -417,19 +419,63 @@ func battle_pokemon_sprite(species_id: int, back: bool = false) -> Dictionary:
 	battle_sprite_cache[cache_key] = result
 	return result
 
+func follower_pokemon_sprite(species_id: int, gender: int = -1, shiny: bool = false, form: int = 0) -> Dictionary:
+	if species_id <= 0:
+		return {"ok": false, "error": "Invalid follower species"}
+	var cache_key: String = "%d:%d:%d:%d" % [species_id, gender, int(shiny), form]
+	if follower_sprite_cache.has(cache_key):
+		return follower_sprite_cache[cache_key]
+	var gender_tags: Array = ["b", "m", "f"]
+	if gender == 0:
+		gender_tags = ["m", "b", "f"]
+	elif gender == 1:
+		gender_tags = ["f", "b", "m"]
+	var shine_tag: String = "s" if shiny else "n"
+	var roots: Array = ["res://assets/sprites/followsprites", "res://content/%s/sprites/followsprites" % string_catalog_id()]
+	var paths: Array = []
+	for root_value in roots:
+		var root: String = str(root_value)
+		for gender_tag in gender_tags:
+			if form > 0:
+				paths.append(root.path_join("%d-%s-%s-%d.png" % [species_id, gender_tag, shine_tag, form]))
+			paths.append(root.path_join("%d-%s-%s.png" % [species_id, gender_tag, shine_tag]))
+	for path_value in paths:
+		var path: String = str(path_value)
+		if not ResourceLoader.exists(path):
+			continue
+		var texture: Texture2D = load(path) as Texture2D
+		if texture == null:
+			continue
+		var result: Dictionary = {"ok": true, "texture": texture, "width": texture.get_width(), "height": texture.get_height(), "source": "followsprite", "path": path}
+		follower_sprite_cache[cache_key] = result
+		return result
+	var missing: Dictionary = {"ok": false, "error": "No PokeMMO followsprite resource is mounted for this species"}
+	follower_sprite_cache[cache_key] = missing
+	return missing
+
 func _battle_internal_species_id(species_id: int) -> int:
 	return species_id if species_id <= 251 else species_id + 25
 
 func _battle_rom_tables() -> Dictionary:
-	if not battle_table_cache.is_empty():
+	if battle_tables_scanned:
 		return battle_table_cache
-	var names: Array = ["pokemon emerald version", "pokemon firered version", "pokemon leafgreen version", "pokemon red version", "pokemon green version", "pokemon ruby version", "pokemon sapphire version"]
+	battle_tables_scanned = true
+	var names: Array = []
+	match str(source_profile.get("id", "")).to_lower():
+		"pokemon-fire-red": names = ["pokemon firered version", "pokemon fire red version", "pokemon fire version"]
+		"pokemon-leaf-green": names = ["pokemon leafgreen version", "pokemon leaf green version", "pokemon leaf version"]
+		"pokemon-emerald": names = ["pokemon emerald version"]
+		"pokemon-ruby": names = ["pokemon ruby version"]
+		"pokemon-sapphire": names = ["pokemon sapphire version"]
+		_:
+			names = ["pokemon emerald version", "pokemon firered version", "pokemon leafgreen version", "pokemon red version", "pokemon green version", "pokemon ruby version", "pokemon sapphire version"]
 	var name_offset: int = -1
 	for game_name in names:
 		name_offset = _find_rom_ascii(str(game_name))
 		if name_offset >= 0:
 			break
 	if name_offset < 8:
+		battle_table_cache = {"available": false}
 		return {}
 	var header_offset: int = name_offset - 8
 	var tables: Dictionary = {"header_offset": header_offset, "front_sprite_table": _read_rom_pointer(header_offset + 40), "back_sprite_table": _read_rom_pointer(header_offset + 44), "palette_table": _read_rom_pointer(header_offset + 48), "species_name_table": _read_rom_pointer(header_offset + 68), "move_name_table": _read_rom_pointer(header_offset + 72), "move_table": _format_int("battle_move_table_offset", -1)}
@@ -440,7 +486,10 @@ func _find_rom_ascii(value: String) -> int:
 	var needle: PackedByteArray = value.to_ascii_buffer()
 	if needle.is_empty() or rom_data.size() < needle.size():
 		return -1
+	var first_byte: int = int(needle[0])
 	for offset in range(rom_data.size() - needle.size() + 1):
+		if int(rom_data[offset]) != first_byte and int(rom_data[offset]) != first_byte - 32:
+			continue
 		var matched: bool = true
 		for index in range(needle.size()):
 			var actual: int = int(rom_data[offset + index])
