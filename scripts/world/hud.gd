@@ -110,7 +110,7 @@ func _build_ui() -> void:
 		row.add_child(details)
 		var label: Label = Label.new()
 		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		label.text_overrun_behavior = TextServer.OVERRUN_ELLIPSIS
+		label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		label.add_theme_font_size_override("font_size", 10)
 		details.add_child(label)
 		var level_label: Label = Label.new()
@@ -293,12 +293,12 @@ func _make_popup_panel(title_value: String) -> PanelContainer:
 	box.add_child(title)
 	return panel
 
-func _panel_style(background: Color, border: Color) -> StyleBoxFlat:
+func _panel_style(background: Color, border: Color, radius: int = 3, width: int = 1) -> StyleBoxFlat:
 	var style: StyleBoxFlat = StyleBoxFlat.new()
 	style.bg_color = background
 	style.border_color = border
-	style.set_border_width_all(1)
-	style.set_corner_radius_all(3)
+	style.set_border_width_all(width)
+	style.set_corner_radius_all(radius)
 	style.content_margin_left = 8.0
 	style.content_margin_top = 6.0
 	style.content_margin_right = 8.0
