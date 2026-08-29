@@ -5,7 +5,7 @@ signal action_requested
 signal closed
 
 const TYPE_INTERVAL: float = 1.0 / 30.0
-const PANEL_HEIGHT: float = 132.0
+const PANEL_HEIGHT: float = 164.0
 const PANEL_WIDTH: float = 430.0
 var text_label: Label
 var arrow_label: Label
@@ -38,8 +38,10 @@ func _ready() -> void:
 	margin.add_child(box)
 	text_label = Label.new()
 	text_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	text_label.clip_text = false
+	text_label.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
 	text_label.add_theme_font_size_override("font_size", 20)
-	text_label.custom_minimum_size = Vector2(0, 88)
+	text_label.custom_minimum_size = Vector2(0, 112)
 	box.add_child(text_label)
 	var arrow_row: HBoxContainer = HBoxContainer.new()
 	arrow_row.alignment = BoxContainer.ALIGNMENT_END
