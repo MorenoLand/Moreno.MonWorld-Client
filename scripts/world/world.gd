@@ -494,8 +494,10 @@ func _on_dialog_action_received(action: Dictionary) -> void:
 		map_view.restore_interaction_facing()
 		return
 	var text_id: int = int(action.get("text_id", 0))
-	var dialogue: Dictionary = GameState.content.dialogue_for_text_id(text_id) if GameState.content != null else {}
-	var pages: Array = dialogue.get("pages", []) if not dialogue.is_empty() else []
+	var pages: Array = _streamed_dialogue_pages(action.get("detail", PackedByteArray()))
+	if pages.is_empty():
+		var dialogue: Dictionary = GameState.content.dialogue_for_text_id(text_id) if GameState.content != null else {}
+		pages = dialogue.get("pages", []) if not dialogue.is_empty() else []
 	if pages.is_empty():
 		pages = ["Dialogue text 0x%08X is unavailable in the selected ROM." % text_id]
 	var actor: Dictionary = {}
@@ -510,6 +512,22 @@ func _on_dialog_action_received(action: Dictionary) -> void:
 	map_view.set_dialogue_active(true)
 	dialogue_overlay.show_pages(pages, false, map_view.dialogue_anchor_screen({"object": actor}))
 	audio.play_effect("dialogue")
+
+func _streamed_dialogue_pages(detail_value: Variant) -> Array:
+	if not detail_value is PackedByteArray:
+		return []
+	var detail: PackedByteArray = detail_value
+	var marker: PackedByteArray = PackedByteArray([0x4F, 0x4D, 0x54, 0x58, 0x54, 0x00])
+	if detail.size() <= marker.size():
+		return []
+	for index in marker.size():
+		if detail[index] != marker[index]:
+			return []
+	var pages: Array = []
+	for page in detail.slice(marker.size()).get_string_from_utf8().split("\f"):
+		if not str(page).is_empty():
+			pages.append(page)
+	return pages
 
 func _on_dialog_state_received(open: bool) -> void:
 	server_dialogue_active = open

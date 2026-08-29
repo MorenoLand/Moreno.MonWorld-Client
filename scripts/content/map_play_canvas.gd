@@ -578,27 +578,26 @@ func interact() -> void:
 	if content == null or map_id.is_empty() or dialogue_active:
 		return
 	var target_position: Vector2i = player_position + Vector2i(_direction_vector(player_facing))
-	for index in world_entities.size():
-		var entity_value: Variant = world_entities[index]
-		if not entity_value is Dictionary:
-			continue
-		var entity: Dictionary = entity_value
-		if not bool(entity.get("npc", false)) or str(entity.get("map_id", "")) != map_id or int(entity.get("x", -1)) != target_position.x or int(entity.get("y", -1)) != target_position.y or int(entity.get("elevation", player_elevation)) != player_elevation:
-			continue
-		if authoritative_state:
-			if not GameState.send_entity_interact(int(entity.get("entity_id", 0)), 0):
-				return
-		_face_world_entity(index, player_facing)
-		dialogue_active = true
+	var target_positions: Array = [target_position, target_position + Vector2i(_direction_vector(player_facing))]
+	for target_value in target_positions:
+		var npc_target: Vector2i = target_value
+		for index in world_entities.size():
+			var entity_value: Variant = world_entities[index]
+			if not entity_value is Dictionary:
+				continue
+			var entity: Dictionary = entity_value
+			if not bool(entity.get("npc", false)) or str(entity.get("map_id", "")) != map_id or int(entity.get("x", -1)) != npc_target.x or int(entity.get("y", -1)) != npc_target.y or int(entity.get("elevation", player_elevation)) != player_elevation:
+				continue
+			if authoritative_state:
+				if not GameState.send_entity_interact(int(entity.get("entity_id", 0)), 0):
+					return
+			_face_world_entity(index, player_facing)
+			return
+	if authoritative_state:
+		GameState.send_tile_interact()
 		return
 	var interaction: Dictionary = content.interaction_at(map_id, player_position.x, player_position.y, player_facing, player_elevation, objects)
 	if bool(interaction.get("ok", false)):
-		if authoritative_state:
-			if str(interaction.get("kind", "")) == "sign":
-				if GameState.send_tile_interact():
-					dialogue_active = true
-				return
-			return
 		_face_interaction_object(interaction.get("object", {}))
 		interaction_requested.emit(interaction)
 
