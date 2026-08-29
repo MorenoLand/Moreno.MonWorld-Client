@@ -224,8 +224,11 @@ func _on_entity_update(value: Dictionary) -> void:
 		merged.merge(entity, true)
 		entities[key] = merged
 		if is_local and map_view != null:
-			var local_elevation: int = map_view.player_elevation
-			map_view.set_player_state(int(entity.get("x", 0)), int(entity.get("y", 0)), int(entity.get("elevation", local_elevation)), int(entity.get("facing", 1)))
+			if entity.has("x") and entity.has("y"):
+				var local_elevation: int = map_view.player_elevation
+				map_view.apply_server_position(int(entity.get("x", map_view.player_position.x)), int(entity.get("y", map_view.player_position.y)), int(entity.get("elevation", local_elevation)), int(entity.get("facing", map_view.player_facing)))
+			elif entity.has("facing"):
+				map_view.apply_server_facing(int(entity.get("facing", map_view.player_facing)))
 		_sync_map_entities()
 
 func _on_local_location_changed(next_map_id: String, x: int, y: int) -> void:

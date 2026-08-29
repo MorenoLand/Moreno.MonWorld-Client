@@ -391,6 +391,34 @@ func set_player_state(x: int, y: int, elevation: int = 3, facing: int = 1) -> vo
 	_update_player_texture()
 	queue_redraw()
 
+func apply_server_position(x: int, y: int, elevation: int = 3, facing: int = 1) -> void:
+	var next_position: Vector2i = Vector2i(x, y)
+	if authoritative_state:
+		authoritative_probe_pending = false
+		authoritative_probe_elapsed = 0.0
+		if movement_active and pending_map_id == map_id and next_position == pending_position:
+			player_elevation = elevation
+			player_facing = facing
+			_update_player_texture()
+			queue_redraw()
+			return
+		if next_position == player_position:
+			player_elevation = elevation
+			player_facing = facing
+			has_spawn = true
+			_update_player_texture()
+			queue_redraw()
+			return
+	set_player_state(x, y, elevation, facing)
+
+func apply_server_facing(facing: int) -> void:
+	if authoritative_state:
+		authoritative_probe_pending = false
+		authoritative_probe_elapsed = 0.0
+	player_facing = facing
+	_update_player_texture()
+	queue_redraw()
+
 func _direction_between(from: Vector2i, to: Vector2i) -> int:
 	if to.y > from.y:
 		return 1
@@ -603,16 +631,17 @@ func _request_move(direction: int) -> bool:
 			return true
 		if not GameState.send_input(_direction_name(direction), player_position.x, player_position.y):
 			return false
-		pending_map_id = str(result.get("map_id", map_id))
-		pending_position = Vector2i(int(result.get("x", player_position.x)), int(result.get("y", player_position.y)))
-		pending_elevation = int(result.get("elevation", player_elevation))
-		movement_stair = bool(result.get("stair", false))
-		movement_stair_behavior = int(result.get("stair_behavior", 0))
+		var server_traversal: bool = bool(result.get("stair", false)) or bool(result.get("door", false)) or str(result.get("map_id", map_id)) != map_id
+		pending_map_id = map_id
+		pending_position = player_position + _direction_vector(direction) if server_traversal else Vector2i(int(result.get("x", player_position.x)), int(result.get("y", player_position.y)))
+		pending_elevation = player_elevation if server_traversal else int(result.get("elevation", player_elevation))
+		movement_stair = false if server_traversal else bool(result.get("stair", false))
+		movement_stair_behavior = 0 if server_traversal else int(result.get("stair_behavior", 0))
 		movement_door = false
 		pending_warp = {}
 		movement_start = Vector2(player_position)
-		movement_target = movement_start + _direction_vector(direction) if pending_map_id != map_id else Vector2(pending_position)
-		movement_jump = bool(result.get("jump", false))
+		movement_target = Vector2(pending_position)
+		movement_jump = bool(result.get("jump", false)) and not server_traversal
 		movement_elapsed = 0.0
 		movement_duration = 0.24 if movement_stair else DOOR_ANIMATION_DURATION if movement_door else 0.32 if movement_jump else NORMAL_STEP_DURATION
 		door_progress = 0.0
