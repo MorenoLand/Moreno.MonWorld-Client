@@ -633,7 +633,7 @@ func _request_move(direction: int) -> bool:
 			return false
 		var server_traversal: bool = bool(result.get("stair", false)) or bool(result.get("door", false)) or str(result.get("map_id", map_id)) != map_id
 		pending_map_id = map_id
-		pending_position = player_position + _direction_vector(direction) if server_traversal else Vector2i(int(result.get("x", player_position.x)), int(result.get("y", player_position.y)))
+		pending_position = player_position + Vector2i(_direction_vector(direction)) if server_traversal else Vector2i(int(result.get("x", player_position.x)), int(result.get("y", player_position.y)))
 		pending_elevation = player_elevation if server_traversal else int(result.get("elevation", player_elevation))
 		movement_stair = false if server_traversal else bool(result.get("stair", false))
 		movement_stair_behavior = 0 if server_traversal else int(result.get("stair_behavior", 0))
