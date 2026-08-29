@@ -404,7 +404,7 @@ func prepare_connected_world(root_map_id: String, max_maps: int = 96, preload_de
 			continue
 		var server_map: Dictionary = _server_map_for_local_map(map_id, server_maps)
 		var prepared: Dictionary = {}
-		if depth <= preload_depth:
+		if depth <= preload_depth or _is_server_custom_map(server_map):
 			prepared = prepare_server_map(map_id, server_map, server_maps, false) if _is_server_custom_map(server_map) else prepare_map(map_id, false)
 		if map_id == root_map_id and not bool(prepared.get("ok", false)):
 			return prepared
