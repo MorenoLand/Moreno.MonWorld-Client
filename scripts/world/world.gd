@@ -141,7 +141,7 @@ func _on_map_load(value: Dictionary) -> void:
 func _load_map_texture(map_id: String, expected_width: int = 0, expected_height: int = 0) -> bool:
 	if GameState.content == null or map_id.is_empty():
 		return false
-	if map_view != null and map_view.map_id == map_id and not map_view.regions.is_empty():
+	if map_view != null and map_view.map_id == map_id and map_view.is_map_rendered(map_id):
 		return true
 	connected_world_generation += 1
 	var generation: int = connected_world_generation
@@ -170,7 +170,6 @@ func _expand_connected_world(root_map_id: String, generation: int) -> void:
 	if not bool(connected_world.get("ok", false)) or generation != connected_world_generation:
 		return
 	map_view.set_world(connected_world, root_map_id)
-	call_deferred("_preload_connected_regions", connected_world, root_map_id, generation)
 
 func _preload_connected_regions(world_value: Dictionary, root_map_id: String, generation: int) -> void:
 	var regions: Array = world_value.get("regions", [])

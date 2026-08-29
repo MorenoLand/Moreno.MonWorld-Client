@@ -241,6 +241,18 @@ func set_active_map(selected_map_id: String) -> bool:
 	queue_redraw()
 	return true
 
+func is_map_rendered(selected_map_id: String = "") -> bool:
+	var candidate_map_id: String = selected_map_id if not selected_map_id.is_empty() else map_id
+	if candidate_map_id.is_empty():
+		return false
+	for region_value in regions:
+		if not region_value is Dictionary:
+			continue
+		var region: Dictionary = region_value
+		if str(region.get("map_id", "")) == candidate_map_id and bool(region.get("ready", false)) and region.get("background_texture") is Texture2D:
+			return true
+	return false
+
 func _ensure_region_rendered(selected_map_id: String) -> bool:
 	if content == null:
 		return false
@@ -901,11 +913,13 @@ func _direction_name(direction: int) -> String:
 
 func _draw() -> void:
 	draw_rect(Rect2(Vector2.ZERO, size), Color.BLACK, true)
-	if regions.is_empty() or not has_spawn:
+	if regions.is_empty():
 		return
 	var tile_scale: float = _tile_scale()
 	var camera_world_size: Vector2 = size / tile_scale
 	var world_player: Vector2 = _movement_world_position()
+	if not has_spawn:
+		world_player = Vector2(_region_origin(map_id)) * TILE_PIXELS + map_pixel_size * 0.5
 	if movement_active and movement_jump:
 		world_player.y -= sin(clampf(movement_elapsed / movement_duration, 0.0, 1.0) * PI) * 0.75
 	var camera_origin: Vector2 = _camera_origin(world_player, camera_world_size)
