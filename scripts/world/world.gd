@@ -145,7 +145,8 @@ func _load_map_texture(map_id: String, expected_width: int = 0, expected_height:
 		return true
 	connected_world_generation += 1
 	var generation: int = connected_world_generation
-	var result: Dictionary = GameState.content.prepare_map(map_id, false)
+	var server_map: Dictionary = GameState.content._server_map_for_local_map(map_id, GameState.server_maps)
+	var result: Dictionary = GameState.content.prepare_server_map(map_id, server_map, GameState.server_maps, false) if GameState.content._is_server_custom_map(server_map) else GameState.content.prepare_map(map_id, false)
 	if not bool(result.get("ok", false)):
 		status_label.text = "Map renderer: %s" % str(result.get("error", "map rendering failed"))
 		return false
@@ -154,7 +155,7 @@ func _load_map_texture(map_id: String, expected_width: int = 0, expected_height:
 		return false
 	map_has_animation = false
 	map_has_animation = not (result.get("animated_background_tiles", []) as Array).is_empty() or not (result.get("animated_foreground_tiles", []) as Array).is_empty()
-	var root_region: Dictionary = {"map_id": map_id, "origin": Vector2i.ZERO, "width": int(result.get("width", 0)), "height": int(result.get("height", 0)), "background_texture": result.get("background_texture"), "foreground_texture": result.get("foreground_texture"), "objects": result.get("objects", []), "warps": result.get("warps", []), "connections": result.get("connections", []), "animated_background_tiles": result.get("animated_background_tiles", []), "animated_foreground_tiles": result.get("animated_foreground_tiles", []), "border_texture": GameState.content.server_border_texture(map_id, GameState.content._server_map_for_local_map(map_id, GameState.server_maps)), "music_id": int(result.get("music_id", 0)), "map_type": int(result.get("map_type", 0)), "ready": true}
+	var root_region: Dictionary = {"map_id": map_id, "origin": Vector2i.ZERO, "width": int(result.get("width", 0)), "height": int(result.get("height", 0)), "background_texture": result.get("background_texture"), "foreground_texture": result.get("foreground_texture"), "objects": result.get("objects", []), "warps": result.get("warps", []), "connections": result.get("connections", []), "animated_background_tiles": result.get("animated_background_tiles", []), "animated_foreground_tiles": result.get("animated_foreground_tiles", []), "music_id": int(result.get("music_id", 0)), "map_type": int(result.get("map_type", 0)), "ready": true}
 	var root_world: Dictionary = {"ok": true, "root_map_id": map_id, "regions": [root_region], "map_origins": {map_id: Vector2i.ZERO}}
 	map_view.set_world(root_world, map_id)
 	audio.play_map_music(GameState.content, map_id)
@@ -193,7 +194,8 @@ func _preload_connected_regions(world_value: Dictionary, root_map_id: String, ge
 		await get_tree().process_frame
 		if generation != connected_world_generation:
 			return
-		var prepared: Dictionary = GameState.content.prepare_map(region_id, false)
+		var server_map: Dictionary = GameState.content._server_map_for_local_map(region_id, GameState.server_maps)
+		var prepared: Dictionary = GameState.content.prepare_server_map(region_id, server_map, GameState.server_maps, false) if GameState.content._is_server_custom_map(server_map) else GameState.content.prepare_map(region_id, false)
 		if not bool(prepared.get("ok", false)):
 			continue
 		region["background_texture"] = prepared.get("background_texture")
@@ -202,7 +204,6 @@ func _preload_connected_regions(world_value: Dictionary, root_map_id: String, ge
 		region["warps"] = prepared.get("warps", [])
 		region["animated_background_tiles"] = prepared.get("animated_background_tiles", [])
 		region["animated_foreground_tiles"] = prepared.get("animated_foreground_tiles", [])
-		region["border_texture"] = GameState.content.server_border_texture(region_id, GameState.content._server_map_for_local_map(region_id, GameState.server_maps))
 		region["ready"] = true
 		if map_view != null:
 			map_view.queue_redraw()

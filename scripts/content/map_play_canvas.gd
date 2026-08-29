@@ -7,7 +7,6 @@ signal interaction_requested(dialogue: Dictionary)
 signal sound_requested(effect: String)
 
 const TILE_PIXELS: float = 16.0
-const BORDER_MAP_OFFSET: int = 7
 const CAMERA_MAX_CELLS_X: int = 30
 const CAMERA_MAX_CELLS_Y: int = 20
 const MAX_TILE_SCALE: float = 4.0
@@ -227,7 +226,8 @@ func _ensure_region_rendered(selected_map_id: String) -> bool:
 			continue
 		if bool(region.get("ready", false)) and region.get("background_texture") is Texture2D:
 			return true
-		var prepared: Dictionary = content.prepare_map(selected_map_id, false)
+		var server_map: Dictionary = content._server_map_for_local_map(selected_map_id, GameState.server_maps)
+		var prepared: Dictionary = content.prepare_server_map(selected_map_id, server_map, GameState.server_maps, false) if content._is_server_custom_map(server_map) else content.prepare_map(selected_map_id, false)
 		if not bool(prepared.get("ok", false)):
 			return false
 		region["background_texture"] = prepared.get("background_texture", prepared.get("texture"))
@@ -661,7 +661,8 @@ func _load_map(next_map_id: String, reset_spawn: bool = false) -> void:
 			_set_spawn()
 		return
 	map_id = next_map_id
-	var result: Dictionary = content.prepare_map(map_id)
+	var server_map: Dictionary = content._server_map_for_local_map(map_id, GameState.server_maps)
+	var result: Dictionary = content.prepare_server_map(map_id, server_map, GameState.server_maps) if content._is_server_custom_map(server_map) else content.prepare_map(map_id)
 	if not bool(result.get("ok", false)):
 		return
 	_apply_map(result, reset_spawn)
@@ -836,19 +837,6 @@ func _draw() -> void:
 	var destination_position: Vector2 = (size - destination_size) * 0.5
 	var drawables: Array = []
 	var camera_rect: Rect2 = Rect2(camera_origin, camera_world_size)
-	for border_region_value in regions:
-		if not border_region_value is Dictionary:
-			continue
-		var border_region: Dictionary = border_region_value
-		var border_texture: Texture2D = border_region.get("border_texture") as Texture2D
-		if border_texture == null:
-			continue
-		var border_map_id: String = str(border_region.get("map_id", ""))
-		var border_origin: Vector2 = Vector2(_region_origin(border_map_id)) * TILE_PIXELS
-		var border_size: Vector2 = Vector2(int(border_region.get("width", 0)), int(border_region.get("height", 0))) * TILE_PIXELS
-		var border_padding: float = BORDER_MAP_OFFSET * TILE_PIXELS
-		var border_limit: Rect2 = Rect2(border_origin, border_size).grow(border_padding)
-		_draw_border_pattern(border_texture, border_origin, camera_rect, destination_position, tile_scale, border_limit)
 	for region_value in regions:
 		if not region_value is Dictionary:
 			continue
@@ -950,28 +938,6 @@ func _draw() -> void:
 		var drawable_anchor: Vector2 = drawable.get("world_anchor", Vector2.ZERO)
 		var drawable_position: Vector2 = destination_position + (drawable_anchor - camera_origin) * tile_scale - Vector2(drawable_size.x * tile_scale * 0.5, drawable_size.y * tile_scale)
 		draw_texture_rect(drawable_texture, Rect2(drawable_position, drawable_size * tile_scale), false)
-
-func _draw_border_pattern(texture: Texture2D, region_origin: Vector2, camera_rect: Rect2, destination_position: Vector2, tile_scale: float, draw_limit: Rect2) -> void:
-	var pattern_size: Vector2 = Vector2(texture.get_width(), texture.get_height())
-	if pattern_size.x <= 0.0 or pattern_size.y <= 0.0:
-		return
-	var visible_camera: Rect2 = camera_rect.intersection(draw_limit)
-	if visible_camera.size.x <= 0.0 or visible_camera.size.y <= 0.0:
-		return
-	var pattern_origin: Vector2 = region_origin - Vector2(BORDER_MAP_OFFSET * TILE_PIXELS, BORDER_MAP_OFFSET * TILE_PIXELS)
-	var first_x: int = floori((visible_camera.position.x - pattern_origin.x) / pattern_size.x) - 1
-	var first_y: int = floori((visible_camera.position.y - pattern_origin.y) / pattern_size.y) - 1
-	var last_x: int = ceili((visible_camera.end.x - pattern_origin.x) / pattern_size.x) + 1
-	var last_y: int = ceili((visible_camera.end.y - pattern_origin.y) / pattern_size.y) + 1
-	for pattern_y in range(first_y, last_y):
-		for pattern_x in range(first_x, last_x):
-			var pattern_rect: Rect2 = Rect2(pattern_origin + Vector2(pattern_x * pattern_size.x, pattern_y * pattern_size.y), pattern_size)
-			var visible_rect: Rect2 = pattern_rect.intersection(visible_camera)
-			if visible_rect.size.x <= 0.0 or visible_rect.size.y <= 0.0:
-				continue
-			var destination: Rect2 = Rect2(destination_position + (visible_rect.position - camera_rect.position) * tile_scale, visible_rect.size * tile_scale)
-			var source: Rect2 = Rect2(visible_rect.position - pattern_rect.position, visible_rect.size)
-			draw_texture_rect_region(texture, destination, source, Color.WHITE, false, true)
 
 func _sort_drawables(left: Dictionary, right: Dictionary) -> bool:
 	var left_y: float = float(left.get("sort_y", 0.0))

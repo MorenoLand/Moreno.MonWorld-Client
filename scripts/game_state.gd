@@ -323,19 +323,23 @@ func _on_game_packet(opcode: int, payload: PackedByteArray) -> void:
 		if not response.ok:
 			connection_error.emit(str(response.get("error", "OpenMMO map packet is malformed")))
 			return
+		if content == null:
+			connection_error.emit("Select a local ROM before entering the OpenMMO world")
+			return
+		var local_map_id: String = content.map_id_for_location(int(response.get("bank_id", -1)), int(response.get("map_id", -1)))
+		var custom_map_value: Variant = response.get("custom_map_gzip", PackedByteArray())
+		var has_custom_map: bool = custom_map_value is PackedByteArray and not (custom_map_value as PackedByteArray).is_empty()
+		if has_custom_map:
+			local_map_id = "server-map-%s" % str(response.get("key", ""))
+		elif content.map_data(local_map_id).is_empty():
+			connection_error.emit("The selected ROM does not contain OpenMMO map %d/%d" % [int(response.get("bank_id", -1)), int(response.get("map_id", -1))])
+			return
+		response["local_map_id"] = local_map_id
 		server_maps[str(response.key)] = response
 		var switch_current: bool = bool(response.get("delete_cache", false)) or active_map_key.is_empty()
 		if not switch_current:
 			return
 		map_transition_pending = false
-		if content == null:
-			connection_error.emit("Select a local ROM before entering the OpenMMO world")
-			return
-		var local_map_id: String = content.map_id_for_location(int(response.get("bank_id", -1)), int(response.get("map_id", -1)))
-		if content.map_data(local_map_id).is_empty():
-			connection_error.emit("The selected ROM does not contain OpenMMO map %d/%d" % [int(response.get("bank_id", -1)), int(response.get("map_id", -1))])
-			return
-		response["local_map_id"] = local_map_id
 		active_map_key = str(response.get("key", ""))
 		pending_map_load = response
 		map_load_received.emit(response)
