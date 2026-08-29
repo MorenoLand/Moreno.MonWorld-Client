@@ -7,6 +7,7 @@ const HUD_SCRIPT = preload("res://scripts/world/hud.gd")
 const DIALOGUE_SCRIPT = preload("res://scripts/dialogue.gd")
 const AUDIO_SCRIPT = preload("res://scripts/world/audio.gd")
 const CHAT_SCRIPT = preload("res://scripts/world/chat.gd")
+const CONNECTED_WORLD_PRELOAD_DEPTH: int = 2
 
 var title_label: Label
 var status_label: Label
@@ -274,7 +275,7 @@ func _expand_connected_world(root_map_id: String, generation: int) -> void:
 	await get_tree().process_frame
 	if generation != connected_world_generation or map_view == null or map_view.map_id != root_map_id:
 		return
-	var connected_world: Dictionary = GameState.content.prepare_connected_world(root_map_id, 96, 1, GameState.server_maps)
+	var connected_world: Dictionary = GameState.content.prepare_connected_world(root_map_id, 96, CONNECTED_WORLD_PRELOAD_DEPTH, GameState.server_maps)
 	if not bool(connected_world.get("ok", false)) or generation != connected_world_generation:
 		return
 	map_view.set_world(connected_world, root_map_id)
@@ -287,7 +288,7 @@ func _preload_connected_regions(world_value: Dictionary, root_map_id: String, ge
 			return
 		var region: Dictionary = region_value
 		var region_id: String = str(region.get("map_id", ""))
-		if region_id.is_empty() or region_id == root_map_id or bool(region.get("ready", false)) or int(region.get("depth", 1)) > 1:
+		if region_id.is_empty() or region_id == root_map_id or bool(region.get("ready", false)) or int(region.get("depth", 1)) > CONNECTED_WORLD_PRELOAD_DEPTH:
 			continue
 		await get_tree().process_frame
 		if generation != connected_world_generation:

@@ -460,6 +460,7 @@ func _build_corner_filler_regions(source_regions: Array, root_map_id: String) ->
 		placed_regions.append(region)
 	var gaps: Array = []
 	var gap_keys: Dictionary = {}
+	var edge_gap_donors: Dictionary = {}
 	for center_value in placed_regions:
 		var center: Dictionary = center_value
 		var center_rect: Rect2i = _corner_region_rect(center)
@@ -510,7 +511,7 @@ func _build_corner_filler_regions(source_regions: Array, root_map_id: String) ->
 				var left_gap_x: int = maxi(top_neighbor_rect.position.x, bottom_neighbor_rect.position.x)
 				_add_corner_gap(gaps, gap_keys, Rect2i(Vector2i(left_gap_x, top_neighbor_rect.end.y), Vector2i(center_rect.position.x - left_gap_x, vertical_gap_y)), placed_regions)
 				_add_corner_gap(gaps, gap_keys, Rect2i(Vector2i(center_rect.end.x, top_neighbor_rect.end.y), Vector2i(mini(top_neighbor_rect.end.x, bottom_neighbor_rect.end.x) - center_rect.end.x, vertical_gap_y)), placed_regions)
-	_add_edge_corner_gaps(gaps, gap_keys, placed_regions)
+	_add_edge_corner_gaps(gaps, gap_keys, edge_gap_donors, placed_regions)
 	var filler_regions: Array = []
 	var filler_index: int = 0
 	for gap_value in gaps:
@@ -520,11 +521,22 @@ func _build_corner_filler_regions(source_regions: Array, root_map_id: String) ->
 		var links: Array = _corner_adjacent_links(gap, placed_regions)
 		if links.is_empty():
 			continue
-		var donor_link: Dictionary = links[0]
-		for link_value in links:
-			var link: Dictionary = link_value
-			if int(link.get("overlap", 0)) > int(donor_link.get("overlap", 0)):
-				donor_link = link
+		var gap_key: String = "%d:%d:%d:%d" % [gap.position.x, gap.position.y, gap.end.x, gap.end.y]
+		var donor_link: Dictionary = {}
+		var preferred_donor_id: String = str(edge_gap_donors.get(gap_key, ""))
+		if not preferred_donor_id.is_empty():
+			for link_value in links:
+				var link: Dictionary = link_value
+				var link_region: Dictionary = link.get("region", {})
+				if str(link_region.get("map_id", "")) == preferred_donor_id:
+					donor_link = link
+					break
+		if donor_link.is_empty():
+			donor_link = links[0]
+			for link_value in links:
+				var link: Dictionary = link_value
+				if int(link.get("overlap", 0)) > int(donor_link.get("overlap", 0)):
+					donor_link = link
 		var donor: Dictionary = donor_link.get("region", {})
 		var filler_id: String = "corner-filler:%s:%d:%d:%d:%d" % [root_map_id, gap.position.x, gap.position.y, gap.end.x, gap.end.y]
 		var filler: Dictionary = _create_corner_filler_region(filler_id, gap, donor, filler_index)
@@ -534,7 +546,7 @@ func _build_corner_filler_regions(source_regions: Array, root_map_id: String) ->
 		filler_index += 1
 	return filler_regions
 
-func _add_edge_corner_gaps(gaps: Array, gap_keys: Dictionary, regions: Array) -> void:
+func _add_edge_corner_gaps(gaps: Array, gap_keys: Dictionary, edge_gap_donors: Dictionary, regions: Array) -> void:
 	for first_index in range(regions.size()):
 		var first: Dictionary = regions[first_index]
 		var first_rect: Rect2i = _corner_region_rect(first)
@@ -544,35 +556,43 @@ func _add_edge_corner_gaps(gaps: Array, gap_keys: Dictionary, regions: Array) ->
 			if first_rect.end.x == second_rect.position.x or second_rect.end.x == first_rect.position.x:
 				var left_rect: Rect2i = first_rect
 				var right_rect: Rect2i = second_rect
+				var left_region: Dictionary = first
+				var right_region: Dictionary = second
 				if second_rect.end.x == first_rect.position.x:
 					left_rect = second_rect
 					right_rect = first_rect
+					left_region = second
+					right_region = first
 				if _corner_y_overlap(left_rect, right_rect) > 0:
 					if left_rect.position.y > right_rect.position.y:
-						_add_edge_corner_gap(gaps, gap_keys, Rect2i(Vector2i(left_rect.position.x, right_rect.position.y), Vector2i(left_rect.size.x, left_rect.position.y - right_rect.position.y)), regions)
+						_add_edge_corner_gap(gaps, gap_keys, edge_gap_donors, Rect2i(Vector2i(left_rect.position.x, right_rect.position.y), Vector2i(left_rect.size.x, left_rect.position.y - right_rect.position.y)), regions, right_region)
 					elif right_rect.position.y > left_rect.position.y:
-						_add_edge_corner_gap(gaps, gap_keys, Rect2i(Vector2i(right_rect.position.x, left_rect.position.y), Vector2i(right_rect.size.x, right_rect.position.y - left_rect.position.y)), regions)
+						_add_edge_corner_gap(gaps, gap_keys, edge_gap_donors, Rect2i(Vector2i(right_rect.position.x, left_rect.position.y), Vector2i(right_rect.size.x, right_rect.position.y - left_rect.position.y)), regions, left_region)
 					if left_rect.end.y < right_rect.end.y:
-						_add_edge_corner_gap(gaps, gap_keys, Rect2i(Vector2i(left_rect.position.x, left_rect.end.y), Vector2i(left_rect.size.x, right_rect.end.y - left_rect.end.y)), regions)
+						_add_edge_corner_gap(gaps, gap_keys, edge_gap_donors, Rect2i(Vector2i(left_rect.position.x, left_rect.end.y), Vector2i(left_rect.size.x, right_rect.end.y - left_rect.end.y)), regions, right_region)
 					elif right_rect.end.y < left_rect.end.y:
-						_add_edge_corner_gap(gaps, gap_keys, Rect2i(Vector2i(right_rect.position.x, right_rect.end.y), Vector2i(right_rect.size.x, left_rect.end.y - right_rect.end.y)), regions)
+						_add_edge_corner_gap(gaps, gap_keys, edge_gap_donors, Rect2i(Vector2i(right_rect.position.x, right_rect.end.y), Vector2i(right_rect.size.x, left_rect.end.y - right_rect.end.y)), regions, left_region)
 			if first_rect.end.y == second_rect.position.y or second_rect.end.y == first_rect.position.y:
 				var top_rect: Rect2i = first_rect
 				var bottom_rect: Rect2i = second_rect
+				var top_region: Dictionary = first
+				var bottom_region: Dictionary = second
 				if second_rect.end.y == first_rect.position.y:
 					top_rect = second_rect
 					bottom_rect = first_rect
+					top_region = second
+					bottom_region = first
 				if _corner_x_overlap(top_rect, bottom_rect) > 0:
 					if top_rect.position.x < bottom_rect.position.x:
-						_add_edge_corner_gap(gaps, gap_keys, Rect2i(Vector2i(top_rect.position.x, bottom_rect.position.y), Vector2i(bottom_rect.position.x - top_rect.position.x, bottom_rect.size.y)), regions)
+						_add_edge_corner_gap(gaps, gap_keys, edge_gap_donors, Rect2i(Vector2i(top_rect.position.x, bottom_rect.position.y), Vector2i(bottom_rect.position.x - top_rect.position.x, bottom_rect.size.y)), regions, top_region)
 					elif bottom_rect.position.x < top_rect.position.x:
-						_add_edge_corner_gap(gaps, gap_keys, Rect2i(Vector2i(bottom_rect.position.x, top_rect.position.y), Vector2i(top_rect.position.x - bottom_rect.position.x, top_rect.size.y)), regions)
+						_add_edge_corner_gap(gaps, gap_keys, edge_gap_donors, Rect2i(Vector2i(bottom_rect.position.x, top_rect.position.y), Vector2i(top_rect.position.x - bottom_rect.position.x, top_rect.size.y)), regions, bottom_region)
 					if top_rect.end.x > bottom_rect.end.x:
-						_add_edge_corner_gap(gaps, gap_keys, Rect2i(Vector2i(bottom_rect.end.x, bottom_rect.position.y), Vector2i(top_rect.end.x - bottom_rect.end.x, bottom_rect.size.y)), regions)
+						_add_edge_corner_gap(gaps, gap_keys, edge_gap_donors, Rect2i(Vector2i(bottom_rect.end.x, bottom_rect.position.y), Vector2i(top_rect.end.x - bottom_rect.end.x, bottom_rect.size.y)), regions, top_region)
 					elif bottom_rect.end.x > top_rect.end.x:
-						_add_edge_corner_gap(gaps, gap_keys, Rect2i(Vector2i(top_rect.end.x, top_rect.position.y), Vector2i(bottom_rect.end.x - top_rect.end.x, top_rect.size.y)), regions)
+						_add_edge_corner_gap(gaps, gap_keys, edge_gap_donors, Rect2i(Vector2i(top_rect.end.x, top_rect.position.y), Vector2i(bottom_rect.end.x - top_rect.end.x, top_rect.size.y)), regions, bottom_region)
 
-func _add_edge_corner_gap(gaps: Array, gap_keys: Dictionary, gap: Rect2i, regions: Array) -> void:
+func _add_edge_corner_gap(gaps: Array, gap_keys: Dictionary, edge_gap_donors: Dictionary, gap: Rect2i, regions: Array, donor: Dictionary) -> void:
 	if gap.size.x <= 0 or gap.size.y <= 0 or gap.size.x > MAX_CORNER_FILLER_SIZE or gap.size.y > MAX_CORNER_FILLER_SIZE:
 		return
 	var fragments: Array = [gap]
@@ -603,7 +623,12 @@ func _add_edge_corner_gap(gaps: Array, gap_keys: Dictionary, gap: Rect2i, region
 			return
 	for fragment_value in fragments:
 		if fragment_value is Rect2i:
-			_add_corner_gap(gaps, gap_keys, fragment_value, regions)
+			var fragment: Rect2i = fragment_value
+			var key: String = "%d:%d:%d:%d" % [fragment.position.x, fragment.position.y, fragment.end.x, fragment.end.y]
+			var existed: bool = gap_keys.has(key)
+			_add_corner_gap(gaps, gap_keys, fragment, regions)
+			if not existed and gap_keys.has(key):
+				edge_gap_donors[key] = str(donor.get("map_id", ""))
 
 func _corner_region_rect(region: Dictionary) -> Rect2i:
 	var origin: Vector2i = region.get("origin", Vector2i.ZERO)
