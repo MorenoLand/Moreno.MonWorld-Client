@@ -167,7 +167,7 @@ func _expand_connected_world(root_map_id: String, generation: int) -> void:
 	await get_tree().process_frame
 	if generation != connected_world_generation or map_view == null or map_view.map_id != root_map_id:
 		return
-	var connected_world: Dictionary = GameState.content.prepare_connected_world(root_map_id, 96, 0, GameState.server_maps)
+	var connected_world: Dictionary = GameState.content.prepare_connected_world(root_map_id, 96, 1, GameState.server_maps)
 	if not bool(connected_world.get("ok", false)) or generation != connected_world_generation:
 		return
 	map_view.set_world(connected_world, root_map_id)
@@ -224,6 +224,13 @@ func _on_entity_update(value: Dictionary) -> void:
 		merged.merge(entity, true)
 		entities[key] = merged
 		if is_local and map_view != null:
+			var entity_map_id: String = str(entity.get("map_id", ""))
+			if not entity_map_id.is_empty() and entity_map_id != map_view.map_id:
+				if not map_view.set_active_map(entity_map_id):
+					_load_map_texture(entity_map_id)
+				snapshot["map_id"] = entity_map_id
+				if title_label != null:
+					title_label.text = "Map: %s" % entity_map_id
 			if entity.has("x") and entity.has("y"):
 				var local_elevation: int = map_view.player_elevation
 				map_view.apply_server_position(int(entity.get("x", map_view.player_position.x)), int(entity.get("y", map_view.player_position.y)), int(entity.get("elevation", local_elevation)), int(entity.get("facing", map_view.player_facing)))
