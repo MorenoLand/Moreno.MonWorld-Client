@@ -480,7 +480,7 @@ func _build_server_map_cache(map_id: String, server_map: Dictionary, server_maps
 	if not custom_value is PackedByteArray:
 		return {"ok": false, "error": "OpenMMO custom map data is invalid"}
 	var expected_bytes: int = width * height * 2
-	var map_bytes: PackedByteArray = Compression.decompress(custom_value as PackedByteArray, expected_bytes, Compression.MODE_GZIP)
+	var map_bytes: PackedByteArray = _gzip_decompress(custom_value as PackedByteArray, expected_bytes)
 	if map_bytes.size() != expected_bytes:
 		return {"ok": false, "error": "OpenMMO custom map data could not be decompressed"}
 	var donor_cache: Dictionary = _server_map_donor_cache(server_map, server_maps)
@@ -508,6 +508,22 @@ func _build_server_map_cache(map_id: String, server_map: Dictionary, server_maps
 			var metatile_index: int = metatile_id if metatile_id < primary_metatile_count else metatile_id - primary_metatile_count
 			_draw_metatile_layers(background_image, foreground_image, map_x * 16, map_y * 16, tileset, metatile_index, primary, secondary, animated_background_tiles, animated_foreground_tiles)
 	return {"ok": true, "base_image": background_image, "base_background_image": background_image, "base_foreground_image": foreground_image, "primary": primary, "secondary": secondary, "primary_tiles": primary.get("tiles", PackedByteArray()), "primary_animation_enabled": bool(primary.get("animation_enabled", false)), "animated_tiles": [], "animated_background_tiles": animated_background_tiles, "animated_foreground_tiles": animated_foreground_tiles, "map_cells": map_cells, "objects": [], "warps": [], "connections": _server_connections(server_map, server_maps), "textures": {}, "images": {}, "background_textures": {}, "foreground_textures": {}, "width": width, "height": height, "header_offset": -1, "layout_offset": -1, "border_offset": -1, "border_width": int(server_map.get("border_width", 0)), "border_height": int(server_map.get("border_height", 0)), "map_group": int(server_map.get("bank_id", -1)), "map_index": int(server_map.get("map_id", -1)), "music_id": 0, "map_type": int(server_map.get("map_type", 0))}
+
+func _gzip_decompress(data: PackedByteArray, expected_bytes: int) -> PackedByteArray:
+	if data.is_empty() or expected_bytes <= 0:
+		return PackedByteArray()
+	var stream: StreamPeerGZIP = StreamPeerGZIP.new()
+	if stream.start_decompression(false, expected_bytes) != OK:
+		return PackedByteArray()
+	if stream.put_data(data) != OK:
+		return PackedByteArray()
+	var available_bytes: int = stream.get_available_bytes()
+	if available_bytes != expected_bytes:
+		return PackedByteArray()
+	var result: Array = stream.get_data(expected_bytes)
+	if result.size() != 2 or int(result[0]) != OK or not result[1] is PackedByteArray:
+		return PackedByteArray()
+	return result[1] as PackedByteArray
 
 func _server_map_donor_cache(server_map: Dictionary, server_maps: Dictionary) -> Dictionary:
 	for connection_value in server_map.get("connections", []):
