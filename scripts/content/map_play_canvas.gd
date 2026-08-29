@@ -61,6 +61,7 @@ var world_entities: Array = []
 var authoritative_state: bool = false
 var dialogue_active: bool = false
 var resize_redraw_pending: bool = false
+var connected_preload_generation: int = 0
 
 func _ready() -> void:
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
@@ -676,11 +677,14 @@ func _process(delta: float) -> void:
 func _load_map(next_map_id: String, reset_spawn: bool = false) -> void:
 	if content == null or next_map_id.is_empty():
 		return
-	var connected_world: Dictionary = content.prepare_connected_world(next_map_id, 96, 1, GameState.server_maps)
+	connected_preload_generation += 1
+	var generation: int = connected_preload_generation
+	var connected_world: Dictionary = content.prepare_connected_world(next_map_id, 96, 0, GameState.server_maps)
 	if bool(connected_world.get("ok", false)):
 		set_world(connected_world, next_map_id)
 		if reset_spawn and not authoritative_state:
 			_set_spawn()
+		call_deferred("_preload_connected_regions", connected_world, next_map_id, generation)
 		return
 	map_id = next_map_id
 	var server_map: Dictionary = content._server_map_for_local_map(map_id, GameState.server_maps)
@@ -694,6 +698,32 @@ func _load_map(next_map_id: String, reset_spawn: bool = false) -> void:
 		has_spawn = true
 	_refresh_object_textures()
 	_update_player_texture()
+
+func _preload_connected_regions(world_value: Dictionary, root_map_id: String, generation: int) -> void:
+	var world_regions: Array = world_value.get("regions", [])
+	for region_value in world_regions:
+		if generation != connected_preload_generation or map_id != root_map_id or not is_inside_tree() or not region_value is Dictionary:
+			return
+		var region: Dictionary = region_value
+		var region_id: String = str(region.get("map_id", ""))
+		if region_id.is_empty() or region_id == root_map_id or bool(region.get("ready", false)):
+			continue
+		await get_tree().process_frame
+		if generation != connected_preload_generation or map_id != root_map_id:
+			return
+		var server_map: Dictionary = content._server_map_for_local_map(region_id, GameState.server_maps)
+		var prepared: Dictionary = content.prepare_server_map(region_id, server_map, GameState.server_maps, false) if content._is_server_custom_map(server_map) else content.prepare_map(region_id, false)
+		if not bool(prepared.get("ok", false)):
+			continue
+		region["background_texture"] = prepared.get("background_texture")
+		region["foreground_texture"] = prepared.get("foreground_texture")
+		region["objects"] = prepared.get("objects", [])
+		region["warps"] = prepared.get("warps", [])
+		region["animated_background_tiles"] = prepared.get("animated_background_tiles", [])
+		region["animated_foreground_tiles"] = prepared.get("animated_foreground_tiles", [])
+		region["ready"] = true
+		_rebuild_world_bounds()
+		queue_redraw()
 
 func _refresh_object_textures() -> void:
 	if content == null:

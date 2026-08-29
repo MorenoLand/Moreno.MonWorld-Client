@@ -163,25 +163,14 @@ func _load_map_texture(map_id: String, expected_width: int = 0, expected_height:
 	return true
 
 func _expand_connected_world(root_map_id: String, generation: int) -> void:
-	var map_limit: int = 8
-	while map_limit <= 96:
-		await get_tree().process_frame
-		if generation != connected_world_generation or map_view == null or map_view.map_id != root_map_id:
-			return
-		var preload_depth: int = 1
-		var connected_world: Dictionary = GameState.content.prepare_connected_world(root_map_id, map_limit, preload_depth, GameState.server_maps)
-		if not bool(connected_world.get("ok", false)) or generation != connected_world_generation:
-			return
-		var regions: Array = connected_world.get("regions", [])
-		for region_value in regions:
-			if region_value is Dictionary and (not (region_value.get("animated_background_tiles", []) as Array).is_empty() or not (region_value.get("animated_foreground_tiles", []) as Array).is_empty()):
-				map_has_animation = true
-				break
-		map_view.set_world(connected_world, root_map_id)
-		if map_limit >= 96:
-			call_deferred("_preload_connected_regions", connected_world, root_map_id, generation)
-			return
-		map_limit += 8
+	await get_tree().process_frame
+	if generation != connected_world_generation or map_view == null or map_view.map_id != root_map_id:
+		return
+	var connected_world: Dictionary = GameState.content.prepare_connected_world(root_map_id, 96, 0, GameState.server_maps)
+	if not bool(connected_world.get("ok", false)) or generation != connected_world_generation:
+		return
+	map_view.set_world(connected_world, root_map_id)
+	call_deferred("_preload_connected_regions", connected_world, root_map_id, generation)
 
 func _preload_connected_regions(world_value: Dictionary, root_map_id: String, generation: int) -> void:
 	var regions: Array = world_value.get("regions", [])
