@@ -578,7 +578,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			hud.activate_hotkey(hotkey_slot)
 		get_viewport().set_input_as_handled()
 		return
-	if key_event.keycode == KEY_F and key_event.pressed and not key_event.echo:
+	if key_event.keycode in [KEY_F, KEY_E, KEY_Z, KEY_X] and key_event.pressed and not key_event.echo:
 		get_viewport().set_input_as_handled()
 		if dialogue_overlay == null or not dialogue_overlay.is_open():
 			map_view.interact()

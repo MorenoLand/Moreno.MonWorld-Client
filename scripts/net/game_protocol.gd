@@ -209,7 +209,11 @@ static func decode_load_entity(payload: PackedByteArray) -> Dictionary:
 	entity["x"] = reader.read_s16_le()
 	entity["y"] = reader.read_s16_le()
 	entity["elevation"] = reader.read_u8()
-	entity["facing"] = reader.read_u8()
+	var raw_facing: int = reader.read_u8()
+	if raw_facing > 3:
+		reader.failed = true
+	else:
+		entity["facing"] = raw_facing + 1
 	entity["transportation"] = reader.read_u8()
 	entity["nameplate_type"] = reader.read_u8()
 	var flags: int = reader.read_u8()

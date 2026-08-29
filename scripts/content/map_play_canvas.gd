@@ -501,9 +501,9 @@ func set_world_entities(values: Array, local_character_id: int) -> void:
 		if texture == null or int(previous.get("graphics_id", -1)) != graphics_id or int(previous.get("facing", -1)) != facing:
 			var sprite: Dictionary = content.render_facing_object_sprite(graphics_id, facing, false, 0)
 			texture = sprite.get("texture") as Texture2D
-		if texture == null:
+		if texture == null and not is_npc:
 			continue
-		world_entities.append({"entity_key": entity_key, "entity_id": int(entity.get("entity_id", 0)), "npc": is_npc, "map_id": entity_map_id, "texture": texture, "width": texture.get_width(), "height": texture.get_height(), "x": int(entity.get("x", 0)), "y": int(entity.get("y", 0)), "elevation": int(entity.get("elevation", 3)), "facing": facing, "default_facing": int(entity.get("facing", 1)), "graphics_id": graphics_id, "blocks_movement": bool(entity.get("blocks_movement", is_npc))})
+		world_entities.append({"entity_key": entity_key, "entity_id": int(entity.get("entity_id", 0)), "npc": is_npc, "map_id": entity_map_id, "texture": texture, "width": texture.get_width() if texture != null else 0, "height": texture.get_height() if texture != null else 0, "x": int(entity.get("x", 0)), "y": int(entity.get("y", 0)), "elevation": int(entity.get("elevation", 3)), "facing": facing, "default_facing": int(entity.get("facing", 1)), "graphics_id": graphics_id, "blocks_movement": bool(entity.get("blocks_movement", is_npc))})
 	queue_redraw()
 
 func _apply_map(result: Dictionary, reset_spawn: bool) -> void:
@@ -552,7 +552,7 @@ func _input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		back_requested.emit()
 		return
-	if key_event.keycode == KEY_F and key_event.pressed and not key_event.echo:
+	if key_event.keycode in [KEY_F, KEY_E, KEY_Z, KEY_X] and key_event.pressed and not key_event.echo:
 		if dialogue_active:
 			return
 		get_viewport().set_input_as_handled()
@@ -586,7 +586,7 @@ func interact() -> void:
 			if not entity_value is Dictionary:
 				continue
 			var entity: Dictionary = entity_value
-			if not bool(entity.get("npc", false)) or str(entity.get("map_id", "")) != map_id or int(entity.get("x", -1)) != npc_target.x or int(entity.get("y", -1)) != npc_target.y or int(entity.get("elevation", player_elevation)) != player_elevation:
+			if not bool(entity.get("npc", false)) or str(entity.get("map_id", "")) != map_id or int(entity.get("x", -1)) != npc_target.x or int(entity.get("y", -1)) != npc_target.y:
 				continue
 			if authoritative_state:
 				if not GameState.send_entity_interact(int(entity.get("entity_id", 0)), 0):

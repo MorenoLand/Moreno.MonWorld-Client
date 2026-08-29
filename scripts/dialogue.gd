@@ -147,7 +147,7 @@ func _input(event: InputEvent) -> void:
 	if not open_state or not event is InputEventKey:
 		return
 	var key_event: InputEventKey = event as InputEventKey
-	if not key_event.pressed or key_event.echo or key_event.keycode not in [KEY_F, KEY_ENTER, KEY_KP_ENTER, KEY_SPACE]:
+	if not key_event.pressed or key_event.echo or key_event.keycode not in [KEY_F, KEY_E, KEY_Z, KEY_X, KEY_ENTER, KEY_KP_ENTER, KEY_SPACE]:
 		return
 	get_viewport().set_input_as_handled()
 	if ignore_next_action:

@@ -1548,7 +1548,7 @@ func _decode_rom_text(text_offset: int) -> Dictionary:
 
 func dialogue_for_text_id(text_id: int) -> Dictionary:
 	var candidates: Array[int] = [text_id]
-	var packed_offset: int = text_id & 0x0FFFFFFF
+	var packed_offset: int = text_id & 0x00FFFFFF
 	if packed_offset != text_id:
 		candidates.append(packed_offset)
 	for candidate_value in candidates:
