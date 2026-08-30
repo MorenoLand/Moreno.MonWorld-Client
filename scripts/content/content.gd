@@ -70,6 +70,7 @@ var battle_animation_plan_cache: Dictionary = {}
 var battle_ball_cache: Dictionary = {}
 var door_animation_texture_cache: Dictionary = {}
 var follower_sprite_cache: Dictionary = {}
+var follower_source_path: String = ""
 var string_catalog: Dictionary = {}
 var detached_map_cache_result: Dictionary = {}
 
@@ -147,6 +148,9 @@ static func _read_gba_pointer(data: PackedByteArray, offset: int) -> int:
 
 static func _read_data_u32(data: PackedByteArray, offset: int) -> int:
 	return int(data[offset]) | (int(data[offset + 1]) << 8) | (int(data[offset + 2]) << 16) | (int(data[offset + 3]) << 24)
+
+static func _read_data_u16(data: PackedByteArray, offset: int) -> int:
+	return int(data[offset]) | (int(data[offset + 1]) << 8)
 
 static func _valid_data_range(data: PackedByteArray, offset: int, length: int) -> bool:
 	return offset >= 0 and length >= 0 and offset <= data.size() and length <= data.size() - offset
@@ -533,6 +537,11 @@ func follower_pokemon_sprite(species_id: int, gender: int = -1, shiny: bool = fa
 	var cache_key: String = "%d:%d:%d:%d" % [species_id, gender, int(shiny), form]
 	if follower_sprite_cache.has(cache_key):
 		return follower_sprite_cache[cache_key]
+	if not follower_source_path.is_empty():
+		var hgss_result: Dictionary = _hgss_follower_sprite(species_id, gender, shiny, form)
+		if bool(hgss_result.get("ok", false)):
+			follower_sprite_cache[cache_key] = hgss_result
+			return hgss_result
 	var gender_tags: Array = ["b", "m", "f"]
 	if gender == 0:
 		gender_tags = ["m", "b", "f"]
@@ -560,6 +569,76 @@ func follower_pokemon_sprite(species_id: int, gender: int = -1, shiny: bool = fa
 	var missing: Dictionary = {"ok": false, "error": "No PokeMMO followsprite resource is mounted for this species"}
 	follower_sprite_cache[cache_key] = missing
 	return missing
+
+func set_follower_source(path: String) -> Dictionary:
+	var resolved_path: String = resolve_follower_source_path(path)
+	if resolved_path.is_empty():
+		return {"ok": false, "error": "The selected folder does not contain extracted HeartGold/SoulSilver follower models"}
+	follower_source_path = resolved_path
+	follower_sprite_cache.clear()
+	return {"ok": true, "path": resolved_path}
+
+static func resolve_follower_source_path(path: String) -> String:
+	var selected_path: String = path.replace("\\", "/").trim_suffix("/")
+	var candidates: Array[String] = [selected_path, selected_path.path_join("mmodel"), selected_path.path_join("files/data/mmodel/mmodel")]
+	for candidate in candidates:
+		if FileAccess.file_exists(candidate.path_join("mmodel_00000297.NSBTX")):
+			return candidate
+	return ""
+
+func _hgss_follower_sprite(species_id: int, gender: int, shiny: bool, form: int) -> Dictionary:
+	if species_id < 1 or species_id > 151 or form != 0:
+		return {"ok": false, "error": "No extracted HGSS follower model is available for this species or form"}
+	var model_id: int = 296 + species_id
+	if species_id >= 4:
+		model_id += 1
+	if species_id >= 26:
+		model_id += 1
+	if gender == 1 and species_id in [3, 25]:
+		model_id += 1
+	var path: String = follower_source_path.path_join("mmodel_%08d.NSBTX" % model_id)
+	if not FileAccess.file_exists(path):
+		return {"ok": false, "error": "The extracted HGSS follower model is missing", "path": path}
+	var data: PackedByteArray = FileAccess.get_file_as_bytes(path)
+	var decoded: Dictionary = _decode_hgss_follower_texture(data, shiny)
+	if bool(decoded.get("ok", false)):
+		decoded["source"] = "hgss_follower_model"
+		decoded["path"] = path
+	return decoded
+
+func _decode_hgss_follower_texture(data: PackedByteArray, shiny: bool) -> Dictionary:
+	if not _valid_data_range(data, 0, 0x14) or data[0] != 0x42 or data[1] != 0x54 or data[2] != 0x58 or data[3] != 0x30:
+		return {"ok": false, "error": "Invalid HGSS follower texture container"}
+	var section_offset: int = _read_data_u32(data, 0x10)
+	if not _valid_data_range(data, section_offset, 0x3C) or data[section_offset] != 0x54 or data[section_offset + 1] != 0x45 or data[section_offset + 2] != 0x58 or data[section_offset + 3] != 0x30:
+		return {"ok": false, "error": "Invalid HGSS follower texture section"}
+	var texture_size: int = _read_data_u16(data, section_offset + 0x0C) * 8
+	var texture_offset: int = section_offset + _read_data_u32(data, section_offset + 0x14)
+	var palette_size: int = _read_data_u16(data, section_offset + 0x30) * 8
+	var palette_offset: int = section_offset + _read_data_u32(data, section_offset + 0x38)
+	var dictionary_offset: int = section_offset + _read_data_u16(data, section_offset + 0x0E)
+	if not _valid_data_range(data, dictionary_offset + 48, 4):
+		return {"ok": false, "error": "Invalid HGSS follower texture dictionary"}
+	var texture_parameter: int = _read_data_u32(data, dictionary_offset + 48)
+	var width: int = 8 << ((texture_parameter >> 20) & 7)
+	var height: int = 8 << ((texture_parameter >> 23) & 7)
+	var texture_format: int = (texture_parameter >> 26) & 7
+	var frame_bytes: int = (width * height) >> 1
+	var frame_count: int = floori(float(texture_size) / float(frame_bytes)) if frame_bytes > 0 else 0
+	var selected_palette_offset: int = palette_offset + (32 if shiny else 0)
+	if texture_format != 3 or width != 32 or height != 32 or frame_count < 8 or palette_size < (64 if shiny else 32) or not _valid_data_range(data, texture_offset, frame_bytes * 8) or not _valid_data_range(data, selected_palette_offset, 32):
+		return {"ok": false, "error": "Unsupported HGSS follower texture layout"}
+	var frames: Array[Texture2D] = []
+	for frame_index in range(8):
+		var image: Image = Image.create(width, height, false, Image.FORMAT_RGBA8)
+		for pixel_index in range(width * height):
+			var packed: int = int(data[texture_offset + frame_index * frame_bytes + (pixel_index >> 1)])
+			var palette_index: int = ((packed >> 4) & 15) if (pixel_index & 1) != 0 else (packed & 15)
+			var color_value: int = _read_data_u16(data, selected_palette_offset + palette_index * 2)
+			var color: Color = Color(float(color_value & 31) / 31.0, float((color_value >> 5) & 31) / 31.0, float((color_value >> 10) & 31) / 31.0, 0.0 if palette_index == 0 else 1.0)
+			image.set_pixel(pixel_index % width, floori(float(pixel_index) / float(width)), color)
+		frames.append(ImageTexture.create_from_image(image))
+	return {"ok": true, "texture": frames[0], "frames": frames, "width": width, "height": height}
 
 func _battle_internal_species_id(species_id: int) -> int:
 	return species_id if species_id <= 251 else species_id + 25

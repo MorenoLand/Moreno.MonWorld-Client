@@ -70,12 +70,20 @@ var transition_active: bool = false
 var dialogue_active: bool = false
 var following_party_index: int = -1
 var follower_texture: Texture2D
+var follower_frames: Array = []
 var follower_species_id: int = 0
 var follower_texture_key: String = ""
 var follower_width: float = 0.0
 var follower_height: float = 0.0
 var follower_position: Vector2 = Vector2.ZERO
 var follower_initialized: bool = false
+var follower_facing: int = 1
+var follower_movement_active: bool = false
+var follower_movement_start: Vector2 = Vector2.ZERO
+var follower_movement_target: Vector2 = Vector2.ZERO
+var follower_movement_elapsed: float = 0.0
+var follower_step_queue: Array[Vector2] = []
+var follower_owner_step_key: String = ""
 var resize_redraw_pending: bool = false
 var connected_preload_generation: int = 0
 
@@ -102,6 +110,9 @@ func set_content(value) -> void:
 	player_texture = null
 	player_texture_key = ""
 	foreground_texture = null
+	follower_texture = null
+	follower_frames.clear()
+	follower_texture_key = ""
 	if not map_id.is_empty():
 		_set_spawn()
 	_refresh_object_textures()
@@ -148,10 +159,15 @@ func set_following_party_index(index: int) -> void:
 	following_party_index = index
 	follower_initialized = false
 	follower_texture = null
+	follower_frames.clear()
 	follower_species_id = 0
 	follower_texture_key = ""
 	follower_width = 0.0
 	follower_height = 0.0
+	follower_movement_active = false
+	follower_movement_elapsed = 0.0
+	follower_step_queue.clear()
+	follower_owner_step_key = ""
 	if index >= 0:
 		_update_follower_texture()
 	queue_redraw()
@@ -162,6 +178,7 @@ func _update_follower_texture() -> void:
 	var party_value: Variant = GameState.current_character.get("party", [])
 	if not party_value is Array or following_party_index >= (party_value as Array).size():
 		follower_texture = null
+		follower_frames.clear()
 		follower_species_id = 0
 		return
 	var member_value: Variant = (party_value as Array)[following_party_index]
@@ -170,6 +187,7 @@ func _update_follower_texture() -> void:
 	var species_id: int = int((member_value as Dictionary).get("dex_id", (member_value as Dictionary).get("species_id", (member_value as Dictionary).get("species", 0))))
 	if species_id <= 0:
 		follower_texture = null
+		follower_frames.clear()
 		follower_species_id = 0
 		follower_texture_key = ""
 		follower_width = 0.0
@@ -184,7 +202,9 @@ func _update_follower_texture() -> void:
 		return
 	follower_texture_key = texture_key
 	var sprite: Dictionary = content.follower_pokemon_sprite(species_id, gender, shiny, form)
-	follower_texture = sprite.get("texture") as Texture2D
+	var frames_value: Variant = sprite.get("frames", [])
+	follower_frames = (frames_value as Array).duplicate() if frames_value is Array else []
+	follower_texture = follower_frames[0] as Texture2D if not follower_frames.is_empty() else sprite.get("texture") as Texture2D
 	follower_species_id = species_id if follower_texture != null else 0
 	follower_width = float(sprite.get("width", 0)) if follower_texture != null else 0.0
 	follower_height = float(sprite.get("height", 0)) if follower_texture != null else 0.0
@@ -196,15 +216,51 @@ func _update_follower(delta: float) -> void:
 	if follower_texture == null:
 		return
 	var player_world: Vector2 = _movement_world_position()
-	var direction: Vector2 = _direction_vector(player_facing)
-	if direction == Vector2.ZERO:
-		direction = Vector2.UP
-	var target: Vector2 = player_world - direction
-	if not follower_initialized or follower_position.distance_to(target) > 2.5:
-		follower_position = target
+	var player_direction: Vector2 = _direction_vector(player_facing)
+	if player_direction == Vector2.ZERO:
+		player_direction = Vector2.UP
+	if not follower_initialized or follower_position.distance_to(player_world) > 3.0:
+		follower_position = (_world_position(map_id, movement_start) if movement_active else player_world) - player_direction
 		follower_initialized = true
+		follower_facing = player_facing
+		follower_movement_active = false
+		follower_step_queue.clear()
+		follower_owner_step_key = ""
+	if movement_active:
+		var owner_start: Vector2 = _world_position(map_id, movement_start)
+		var owner_target: Vector2 = _world_position(pending_map_id, pending_position) if region_origins.has(pending_map_id) else owner_start + _direction_vector(player_facing)
+		var step_key: String = "%s:%.3f:%.3f:%.3f:%.3f" % [map_id, owner_start.x, owner_start.y, owner_target.x, owner_target.y]
+		if step_key != follower_owner_step_key:
+			follower_owner_step_key = step_key
+			if follower_step_queue.is_empty() or follower_step_queue.back().distance_to(owner_start) > 0.01:
+				follower_step_queue.append(owner_start)
+	if not follower_movement_active and not follower_step_queue.is_empty():
+		follower_movement_start = follower_position
+		follower_movement_target = follower_step_queue.pop_front()
+		var travel: Vector2 = follower_movement_target - follower_movement_start
+		if travel.length() > 2.5:
+			follower_position = follower_movement_target
+		else:
+			follower_facing = 4 if absf(travel.x) > absf(travel.y) and travel.x > 0.0 else 3 if absf(travel.x) > absf(travel.y) else 1 if travel.y > 0.0 else 2
+			follower_movement_elapsed = 0.0
+			follower_movement_active = travel.length() > 0.01
+	if follower_movement_active:
+		follower_movement_elapsed = minf(follower_movement_elapsed + delta, NORMAL_STEP_DURATION)
+		var progress: float = follower_movement_elapsed / NORMAL_STEP_DURATION
+		follower_position = follower_movement_start.lerp(follower_movement_target, progress)
+		_set_follower_frame(1 if progress >= 0.5 else 0)
+		if follower_movement_elapsed >= NORMAL_STEP_DURATION:
+			follower_position = follower_movement_target
+			follower_movement_active = false
+			_set_follower_frame(0)
+	else:
+		_set_follower_frame(0)
+
+func _set_follower_frame(gait_frame: int) -> void:
+	if follower_frames.size() < 8:
 		return
-	follower_position = follower_position.move_toward(target, delta * 5.0)
+	var direction_offset: int = 0 if follower_facing == 1 else 2 if follower_facing == 2 else 4 if follower_facing == 3 else 6
+	follower_texture = follower_frames[direction_offset + clampi(gait_frame, 0, 1)] as Texture2D
 
 func set_local_entity_id(value: int) -> void:
 	local_entity_id = value

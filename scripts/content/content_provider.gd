@@ -6,7 +6,7 @@ const REGION_OPTIONS: Array = [
 	{"region": "Kanto", "title": "FireRed/LeafGreen ROM", "enabled": true, "description": "Accepts a compatible FireRed or LeafGreen base ROM, including graphics patches that preserve the source map layout."},
 	{"region": "Hoenn", "title": "Emerald ROM", "enabled": false, "description": "Unavailable until Hoenn content is implemented."},
 	{"region": "Sinnoh", "title": "Platinum ROM", "enabled": false, "description": "Unavailable until Sinnoh content is implemented."},
-	{"region": "Johto", "title": "HeartGold/SoulSilver ROM", "enabled": false, "description": "Unavailable until Johto content is implemented."}
+	{"region": "Followers", "title": "HeartGold/SoulSilver extracted source", "enabled": true, "mode": "followers", "description": "Optional desktop source for authentic directional follower sprites. Select the pokeheartgold source root or its extracted mmodel folder; Johto map content remains unavailable."}
 ]
 signal content_loaded(content: OpenMMOContent)
 signal content_failed(message: String)
@@ -14,6 +14,7 @@ signal content_failed(message: String)
 var manager: Window
 var _web_callback: Variant
 var _native_dialog_open: bool = false
+var _pending_option: Dictionary = {}
 
 func choose(parent: Node) -> void:
 	if is_instance_valid(manager):
@@ -56,14 +57,14 @@ func choose(parent: Node) -> void:
 			label.modulate = Color("7f8794")
 		row.add_child(label)
 		var state: Label = Label.new()
-		state.text = "Available" if bool(option.get("enabled", false)) else "Coming later"
+		state.text = "Optional" if str(option.get("mode", "rom")) == "followers" else "Available" if bool(option.get("enabled", false)) else "Coming later"
 		state.custom_minimum_size = Vector2(110, 0)
 		state.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		state.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		state.modulate = Color("b8c7d9") if bool(option.get("enabled", false)) else Color("6c7480")
 		row.add_child(state)
 		var select_button: Button = Button.new()
-		select_button.text = "Select File"
+		select_button.text = "Select Folder" if str(option.get("mode", "rom")) == "followers" else "Select File"
 		select_button.disabled = not bool(option.get("enabled", false))
 		select_button.pressed.connect(_select_region.bind(option))
 		row.add_child(select_button)
@@ -73,7 +74,7 @@ func choose(parent: Node) -> void:
 		row.add_child(info_button)
 		box.add_child(row)
 	var note: Label = Label.new()
-	note.text = "The Kanto row accepts compatible FireRed or LeafGreen .gba ROMs, including graphics patches that preserve the source map layout. The ROM is read locally and never uploaded."
+	note.text = "Kanto accepts compatible FireRed or LeafGreen .gba ROMs. The optional follower source reads extracted HGSS models in place. Content stays local and is never uploaded."
 	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	note.modulate = Color("b8c7d9")
 	box.add_child(note)
@@ -86,8 +87,12 @@ func choose(parent: Node) -> void:
 func _select_region(option: Dictionary) -> void:
 	if not bool(option.get("enabled", false)):
 		return
+	_pending_option = option.duplicate(true)
 	if is_instance_valid(manager):
 		manager.hide()
+	if str(option.get("mode", "rom")) == "followers" and OS.has_feature("web"):
+		content_failed.emit("extracted follower folders are available on desktop builds")
+		return
 	if OS.has_feature("web"):
 		_choose_web()
 		return
@@ -97,7 +102,10 @@ func _select_region(option: Dictionary) -> void:
 		content_failed.emit("native file selection is unavailable on this platform")
 		return
 	_native_dialog_open = true
-	var dialog_error: int = DisplayServer.file_dialog_show("Select %s" % str(option.get("title", "ROM")), "", "", false, DisplayServer.FILE_DIALOG_MODE_OPEN_FILE, PackedStringArray(["*.gba;Game Boy Advance ROM;application/octet-stream"]), _on_native_file_selected)
+	var folder_mode: bool = str(option.get("mode", "rom")) == "followers"
+	var dialog_mode: int = DisplayServer.FILE_DIALOG_MODE_OPEN_DIR if folder_mode else DisplayServer.FILE_DIALOG_MODE_OPEN_FILE
+	var filters: PackedStringArray = PackedStringArray() if folder_mode else PackedStringArray(["*.gba;Game Boy Advance ROM;application/octet-stream"])
+	var dialog_error: int = DisplayServer.file_dialog_show("Select %s" % str(option.get("title", "ROM")), "", "", false, dialog_mode, filters, _on_native_file_selected)
 	if dialog_error != OK:
 		_native_dialog_open = false
 		content_failed.emit("could not open the native file picker")
@@ -120,10 +128,15 @@ func _on_manager_exiting() -> void:
 
 func _on_native_file_selected(status: bool, selected_paths: PackedStringArray, _filter_index: int) -> void:
 	_native_dialog_open = false
+	var mode: String = str(_pending_option.get("mode", "rom"))
+	_pending_option = {}
 	if not status or selected_paths.is_empty():
-		content_failed.emit("no ROM was selected")
+		content_failed.emit("no follower folder was selected" if mode == "followers" else "no ROM was selected")
 		return
-	_on_rom_selected(selected_paths[0])
+	if mode == "followers":
+		_on_follower_source_selected(selected_paths[0])
+	else:
+		_on_rom_selected(selected_paths[0])
 
 func _on_rom_selected(path: String) -> void:
 	var extension: String = path.get_extension().to_lower()
@@ -132,9 +145,11 @@ func _on_rom_selected(path: String) -> void:
 		return
 	var result: Dictionary = OpenMMOContent.from_rom_path(path)
 	if bool(result.get("ok", false)):
+		var content: OpenMMOContent = result.get("content") as OpenMMOContent
+		_attach_saved_follower_source(content)
 		_save_rom_path(path)
 		_close_manager()
-		content_loaded.emit(result.get("content"))
+		content_loaded.emit(content)
 	else:
 		content_failed.emit(str(result.get("error", "could not load content")))
 
@@ -152,7 +167,9 @@ func restore_saved_rom() -> bool:
 		return false
 	var result: Dictionary = OpenMMOContent.from_rom_path(path)
 	if bool(result.get("ok", false)):
-		content_loaded.emit(result.get("content"))
+		var content: OpenMMOContent = result.get("content") as OpenMMOContent
+		_attach_saved_follower_source(content)
+		content_loaded.emit(content)
 		return true
 	content_failed.emit("The saved Kanto ROM is still selected but could not be decoded: %s" % str(result.get("error", "unknown content error")))
 	return false
@@ -161,6 +178,48 @@ func _save_rom_path(path: String) -> void:
 	var settings: Dictionary = OpenMMOStorage.read_json(OpenMMOStorage.SETTINGS_FILE)
 	var roms: Dictionary = settings.get("roms", {})
 	roms["kanto"] = path
+	settings["roms"] = roms
+	OpenMMOStorage.write_json(OpenMMOStorage.SETTINGS_FILE, settings)
+
+func _on_follower_source_selected(path: String) -> void:
+	var resolved_path: String = OpenMMOContent.resolve_follower_source_path(path)
+	if resolved_path.is_empty():
+		content_failed.emit("The selected folder does not contain extracted HeartGold/SoulSilver follower models")
+		if is_instance_valid(manager):
+			manager.popup_centered()
+		return
+	_save_follower_source_path(resolved_path)
+	if GameState.content != null:
+		var attached: Dictionary = GameState.content.set_follower_source(resolved_path)
+		if not bool(attached.get("ok", false)):
+			content_failed.emit(str(attached.get("error", "could not load follower sprites")))
+			return
+		_close_manager()
+		content_loaded.emit(GameState.content)
+	elif is_instance_valid(manager):
+		manager.popup_centered()
+
+func _attach_saved_follower_source(content: OpenMMOContent) -> void:
+	if content == null:
+		return
+	var roms: Dictionary = OpenMMOStorage.read_json(OpenMMOStorage.SETTINGS_FILE).get("roms", {})
+	var path: String = str(roms.get("johto_follower_source", ""))
+	if path.is_empty():
+		return
+	if not bool(content.set_follower_source(path).get("ok", false)):
+		_clear_saved_follower_source()
+
+func _save_follower_source_path(path: String) -> void:
+	var settings: Dictionary = OpenMMOStorage.read_json(OpenMMOStorage.SETTINGS_FILE)
+	var roms: Dictionary = settings.get("roms", {})
+	roms["johto_follower_source"] = path
+	settings["roms"] = roms
+	OpenMMOStorage.write_json(OpenMMOStorage.SETTINGS_FILE, settings)
+
+func _clear_saved_follower_source() -> void:
+	var settings: Dictionary = OpenMMOStorage.read_json(OpenMMOStorage.SETTINGS_FILE)
+	var roms: Dictionary = settings.get("roms", {})
+	roms.erase("johto_follower_source")
 	settings["roms"] = roms
 	OpenMMOStorage.write_json(OpenMMOStorage.SETTINGS_FILE, settings)
 
