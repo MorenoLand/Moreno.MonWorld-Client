@@ -1130,7 +1130,8 @@ func _request_move(direction: int) -> bool:
 		movement_unvalidated = false
 		var destination_map_id: String = str(result.get("map_id", map_id))
 		var map_transition: bool = destination_map_id != map_id
-		var server_traversal: bool = bool(result.get("stair", false)) or bool(result.get("door", false)) or map_transition
+		var result_warp: Dictionary = result.get("warp", {}) if result.get("warp", {}) is Dictionary else {}
+		var server_traversal: bool = bool(result.get("stair", false)) or bool(result.get("door", false)) or not result_warp.is_empty() or map_transition
 		pending_map_id = destination_map_id
 		pending_position = Vector2i(int(result.get("x", player_position.x)), int(result.get("y", player_position.y))) if map_transition else player_position + Vector2i(_direction_vector(direction)) if server_traversal else Vector2i(int(result.get("x", player_position.x)), int(result.get("y", player_position.y)))
 		pending_elevation = int(result.get("elevation", player_elevation)) if map_transition else player_elevation if server_traversal else int(result.get("elevation", player_elevation))
@@ -1138,7 +1139,7 @@ func _request_move(direction: int) -> bool:
 		movement_stair_behavior = 0 if server_traversal else int(result.get("stair_behavior", 0))
 		movement_door = bool(result.get("door", false)) and not movement_stair
 		movement_door_position = player_position + Vector2i(_direction_vector(direction)) if movement_door else Vector2i.ZERO
-		pending_warp = {}
+		pending_warp = result_warp
 		movement_start = Vector2(player_position)
 		movement_target = Vector2(pending_position)
 		movement_jump = bool(result.get("jump", false)) and not server_traversal
@@ -1159,7 +1160,7 @@ func _request_move(direction: int) -> bool:
 	movement_stair_behavior = int(result.get("stair_behavior", 0))
 	movement_door = bool(result.get("door", false)) and not movement_stair
 	movement_door_position = player_position + Vector2i(_direction_vector(direction)) if movement_door else Vector2i.ZERO
-	pending_warp = result.get("warp", {}) if movement_stair or movement_door else {}
+	pending_warp = result.get("warp", {}) if result.get("warp", {}) is Dictionary else {}
 	movement_start = Vector2(player_position)
 	movement_target = movement_start + _direction_vector(direction) if pending_map_id != map_id else Vector2(pending_position)
 	movement_jump = bool(result.get("jump", false))

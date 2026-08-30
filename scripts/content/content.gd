@@ -2153,8 +2153,9 @@ func movement_result(map_id: String, x: int, y: int, direction: int, elevation: 
 	if not can_walk(map_id, x, y, destination.x, destination.y, elevation, occupied):
 		return {"ok": false, "error": "blocked"}
 	var destination_warp: Dictionary = warp_at(map_id, destination.x, destination.y, elevation)
-	var has_door_warp: bool = bool(destination_warp.get("ok", false))
-	return {"ok": true, "map_id": map_id, "x": destination.x, "y": destination.y, "from_x": x, "from_y": y, "jump": false, "stair": false, "door": has_door_warp, "warp": destination_warp if has_door_warp else {}, "elevation": int(destination_cell.get("elevation", elevation))}
+	var has_warp: bool = bool(destination_warp.get("ok", false))
+	var has_door_warp: bool = has_warp and bool(door_animation_frame(map_id, destination.x, destination.y, 1).get("ok", false))
+	return {"ok": true, "map_id": map_id, "x": destination.x, "y": destination.y, "from_x": x, "from_y": y, "jump": false, "stair": false, "door": has_door_warp, "warp": destination_warp if has_warp else {}, "elevation": int(destination_cell.get("elevation", elevation))}
 
 func interaction_at(map_id: String, x: int, y: int, direction: int, elevation: int = 3, visible_objects: Array = []) -> Dictionary:
 	var vector: Vector2i = _direction_vector(direction)
