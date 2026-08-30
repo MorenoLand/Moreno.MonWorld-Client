@@ -8,6 +8,7 @@ const DIALOGUE_SCRIPT = preload("res://scripts/dialogue.gd")
 const AUDIO_SCRIPT = preload("res://scripts/world/audio.gd")
 const CHAT_SCRIPT = preload("res://scripts/world/chat.gd")
 const CONNECTED_WORLD_PRELOAD_DEPTH: int = 2
+const CONNECTED_WORLD_MAX_MAPS: int = 24
 
 var title_label: Label
 var status_label: Label
@@ -39,6 +40,9 @@ var server_dialogue_action_type: int = -1
 var server_dialogue_detail: PackedByteArray = PackedByteArray()
 var dialogue_string_vars: Dictionary = {}
 var connected_world_generation: int = 0
+var removed_npc_entities: Dictionary = {}
+var npc_entity_maps: Dictionary = {}
+var map_prepare_jobs: Dictionary = {}
 
 func _ready() -> void:
 	set_process_input(true)
@@ -234,7 +238,7 @@ func _on_world_snapshot(value: Dictionary) -> void:
 				party = selected_party
 		snapshot["party"] = party
 		hud.set_state(GameState.content, str(snapshot.get("map_id", "")), snapshot, party)
-	_load_map_texture(str(snapshot.get("map_id", "")))
+	await _load_map_texture(str(snapshot.get("map_id", "")))
 	_sync_map_entities()
 
 func _on_map_load(value: Dictionary) -> void:
@@ -242,11 +246,14 @@ func _on_map_load(value: Dictionary) -> void:
 	if map_id.is_empty():
 		status_label.text = "OpenMMO did not provide a renderable map"
 		return
+	await _wait_for_door_traversal()
+	while transition_reveal_pending and transition_overlay != null and not transition_overlay.visible:
+		await get_tree().process_frame
 	snapshot = {"map_id": map_id, "server_map": value, "party": GameState.current_character.get("party", []), "players": []}
 	_retain_server_entities_for_map(map_id)
 	if hud != null:
 		hud.set_state(GameState.content, map_id, snapshot, snapshot.party)
-	if not _load_map_texture(map_id, int(value.get("width", 0)), int(value.get("height", 0))):
+	if not await _load_map_texture(map_id, int(value.get("width", 0)), int(value.get("height", 0))):
 		return
 	map_view.set_input_enabled(true)
 	_sync_map_entities()
@@ -262,6 +269,11 @@ func _load_map_texture(map_id: String, expected_width: int = 0, expected_height:
 	connected_world_generation += 1
 	var generation: int = connected_world_generation
 	var server_map: Dictionary = GameState.content._server_map_for_local_map(map_id, GameState.server_maps)
+	if not GameState.content._is_server_custom_map(server_map):
+		var cached_map: Dictionary = await _ensure_rom_map_prepared(map_id)
+		if not bool(cached_map.get("ok", false)):
+			status_label.text = "Map renderer: %s" % str(cached_map.get("error", "map rendering failed"))
+			return false
 	var result: Dictionary = GameState.content.prepare_server_map(map_id, server_map, GameState.server_maps, false) if GameState.content._is_server_custom_map(server_map) else GameState.content.prepare_map(map_id, false)
 	if not bool(result.get("ok", false)):
 		status_label.text = "Map renderer: %s" % str(result.get("error", "map rendering failed"))
@@ -275,8 +287,50 @@ func _load_map_texture(map_id: String, expected_width: int = 0, expected_height:
 	var root_world: Dictionary = {"ok": true, "root_map_id": map_id, "regions": [root_region], "map_origins": {map_id: Vector2i.ZERO}}
 	map_view.set_world(root_world, map_id)
 	audio.play_map_music(GameState.content, map_id)
+	_queue_warp_map_preloads(result.get("warps", []))
 	call_deferred("_expand_connected_world", map_id, generation)
 	return true
+
+func _start_rom_map_prepare(map_id: String) -> void:
+	if map_id.is_empty() or map_prepare_jobs.has(map_id) or GameState.content == null or GameState.content.has_prepared_map(map_id):
+		return
+	var worker: OpenMMOContent = GameState.content.create_map_cache_worker()
+	var task_id: int = WorkerThreadPool.add_task(worker.build_detached_map_cache.bind(map_id), false, "Prepare map %s" % map_id)
+	map_prepare_jobs[map_id] = {"worker": worker, "task_id": task_id, "joined": false, "result": {}}
+
+func _ensure_rom_map_prepared(map_id: String) -> Dictionary:
+	if GameState.content.has_prepared_map(map_id):
+		return GameState.content.map_cache.get(map_id, {})
+	_start_rom_map_prepare(map_id)
+	var job_value: Variant = map_prepare_jobs.get(map_id, {})
+	if not job_value is Dictionary or (job_value as Dictionary).is_empty():
+		return {"ok": false, "error": "could not start map preparation"}
+	var job: Dictionary = job_value as Dictionary
+	var task_id: int = int(job.get("task_id", -1))
+	while task_id >= 0 and not WorkerThreadPool.is_task_completed(task_id):
+		await get_tree().process_frame
+	if not bool(job.get("joined", false)):
+		job["joined"] = true
+		WorkerThreadPool.wait_for_task_completion(task_id)
+		var worker: OpenMMOContent = job.get("worker") as OpenMMOContent
+		var result: Dictionary = worker.detached_map_cache_result if worker != null else {"ok": false, "error": "map preparation worker failed"}
+		job["result"] = result
+		GameState.content.install_detached_map_cache(map_id, result)
+		map_prepare_jobs.erase(map_id)
+		return result
+	while (job.get("result", {}) as Dictionary).is_empty():
+		await get_tree().process_frame
+	return job.get("result", {}) as Dictionary
+
+func _queue_warp_map_preloads(warps: Variant) -> void:
+	if not warps is Array:
+		return
+	for warp_value in warps as Array:
+		if not warp_value is Dictionary:
+			continue
+		var target_map_id: String = str((warp_value as Dictionary).get("map_id", ""))
+		if not target_map_id.is_empty():
+			_start_rom_map_prepare(target_map_id)
 
 func _expand_connected_world(root_map_id: String, generation: int) -> void:
 	await get_tree().process_frame
@@ -284,7 +338,7 @@ func _expand_connected_world(root_map_id: String, generation: int) -> void:
 		await get_tree().process_frame
 	if generation != connected_world_generation or map_view == null or map_view.map_id != root_map_id:
 		return
-	var connected_world: Dictionary = GameState.content.prepare_connected_world(root_map_id, 96, 0, GameState.server_maps)
+	var connected_world: Dictionary = GameState.content.prepare_connected_world(root_map_id, CONNECTED_WORLD_MAX_MAPS, 0, GameState.server_maps, CONNECTED_WORLD_PRELOAD_DEPTH)
 	if not bool(connected_world.get("ok", false)) or generation != connected_world_generation:
 		return
 	map_view.set_world(connected_world, root_map_id)
@@ -303,6 +357,10 @@ func _preload_connected_regions(world_value: Dictionary, root_map_id: String, ge
 		if generation != connected_world_generation:
 			return
 		var server_map: Dictionary = GameState.content._server_map_for_local_map(region_id, GameState.server_maps)
+		if not GameState.content._is_server_custom_map(server_map):
+			var cached_map: Dictionary = await _ensure_rom_map_prepared(region_id)
+			if not bool(cached_map.get("ok", false)):
+				continue
 		var prepared: Dictionary = GameState.content.prepare_server_map(region_id, server_map, GameState.server_maps, false) if GameState.content._is_server_custom_map(server_map) else GameState.content.prepare_map(region_id, false)
 		if not bool(prepared.get("ok", false)):
 			continue
@@ -326,6 +384,12 @@ func _on_entity_update(value: Dictionary) -> void:
 		return
 	if value.has("remove_entity_id"):
 		var removed_entity_id: int = int(value.get("remove_entity_id", 0))
+		var removed_key: String = str(removed_entity_id)
+		if npc_entity_maps.has(removed_key):
+			var removed_map_id: String = str(npc_entity_maps.get(removed_key, ""))
+			var removed_for_map: Dictionary = removed_npc_entities.get(removed_map_id, {}).duplicate()
+			removed_for_map[removed_key] = true
+			removed_npc_entities[removed_map_id] = removed_for_map
 		var remove_keys: Array = []
 		for key in entities:
 			var stored_value: Variant = entities[key]
@@ -339,6 +403,15 @@ func _on_entity_update(value: Dictionary) -> void:
 	if player is Dictionary:
 		var entity: Dictionary = player
 		var key := str(entity.get("entity_id", entity.get("character_id", entity.get("user_id", 0))))
+		if bool(entity.get("npc", false)):
+			var entity_map_id: String = str(entity.get("map_id", ""))
+			npc_entity_maps[key] = entity_map_id
+			var removed_for_map: Dictionary = removed_npc_entities.get(entity_map_id, {}).duplicate()
+			if bool(value.get("spawn", false)) and removed_for_map.has(key):
+				if bool(value.get("map_load_spawn", false)):
+					return
+				removed_for_map.erase(key)
+				removed_npc_entities[entity_map_id] = removed_for_map
 		var is_local: bool = bool(value.get("local", false)) or int(entity.get("character_id", 0)) == selected_character_id
 		var merged: Dictionary = {}
 		var existing: Variant = entities.get(key, {})
@@ -350,7 +423,7 @@ func _on_entity_update(value: Dictionary) -> void:
 			var entity_map_id: String = str(entity.get("map_id", ""))
 			if not entity_map_id.is_empty() and entity_map_id != map_view.map_id:
 				if not map_view.set_active_map(entity_map_id):
-					_load_map_texture(entity_map_id)
+					await _load_map_texture(entity_map_id)
 				snapshot["map_id"] = entity_map_id
 				if title_label != null:
 					title_label.text = "Map: %s" % entity_map_id
@@ -390,12 +463,13 @@ func _on_local_location_changed(next_map_id: String, x: int, y: int) -> void:
 
 func _on_render_screen(visible: bool) -> void:
 	if not visible:
-		if map_view != null:
-			map_view.set_transition_active(true)
-			map_view.set_input_enabled(false)
 		transition_reveal_pending = true
 		transition_map_ready = false
 		transition_screen_ready = false
+		await _wait_for_door_traversal()
+		if map_view != null:
+			map_view.set_transition_active(true)
+			map_view.set_input_enabled(false)
 		_cover_screen_transition()
 		return
 	if transition_reveal_pending:
@@ -410,6 +484,10 @@ func _on_render_screen(visible: bool) -> void:
 		map_view.set_input_enabled(true)
 	if hud != null:
 		hud.visible = true
+
+func _wait_for_door_traversal() -> void:
+	while map_view != null and bool(map_view.get("movement_active")) and bool(map_view.get("movement_door")):
+		await get_tree().process_frame
 
 func _try_reveal_screen_transition() -> void:
 	if not transition_reveal_pending or not transition_map_ready or not transition_screen_ready:

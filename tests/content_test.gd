@@ -35,6 +35,18 @@ func _init() -> void:
 		push_error("FireRed ROM did not select the FireRed source profile")
 		quit(1)
 		return
+	for door_frame_index in range(1, 4):
+		var door_frame: Dictionary = content.door_animation_frame("pallet-town", 6, 7, door_frame_index)
+		var door_texture: Texture2D = door_frame.get("texture") as Texture2D
+		if not bool(door_frame.get("ok", false)) or door_texture == null or door_texture.get_width() != 16 or door_texture.get_height() not in [16, 32]:
+			push_error("FireRed door animation frame %d was not decoded" % door_frame_index)
+			quit(1)
+			return
+	var ball_result: Dictionary = content.battle_pokeball_frames()
+	if not bool(ball_result.get("ok", false)) or (ball_result.get("frames", []) as Array).size() != 3:
+		push_error("FireRed Poké Ball send-out frames were not decoded")
+		quit(1)
+		return
 	var ember_plan: Dictionary = content.battle_move_animation_plan(52)
 	if not bool(ember_plan.get("ok", false)) or (ember_plan.get("spawns", []) as Array).is_empty():
 		push_error("FireRed Ember animation script was not decoded")

@@ -24,6 +24,10 @@ var effects_layer: Control
 var hp_tweens: Dictionary = {}
 var move_tween: Tween
 var hp_tween_delay: float = 0.0
+var battle_event_queue: Array[Dictionary] = []
+var battle_event_busy: bool = false
+var send_out_tweens: Array[Tween] = []
+var release_glow_texture: Texture2D
 var state: Dictionary = {}
 var selection_mode: String = ""
 var input_locked: bool = true
@@ -39,6 +43,9 @@ func _ready() -> void:
 func _exit_tree() -> void:
 	if GameState.battle_event_received.is_connected(_on_battle_event):
 		GameState.battle_event_received.disconnect(_on_battle_event)
+	battle_event_queue.clear()
+	if move_tween != null:
+		move_tween.kill()
 
 func _build_ui() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
@@ -93,17 +100,17 @@ func _build_ui() -> void:
 	stage_root.add_child(player_card)
 	opponent_sprite = _make_sprite()
 	opponent_sprite.anchor_left = 0.64
-	opponent_sprite.anchor_top = 0.11
+	opponent_sprite.anchor_top = 0.18
 	opponent_sprite.anchor_right = 0.94
-	opponent_sprite.anchor_bottom = 0.53
+	opponent_sprite.anchor_bottom = 0.60
 	opponent_sprite.pivot_offset = Vector2(130.0, 100.0)
 	opponent_sprite.z_index = 1
 	stage_root.add_child(opponent_sprite)
 	player_sprite = _make_sprite()
-	player_sprite.anchor_left = 0.12
-	player_sprite.anchor_top = 0.46
-	player_sprite.anchor_right = 0.48
-	player_sprite.anchor_bottom = 0.88
+	player_sprite.anchor_left = 0.15
+	player_sprite.anchor_top = 0.49
+	player_sprite.anchor_right = 0.45
+	player_sprite.anchor_bottom = 0.76
 	player_sprite.pivot_offset = Vector2(150.0, 110.0)
 	player_sprite.z_index = 1
 	stage_root.add_child(player_sprite)
@@ -114,7 +121,7 @@ func _build_ui() -> void:
 	stage_root.add_child(effects_layer)
 	var log_panel := PanelContainer.new()
 	log_panel.anchor_left = 0.55
-	log_panel.anchor_top = 0.78
+	log_panel.anchor_top = 0.77
 	log_panel.anchor_right = 0.975
 	log_panel.anchor_bottom = 0.97
 	log_panel.add_theme_stylebox_override("panel", _panel_style(Color(0.035, 0.055, 0.04, 0.88), Color("536a64"), 5, 1))
@@ -128,7 +135,7 @@ func _build_ui() -> void:
 	log_panel.add_child(log_view)
 	var action_panel := PanelContainer.new()
 	action_panel.anchor_left = 0.025
-	action_panel.anchor_top = 0.74
+	action_panel.anchor_top = 0.77
 	action_panel.anchor_right = 0.535
 	action_panel.anchor_bottom = 0.97
 	action_panel.add_theme_stylebox_override("panel", _panel_style(Color(0.035, 0.055, 0.04, 0.94), Color("71866f"), 5, 1))
@@ -577,7 +584,7 @@ func _trigger_flash(color: Color = Color(1.0, 1.0, 1.0, 0.82)) -> void:
 	)
 
 func _sprite_for_entity(entity_id: int) -> TextureRect:
-	if entity_id <= 0:
+	if entity_id == 0:
 		return null
 	for party_key in ["player_party", "opponent_party"]:
 		var party_value: Variant = state.get(party_key, [])
@@ -589,7 +596,7 @@ func _sprite_for_entity(entity_id: int) -> TextureRect:
 	return null
 
 func _entity_in_party(entity_id: int, party_key: String) -> bool:
-	if entity_id <= 0:
+	if entity_id == 0:
 		return false
 	var party_value: Variant = state.get(party_key, [])
 	if not party_value is Array:
@@ -620,15 +627,14 @@ func _animate_move(event: Dictionary) -> void:
 		for target_value in targets as Array:
 			if target_value is Dictionary:
 				target_entity = int((target_value as Dictionary).get("entity_id", 0))
-				if target_entity > 0:
+				if target_entity != 0:
 					break
 	var defender: TextureRect = _sprite_for_entity(target_entity)
 	if defender == null or defender == attacker:
 		defender = opponent_sprite if attacker == player_sprite else player_sprite
 	if attacker == null or defender == null:
+		_finish_move_event.call_deferred()
 		return
-	if move_tween != null:
-		move_tween.kill()
 	attacker.modulate = Color.WHITE
 	defender.modulate = Color.WHITE
 	var base_position: Vector2 = attacker.position
@@ -655,6 +661,7 @@ func _animate_move(event: Dictionary) -> void:
 	if contact:
 		move_tween.tween_property(attacker, "position", base_position, 0.2).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN_OUT)
 	move_tween.tween_callback(_finish_move_animation.bind(attacker, base_position, defender, event))
+	move_tween.tween_callback(_finish_move_event)
 
 func _blink_sprite(sprite: TextureRect) -> void:
 	if sprite == null:
@@ -746,15 +753,132 @@ func _set_effect_frame(value: float, effect: TextureRect, frames: Array) -> void
 func _reset_battle_sprite_visuals() -> void:
 	if move_tween != null:
 		move_tween.kill()
+		move_tween = null
 	if player_sprite != null:
 		player_sprite.modulate = Color.WHITE
+		player_sprite.scale = Vector2.ONE
+		player_sprite.visible = true
 	if opponent_sprite != null:
 		opponent_sprite.modulate = Color.WHITE
+		opponent_sprite.scale = Vector2.ONE
+		opponent_sprite.visible = true
+	for tween in send_out_tweens:
+		if tween != null:
+			tween.kill()
+	send_out_tweens.clear()
+
+func _animate_send_out(event: Dictionary) -> void:
+	var side: int = int(event.get("side", 0))
+	var sprite: TextureRect = player_sprite if side == 0 else opponent_sprite
+	if sprite == null or sprite.texture == null or effects_layer == null:
+		_finish_move_event.call_deferred()
+		return
+	var ball_result: Dictionary = GameState.content.battle_pokeball_frames(0) if GameState.content != null else {}
+	var frames: Array = ball_result.get("frames", []) if bool(ball_result.get("ok", false)) else []
+	var ball := TextureRect.new()
+	ball.texture = frames[0] as Texture2D if not frames.is_empty() else null
+	ball.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	ball.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	ball.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	ball.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ball.size = Vector2(48.0, 48.0)
+	ball.pivot_offset = ball.size * 0.5
+	effects_layer.add_child(ball)
+	var target: Vector2 = sprite.position + sprite.size * 0.5
+	var start: Vector2 = Vector2(stage_root.size.x * (0.05 if side == 0 else 0.95), stage_root.size.y * (0.77 if side == 0 else 0.27))
+	sprite.visible = false
+	sprite.scale = Vector2(0.08, 0.08)
+	sprite.modulate = Color(1.0, 1.0, 1.0, 0.0)
+	var tween: Tween = create_tween()
+	send_out_tweens.append(tween)
+	tween.tween_method(_set_ball_arc.bind(ball, start, target, frames, side), 0.0, 1.0, 0.42).set_trans(Tween.TRANS_LINEAR)
+	tween.tween_callback(_release_battler.bind(sprite, ball, target, frames))
+	tween.tween_interval(0.38)
+	tween.tween_callback(_finish_send_out.bind(sprite, ball, tween))
+
+func _set_ball_arc(value: float, ball: TextureRect, start: Vector2, target: Vector2, frames: Array, side: int) -> void:
+	if ball == null or not is_instance_valid(ball):
+		return
+	var center: Vector2 = start.lerp(target, value)
+	center.y -= sin(value * PI) * 92.0
+	ball.position = center - ball.size * 0.5
+	ball.rotation = value * TAU * 2.0 * (1.0 if side == 0 else -1.0)
+	if not frames.is_empty():
+		ball.texture = frames[clampi(floori(value * 2.0), 0, mini(frames.size() - 1, 1))] as Texture2D
+
+func _release_battler(sprite: TextureRect, ball: TextureRect, target: Vector2, frames: Array) -> void:
+	if sprite == null or not is_instance_valid(sprite):
+		return
+	if ball != null and is_instance_valid(ball):
+		if not frames.is_empty():
+			ball.texture = frames[frames.size() - 1] as Texture2D
+		var ball_fade: Tween = create_tween()
+		ball_fade.tween_property(ball, "modulate", Color(1.0, 1.0, 1.0, 0.0), 0.18)
+	var glow := TextureRect.new()
+	glow.texture = _release_glow()
+	glow.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	glow.stretch_mode = TextureRect.STRETCH_SCALE
+	glow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	glow.size = Vector2(104.0, 104.0)
+	glow.position = target - glow.size * 0.5
+	glow.pivot_offset = glow.size * 0.5
+	glow.scale = Vector2(0.35, 0.35)
+	effects_layer.add_child(glow)
+	var glow_tween: Tween = create_tween()
+	glow_tween.tween_property(glow, "scale", Vector2(1.35, 1.35), 0.32).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	glow_tween.parallel().tween_property(glow, "modulate", Color(1.0, 1.0, 1.0, 0.0), 0.32)
+	glow_tween.tween_callback(glow.queue_free)
+	sprite.pivot_offset = sprite.size * 0.5
+	sprite.visible = true
+	var emerge: Tween = create_tween()
+	emerge.tween_property(sprite, "scale", Vector2.ONE, 0.30).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+	emerge.parallel().tween_property(sprite, "modulate", Color.WHITE, 0.24)
+
+func _finish_send_out(sprite: TextureRect, ball: TextureRect, tween: Tween) -> void:
+	if sprite != null and is_instance_valid(sprite):
+		sprite.visible = true
+		sprite.scale = Vector2.ONE
+		sprite.modulate = Color.WHITE
+	if ball != null and is_instance_valid(ball):
+		ball.queue_free()
+	send_out_tweens.erase(tween)
+	_finish_move_event()
+
+func _release_glow() -> Texture2D:
+	if release_glow_texture != null:
+		return release_glow_texture
+	var image: Image = Image.create(32, 32, false, Image.FORMAT_RGBA8)
+	for y in range(32):
+		for x in range(32):
+			var distance: float = Vector2(x - 15.5, y - 15.5).length() / 16.0
+			image.set_pixel(x, y, Color(1.0, 1.0, 0.86, clampf(1.0 - distance, 0.0, 1.0)))
+	release_glow_texture = ImageTexture.create_from_image(image)
+	return release_glow_texture
 
 func _on_battle_event(value: Dictionary) -> void:
+	battle_event_queue.append(value.duplicate(true))
+	_process_battle_event_queue()
+
+func _process_battle_event_queue() -> void:
+	if battle_event_busy:
+		return
+	while not battle_event_queue.is_empty():
+		var value: Dictionary = battle_event_queue.pop_front()
+		battle_event_busy = str(value.get("type", "update")) in ["move_event", "switch_in"]
+		_apply_battle_event(value)
+		if battle_event_busy:
+			return
+
+func _finish_move_event() -> void:
+	move_tween = null
+	battle_event_busy = false
+	_process_battle_event_queue()
+
+func _apply_battle_event(value: Dictionary) -> void:
 	var event_type: String = str(value.get("type", "update"))
 	var event_state: Variant = value.get("state", null)
 	var move_event: Dictionary = {}
+	var switch_event: Dictionary = {}
 	if event_state is Dictionary:
 		state = (event_state as Dictionary).duplicate(true)
 	else:
@@ -782,7 +906,8 @@ func _on_battle_event(value: Dictionary) -> void:
 		"switch_in":
 			input_locked = true
 			_reset_battle_sprite_visuals()
-			_trigger_flash(Color(0.72, 0.86, 1.0, 0.42))
+			var switch_value: Variant = value.get("event", {})
+			switch_event = switch_value as Dictionary if switch_value is Dictionary else {}
 		"battle_end":
 			input_locked = true
 			selection_mode = ""
@@ -795,3 +920,7 @@ func _on_battle_event(value: Dictionary) -> void:
 	hp_tween_delay = 0.0
 	if not move_event.is_empty():
 		_animate_move(move_event)
+	elif not switch_event.is_empty():
+		_animate_send_out(switch_event)
+	elif battle_event_busy:
+		_finish_move_event.call_deferred()

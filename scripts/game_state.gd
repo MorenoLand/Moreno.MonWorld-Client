@@ -484,7 +484,7 @@ func _on_game_packet(opcode: int, payload: PackedByteArray) -> void:
 			return
 		var npc: Dictionary = response.entity
 		npc["map_id"] = content.map_id_for_location(int(npc.get("bank_id", -1)), int(npc.get("wire_map_id", -1))) if content != null else ""
-		entity_update_received.emit({"player": npc, "local": false})
+		entity_update_received.emit({"player": npc, "local": false, "spawn": true, "map_load_spawn": not pending_map_load.is_empty()})
 	elif opcode == GAME_PROTOCOL_SCRIPT.NPC_UPDATE:
 		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_npc_update(payload)
 		if response.ok:

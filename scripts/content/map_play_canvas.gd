@@ -14,6 +14,7 @@ const REFERENCE_VIEWPORT_SIZE: Vector2 = Vector2(1280.0, 720.0)
 const NORMAL_STEP_DURATION: float = 0.17
 const ANIMATION_FRAME_INTERVAL: float = 0.125
 const DOOR_ANIMATION_DURATION: float = 16.0 / 60.0
+const DOOR_TRAVERSAL_DURATION: float = 44.0 / 60.0
 const DOOR_FRAME_COUNT: int = 4
 const AUTHORITATIVE_PROBE_INTERVAL: float = 0.2
 
@@ -43,6 +44,7 @@ var movement_jump: bool = false
 var movement_stair: bool = false
 var movement_stair_behavior: int = 0
 var movement_door: bool = false
+var movement_door_position: Vector2i = Vector2i.ZERO
 var door_progress: float = 0.0
 var movement_elapsed: float = 0.0
 var movement_duration: float = 0.14
@@ -241,6 +243,7 @@ func _reset_movement_state(clear_direction: bool = false) -> void:
 	movement_stair = false
 	movement_stair_behavior = 0
 	movement_door = false
+	movement_door_position = Vector2i.ZERO
 	door_progress = 0.0
 	movement_elapsed = 0.0
 	pending_map_id = ""
@@ -374,6 +377,8 @@ func _ensure_region_rendered(selected_map_id: String) -> bool:
 			continue
 		if bool(region.get("ready", false)) and region.get("background_texture") is Texture2D:
 			return true
+		if authoritative_state:
+			return false
 		var server_map: Dictionary = content._server_map_for_local_map(selected_map_id, GameState.server_maps)
 		var prepared: Dictionary = content.prepare_server_map(selected_map_id, server_map, GameState.server_maps, false) if content._is_server_custom_map(server_map) else content.prepare_map(selected_map_id, false)
 		if not bool(prepared.get("ok", false)):
@@ -456,7 +461,18 @@ func _movement_world_position() -> Vector2:
 		target_world = _world_position(pending_map_id, pending_position)
 	else:
 		target_world = start_world + _direction_vector(player_facing)
-	return start_world.lerp(target_world, clampf(movement_elapsed / movement_duration, 0.0, 1.0))
+	var progress: float = clampf(movement_elapsed / movement_duration, 0.0, 1.0)
+	if movement_door:
+		progress = clampf((progress - 16.0 / 44.0) / (12.0 / 44.0), 0.0, 1.0)
+	return start_world.lerp(target_world, progress)
+
+func _door_frame_index() -> int:
+	var tick: int = clampi(floori(door_progress * 44.0), 0, 43)
+	if tick < 16:
+		return clampi(tick / 4, 0, DOOR_FRAME_COUNT - 1)
+	if tick < 28:
+		return DOOR_FRAME_COUNT - 1
+	return clampi(DOOR_FRAME_COUNT - 1 - (tick - 28) / 4, 0, DOOR_FRAME_COUNT - 1)
 
 func _camera_origin(world_position: Vector2, camera_world_size: Vector2) -> Vector2:
 	var camera_center: Vector2 = (world_position + Vector2(0.5, 0.5)) * TILE_PIXELS
@@ -1037,13 +1053,14 @@ func _request_move(direction: int) -> bool:
 		pending_elevation = int(result.get("elevation", player_elevation)) if map_transition else player_elevation if server_traversal else int(result.get("elevation", player_elevation))
 		movement_stair = false if server_traversal else bool(result.get("stair", false))
 		movement_stair_behavior = 0 if server_traversal else int(result.get("stair_behavior", 0))
-		movement_door = false
+		movement_door = bool(result.get("door", false)) and not movement_stair
+		movement_door_position = player_position + Vector2i(_direction_vector(direction)) if movement_door else Vector2i.ZERO
 		pending_warp = {}
 		movement_start = Vector2(player_position)
 		movement_target = Vector2(pending_position)
 		movement_jump = bool(result.get("jump", false)) and not server_traversal
 		movement_elapsed = 0.0
-		movement_duration = 0.24 if movement_stair else DOOR_ANIMATION_DURATION if movement_door else 0.32 if movement_jump else NORMAL_STEP_DURATION
+		movement_duration = 0.24 if movement_stair else DOOR_TRAVERSAL_DURATION if movement_door else 0.32 if movement_jump else NORMAL_STEP_DURATION
 		door_progress = 0.0
 		movement_active = true
 		movement_animation_active = true
@@ -1058,12 +1075,13 @@ func _request_move(direction: int) -> bool:
 	movement_stair = bool(result.get("stair", false))
 	movement_stair_behavior = int(result.get("stair_behavior", 0))
 	movement_door = bool(result.get("door", false)) and not movement_stair
+	movement_door_position = player_position + Vector2i(_direction_vector(direction)) if movement_door else Vector2i.ZERO
 	pending_warp = result.get("warp", {}) if movement_stair or movement_door else {}
 	movement_start = Vector2(player_position)
 	movement_target = movement_start + _direction_vector(direction) if pending_map_id != map_id else Vector2(pending_position)
 	movement_jump = bool(result.get("jump", false))
 	movement_elapsed = 0.0
-	movement_duration = 0.24 if movement_stair else DOOR_ANIMATION_DURATION if movement_door else 0.32 if movement_jump else NORMAL_STEP_DURATION
+	movement_duration = 0.24 if movement_stair else DOOR_TRAVERSAL_DURATION if movement_door else 0.32 if movement_jump else NORMAL_STEP_DURATION
 	door_progress = 0.0
 	movement_active = true
 	movement_animation_active = true
@@ -1125,6 +1143,7 @@ func _process(delta: float) -> void:
 	movement_stair = false
 	movement_stair_behavior = 0
 	movement_door = false
+	movement_door_position = Vector2i.ZERO
 	door_progress = 0.0
 	pending_warp = {}
 	player_position = completed_position
@@ -1480,6 +1499,12 @@ func _draw() -> void:
 		var player_size: Vector2 = Vector2(player_texture.get_width(), player_texture.get_height())
 		var player_anchor: Vector2 = (world_player + Vector2(0.5, 1.0)) * TILE_PIXELS
 		drawables.append({"kind": "sprite", "texture": player_texture, "width": player_size.x, "height": player_size.y, "world_anchor": player_anchor, "sort_y": world_player.y + 1.0, "sort_order": 1})
+	if movement_active and movement_door and content != null:
+		var door_frame: Dictionary = content.door_animation_frame(map_id, movement_door_position.x, movement_door_position.y, _door_frame_index())
+		var door_texture: Texture2D = door_frame.get("texture") as Texture2D
+		if door_texture != null:
+			var door_world: Vector2 = _world_position(map_id, Vector2(movement_door_position))
+			drawables.append({"kind": "door", "texture": door_texture, "width": float(door_texture.get_width()), "height": float(door_texture.get_height()), "world_anchor": Vector2((door_world.x + 0.5) * TILE_PIXELS, (door_world.y + 1.0) * TILE_PIXELS), "sort_y": door_world.y + 1.0, "sort_order": 3})
 	drawables.sort_custom(_sort_drawables)
 	for drawable_value in drawables:
 		var drawable: Dictionary = drawable_value

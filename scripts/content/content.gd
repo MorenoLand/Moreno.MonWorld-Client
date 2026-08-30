@@ -57,6 +57,7 @@ var rom_header: Dictionary = {}
 var source_profile: Dictionary = {}
 var map_cache: Dictionary = {}
 var map_topology_cache: Dictionary = {}
+var tileset_cache: Dictionary = {}
 var sprite_cache: Dictionary = {}
 var battle_table_cache: Dictionary = {}
 var battle_tables_scanned: bool = false
@@ -66,8 +67,11 @@ var battle_move_name_cache: Dictionary = {}
 var battle_move_info_cache: Dictionary = {}
 var battle_animation_sheet_cache: Dictionary = {}
 var battle_animation_plan_cache: Dictionary = {}
+var battle_ball_cache: Dictionary = {}
+var door_animation_texture_cache: Dictionary = {}
 var follower_sprite_cache: Dictionary = {}
 var string_catalog: Dictionary = {}
+var detached_map_cache_result: Dictionary = {}
 
 static func from_rom_path(path: String) -> Dictionary:
 	var file: FileAccess = FileAccess.open(path, FileAccess.READ)
@@ -451,6 +455,77 @@ func battle_pokemon_sprite(species_id: int, back: bool = false) -> Dictionary:
 	var result: Dictionary = {"ok": true, "texture": ImageTexture.create_from_image(image), "width": 64, "height": 64, "species_id": species_id, "back": back}
 	battle_sprite_cache[cache_key] = result
 	return result
+
+func battle_pokeball_frames(ball_id: int = 0) -> Dictionary:
+	var cache_key: String = str(ball_id)
+	if battle_ball_cache.has(cache_key):
+		return battle_ball_cache[cache_key]
+	var sheet_table: int = _find_ball_sheet_table()
+	var palette_table: int = _find_ball_palette_table()
+	var sheet_entry: int = sheet_table + ball_id * 8
+	var palette_entry: int = palette_table + ball_id * 8
+	if ball_id < 0 or ball_id >= 12 or sheet_table < 0 or palette_table < 0 or not _valid_range(sheet_entry, 8) or not _valid_range(palette_entry, 8):
+		return {"ok": false}
+	var pixels: PackedByteArray = _read_lz77(_read_rom_pointer(sheet_entry))
+	var palette: PackedByteArray = _read_lz77(_read_rom_pointer(palette_entry))
+	if pixels.size() < 384 or palette.size() < 32:
+		return {"ok": false}
+	var frames: Array = []
+	for frame_index in range(3):
+		var image: Image = Image.create(16, 16, false, Image.FORMAT_RGBA8)
+		for y in range(16):
+			for x in range(16):
+				var tile_offset: int = (frame_index * 4 + (y / 8) * 2 + x / 8) * 32
+				var pixel_offset: int = tile_offset + (y % 8) * 4 + (x % 8) / 2
+				var packed: int = int(pixels[pixel_offset])
+				var palette_index: int = packed & 0x0F if x % 2 == 0 else (packed >> 4) & 0x0F
+				var color_value: int = int(palette[palette_index * 2]) | int(palette[palette_index * 2 + 1]) << 8
+				var color: Color = _rgb555_color(color_value)
+				if palette_index == 0:
+					color.a = 0.0
+				image.set_pixel(x, y, color)
+		frames.append(ImageTexture.create_from_image(image))
+	var result: Dictionary = {"ok": true, "frames": frames, "width": 16, "height": 16, "ball_id": ball_id}
+	battle_ball_cache[cache_key] = result
+	return result
+
+func _find_ball_sheet_table() -> int:
+	var cursor: int = 4
+	while cursor < rom_data.size():
+		var marker: int = rom_data.find(0x80, cursor)
+		if marker < 0:
+			return -1
+		var offset: int = marker - 4
+		if offset % 4 == 0 and _valid_range(offset, 12 * 8):
+			var valid: bool = true
+			for index in range(12):
+				var record: int = offset + index * 8
+				if _read_u16(record + 4) != 384 or _read_u16(record + 6) != 55000 + index or _read_rom_pointer(record) < 0:
+					valid = false
+					break
+			if valid:
+				return offset
+		cursor = marker + 1
+	return -1
+
+func _find_ball_palette_table() -> int:
+	var cursor: int = 4
+	while cursor < rom_data.size():
+		var marker: int = rom_data.find(0xD8, cursor)
+		if marker < 0:
+			return -1
+		var offset: int = marker - 4
+		if offset % 4 == 0 and _valid_range(offset, 12 * 8):
+			var valid: bool = true
+			for index in range(12):
+				var record: int = offset + index * 8
+				if _read_u16(record + 4) != 55000 + index or _read_rom_pointer(record) < 0:
+					valid = false
+					break
+			if valid:
+				return offset
+		cursor = marker + 1
+	return -1
 
 func follower_pokemon_sprite(species_id: int, gender: int = -1, shiny: bool = false, form: int = 0) -> Dictionary:
 	if species_id <= 0:
@@ -910,6 +985,26 @@ func prepare_map(map_id: String, include_composite_texture: bool = true) -> Dict
 		cached_map["world_texture"] = world_texture
 	return {"ok": true, "texture": world_texture if world_texture != null else background_texture, "background_texture": background_texture, "foreground_texture": foreground_texture, "world_texture": world_texture, "width": int(cached_map.get("width", 0)), "height": int(cached_map.get("height", 0)), "header_offset": int(cached_map.get("header_offset", -1)), "layout_offset": int(cached_map.get("layout_offset", -1)), "objects": cached_map.get("objects", []), "warps": cached_map.get("warps", []), "connections": cached_map.get("connections", []), "animated_background_tiles": cached_map.get("animated_background_tiles", []), "animated_foreground_tiles": cached_map.get("animated_foreground_tiles", []), "map_cells": cached_map.get("map_cells", PackedInt32Array()), "music_id": int(cached_map.get("music_id", 0)), "map_type": int(cached_map.get("map_type", 0)), "animation_phase": 0}
 
+func create_map_cache_worker() -> OpenMMOContent:
+	var worker: OpenMMOContent = OpenMMOContent.new()
+	worker.manifest = manifest.duplicate(true)
+	worker.rom_data = rom_data
+	worker.rom_sha1 = rom_sha1
+	worker.rom_header = rom_header.duplicate(true)
+	worker.source_profile = source_profile.duplicate(true)
+	return worker
+
+func build_detached_map_cache(map_id: String) -> void:
+	detached_map_cache_result = _get_or_build_map_cache(map_id)
+
+func install_detached_map_cache(map_id: String, cached_map: Dictionary) -> void:
+	if not map_cache.has(map_id) and bool(cached_map.get("ok", false)):
+		map_cache[map_id] = cached_map
+
+func has_prepared_map(map_id: String) -> bool:
+	var cached_value: Variant = map_cache.get(map_id, {})
+	return cached_value is Dictionary and bool((cached_value as Dictionary).get("ok", false))
+
 func prepare_server_map(map_id: String, server_map: Dictionary, server_maps: Dictionary, include_composite_texture: bool = true) -> Dictionary:
 	var cached_map: Dictionary = map_cache.get(map_id, {})
 	if cached_map.is_empty():
@@ -931,7 +1026,7 @@ func prepare_server_map(map_id: String, server_map: Dictionary, server_maps: Dic
 		cached_map["world_texture"] = world_texture
 	return {"ok": true, "texture": world_texture if world_texture != null else background_texture, "background_texture": background_texture, "foreground_texture": foreground_texture, "world_texture": world_texture, "width": int(cached_map.get("width", 0)), "height": int(cached_map.get("height", 0)), "header_offset": -1, "layout_offset": -1, "objects": [], "warps": [], "connections": cached_map.get("connections", []), "animated_background_tiles": cached_map.get("animated_background_tiles", []), "animated_foreground_tiles": cached_map.get("animated_foreground_tiles", []), "map_cells": cached_map.get("map_cells", PackedInt32Array()), "music_id": int(cached_map.get("music_id", 0)), "map_type": int(cached_map.get("map_type", 0)), "animation_phase": 0}
 
-func prepare_connected_world(root_map_id: String, max_maps: int = 96, preload_depth: int = 1, server_maps: Dictionary = {}) -> Dictionary:
+func prepare_connected_world(root_map_id: String, max_maps: int = 96, preload_depth: int = 1, server_maps: Dictionary = {}, max_depth: int = -1) -> Dictionary:
 	if root_map_id.is_empty() or max_maps <= 0 or preload_depth < 0:
 		return {"ok": false, "error": "invalid connected-world root"}
 	var regions: Array = []
@@ -964,6 +1059,8 @@ func prepare_connected_world(root_map_id: String, max_maps: int = 96, preload_de
 		var region: Dictionary = {"map_id": map_id, "origin": origin, "width": width, "height": height, "background_texture": prepared.get("background_texture"), "foreground_texture": prepared.get("foreground_texture"), "objects": prepared.get("objects", []), "warps": prepared.get("warps", []), "connections": topology.get("connections", []), "animated_background_tiles": prepared.get("animated_background_tiles", []), "animated_foreground_tiles": prepared.get("animated_foreground_tiles", []), "music_id": int(topology.get("music_id", 0)), "map_type": int(topology.get("map_type", 0)), "depth": depth, "ready": bool(prepared.get("ok", false))}
 		regions.append(region)
 		placed[map_id] = origin
+		if max_depth >= 0 and depth >= max_depth:
+			continue
 		for connection_value in topology.get("connections", []):
 			if not connection_value is Dictionary:
 				continue
@@ -1452,6 +1549,69 @@ func animated_metatile_texture(map_id: String, metatile: Dictionary, animation_t
 	map_cache[map_id] = cached_map
 	return texture
 
+func door_animation_frame(map_id: String, x: int, y: int, frame: int) -> Dictionary:
+	if frame <= 0:
+		return {"ok": false}
+	var cached_map: Dictionary = _get_or_build_map_cache(map_id)
+	var width: int = int(cached_map.get("width", 0))
+	var height: int = int(cached_map.get("height", 0))
+	var map_cells: PackedInt32Array = cached_map.get("map_cells", PackedInt32Array())
+	if not bool(cached_map.get("ok", false)) or x < 0 or y < 0 or x >= width or y >= height or y * width + x >= map_cells.size():
+		return {"ok": false}
+	var metatile_id: int = int(map_cells[y * width + x]) & _format_int("map_grid_metatile_id_mask", MAPGRID_METATILE_ID_MASK)
+	var cache_key: String = "%s:%d:%d" % [map_id, metatile_id, frame]
+	if door_animation_texture_cache.has(cache_key):
+		return door_animation_texture_cache[cache_key]
+	var table_offset: int = _format_int("door_graphics_table_offset", -1)
+	if str(source_profile.get("id", "")) == "pokemon-fire-red" and rom_sha1 == FIRE_RED_SHA1:
+		table_offset = 0x35B5D8
+	if table_offset < 0:
+		return {"ok": false}
+	var record: int = -1
+	for index in range(33):
+		var candidate: int = table_offset + index * 12
+		if not _valid_range(candidate, 12) or _read_rom_pointer(candidate + 4) < 0:
+			break
+		if _read_u16(candidate) == metatile_id:
+			record = candidate
+			break
+	if record < 0:
+		return {"ok": false}
+	var large: bool = int(rom_data[record + 3]) == 1
+	var tiles_offset: int = _read_rom_pointer(record + 4)
+	var palette_numbers_offset: int = _read_rom_pointer(record + 8)
+	var frame_offsets: Array = [0, 256, 512] if large else [0, 128, 256]
+	var frame_index: int = clampi(frame - 1, 0, frame_offsets.size() - 1)
+	var tile_count: int = 8 if large else 4
+	var image_height: int = 32 if large else 16
+	var source_offset: int = tiles_offset + int(frame_offsets[frame_index])
+	if source_offset < 0 or palette_numbers_offset < 0 or not _valid_range(source_offset, tile_count * 32) or not _valid_range(palette_numbers_offset, tile_count):
+		return {"ok": false}
+	var image: Image = Image.create(16, image_height, false, Image.FORMAT_RGBA8)
+	var primary: Dictionary = cached_map.get("primary", {})
+	var secondary: Dictionary = cached_map.get("secondary", {})
+	for tile_index in range(tile_count):
+		var tile_x: int = (tile_index % 4) & 1
+		var tile_y: int = ((tile_index % 4) >> 1) + (2 if tile_index >= 4 else 0)
+		var palette_bank: int = int(rom_data[palette_numbers_offset + tile_index])
+		var palette_values: Array = primary.get("palettes", [])
+		var primary_palette_count: int = _format_int("primary_palette_count", PRIMARY_PALETTE_COUNT)
+		var secondary_palette_count: int = _format_int("secondary_palette_count", SECONDARY_PALETTE_COUNT)
+		if palette_bank >= primary_palette_count:
+			palette_values = secondary.get("palettes", [])
+			palette_bank = clampi(palette_bank, primary_palette_count, primary_palette_count + secondary_palette_count - 1)
+		if palette_bank * 16 + 15 >= palette_values.size():
+			continue
+		var tile_offset: int = source_offset + tile_index * 32
+		for pixel_y in range(8):
+			for pixel_x in range(8):
+				var packed: int = int(rom_data[tile_offset + pixel_y * 4 + (pixel_x >> 1)])
+				var color_index: int = packed & 0x0F if (pixel_x & 1) == 0 else packed >> 4
+				image.set_pixel(tile_x * 8 + pixel_x, tile_y * 8 + pixel_y, palette_values[palette_bank * 16 + color_index])
+	var result: Dictionary = {"ok": true, "texture": ImageTexture.create_from_image(image), "width": 16, "height": image_height, "offset_y": -16 if large else 0}
+	door_animation_texture_cache[cache_key] = result
+	return result
+
 func _connected_map_origin(origin: Vector2i, width: int, height: int, target_width: int, target_height: int, direction: int, offset: int) -> Vector2i:
 	match direction:
 		CONNECTION_SOUTH:
@@ -1513,8 +1673,8 @@ func _build_map_cache(map_id: String, map_value: Dictionary, include_composite: 
 		var metatile_id: int = map_word & metatile_id_mask
 		if metatile_id != undefined_metatile and metatile_id >= primary_metatile_count:
 			max_secondary_metatile = maxi(max_secondary_metatile, metatile_id - primary_metatile_count)
-	var primary: Dictionary = _read_tileset(primary_offset, _format_int("primary_tile_count", PRIMARY_TILE_COUNT), primary_metatile_count, _format_int("primary_palette_count", PRIMARY_PALETTE_COUNT))
-	var secondary: Dictionary = _read_tileset(secondary_offset, 0, maxi(max_secondary_metatile + 1, 1), _format_int("secondary_rom_palette_count", SECONDARY_ROM_PALETTE_COUNT))
+	var primary: Dictionary = _read_tileset(primary_offset, _format_int("primary_tile_count", PRIMARY_TILE_COUNT), primary_metatile_count, _format_int("primary_palette_count", PRIMARY_PALETTE_COUNT), "primary")
+	var secondary: Dictionary = _read_tileset(secondary_offset, 0, maxi(max_secondary_metatile + 1, 1), _format_int("secondary_rom_palette_count", SECONDARY_ROM_PALETTE_COUNT), "secondary")
 	if primary.is_empty() or secondary.is_empty():
 		return {"ok": false, "error": "could not read the FireRed map tilesets"}
 	primary["is_secondary"] = false
@@ -1794,14 +1954,14 @@ func warp_at(map_id: String, x: int, y: int, elevation: int = 3) -> Dictionary:
 		if warp_elevation != 0 and warp_elevation != elevation:
 			continue
 		var target_map_id: String = str(warp.get("map_id", ""))
-		var target_cache: Dictionary = _get_or_build_map_cache(target_map_id)
-		if not bool(target_cache.get("ok", false)):
+		var target_metadata: Dictionary = _map_warp_metadata(target_map_id)
+		if not bool(target_metadata.get("ok", false)):
 			return {"ok": false, "error": "warp destination is not available"}
 		var destination_warp_id: int = int(warp.get("warp_id", -1))
 		var destination_x: int = -1
 		var destination_y: int = -1
 		var destination_elevation: int = elevation
-		var target_warps: Array = target_cache.get("warps", [])
+		var target_warps: Array = target_metadata.get("warps", [])
 		if destination_warp_id >= 0 and destination_warp_id < target_warps.size() and target_warps[destination_warp_id] is Dictionary:
 			var destination_warp: Dictionary = target_warps[destination_warp_id]
 			destination_x = int(destination_warp.get("x", -1))
@@ -1816,6 +1976,18 @@ func warp_at(map_id: String, x: int, y: int, elevation: int = 3) -> Dictionary:
 			destination_elevation = int(spawn.get("elevation", destination_elevation))
 		return {"ok": true, "map_id": target_map_id, "x": destination_x, "y": destination_y, "elevation": destination_elevation, "warp": true}
 	return {"ok": false, "error": "no warp at position"}
+
+func _map_warp_metadata(map_id: String) -> Dictionary:
+	var cached_value: Variant = map_cache.get(map_id, {})
+	if cached_value is Dictionary and bool((cached_value as Dictionary).get("ok", false)):
+		return {"ok": true, "warps": (cached_value as Dictionary).get("warps", [])}
+	var map_value: Dictionary = map_data(map_id)
+	if map_value.is_empty():
+		return {"ok": false}
+	var descriptor: Dictionary = _read_map_descriptor(map_value)
+	if not bool(descriptor.get("ok", false)):
+		return descriptor
+	return {"ok": true, "warps": _read_map_warps(int(descriptor.get("header_offset", -1)))}
 
 func _warp_record_at(cached_map: Dictionary, x: int, y: int, elevation: int = -1) -> Dictionary:
 	for warp_value in cached_map.get("warps", []):
@@ -2349,9 +2521,13 @@ func render_object_sprite(graphics_id: int, frame: int = 0, flip_h: bool = false
 	sprite_cache[cache_key] = texture
 	return {"ok": true, "texture": texture, "width": width, "height": height, "frame_count": frame_count, "resolved_graphics_id": resolved_graphics_id}
 
-func _read_tileset(offset: int, tile_count: int, metatile_count: int, palette_count: int) -> Dictionary:
+func _read_tileset(offset: int, tile_count: int, metatile_count: int, palette_count: int, cache_namespace: String) -> Dictionary:
 	if offset < 0 or metatile_count <= 0 or not _valid_range(offset, 0x18):
 		return {}
+	var cache_key: String = "%s:%d:%d:%d:%d" % [cache_namespace, offset, tile_count, metatile_count, palette_count]
+	var cached_value: Variant = tileset_cache.get(cache_key, {})
+	if cached_value is Dictionary and not (cached_value as Dictionary).is_empty():
+		return cached_value as Dictionary
 	var tile_bytes_per_tile: int = _format_int("tile_bytes", TILE_BYTES)
 	var tiles_per_metatile: int = _format_int("tiles_per_metatile", TILES_PER_METATILE)
 	var primary_tile_count: int = _format_int("primary_tile_count", PRIMARY_TILE_COUNT)
@@ -2406,7 +2582,9 @@ func _read_tileset(offset: int, tile_count: int, metatile_count: int, palette_co
 		return {}
 	for attribute_index in range(metatile_count):
 		attributes.append(_read_u32(attributes_offset + attribute_index * 4))
-	return {"tiles": tiles, "metatiles": metatile_words, "palettes": palettes, "attributes": attributes, "tile_count": effective_tile_count, "animation_callback": _read_rom_pointer(offset + 16)}
+	var result: Dictionary = {"tiles": tiles, "metatiles": metatile_words, "palettes": palettes, "attributes": attributes, "tile_count": effective_tile_count, "animation_callback": _read_rom_pointer(offset + 16)}
+	tileset_cache[cache_key] = result
+	return result
 
 func _draw_metatile(image: Image, destination_x: int, destination_y: int, tileset: Dictionary, metatile_index: int, primary: Dictionary, secondary: Dictionary, animated_tiles: Array, primary_override: PackedByteArray = PackedByteArray()) -> void:
 	if not primary_override.is_empty():
