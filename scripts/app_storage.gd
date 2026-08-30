@@ -23,6 +23,9 @@ static func strings_path() -> String:
 static func strings_file_path(content_id: String, language: String = "en") -> String:
 	return strings_path().path_join(content_id).path_join("%s.json" % language)
 
+static func strings_cache_file_path(content_id: String, cache_name: String) -> String:
+	return strings_path().path_join(content_id).path_join("%s.json" % cache_name)
+
 static func settings_path() -> String:
 	return root_path().path_join(SETTINGS_FILE)
 
@@ -69,6 +72,31 @@ static func write_strings(content_id: String, values: Dictionary) -> bool:
 	if directory_result != OK and directory_result != ERR_ALREADY_EXISTS:
 		return false
 	var file: FileAccess = FileAccess.open(strings_file_path(content_id), FileAccess.WRITE)
+	if file == null:
+		return false
+	file.store_string(JSON.stringify(values, "\t"))
+	file.close()
+	return true
+
+static func read_strings_cache(content_id: String, cache_name: String) -> Dictionary:
+	var path: String = strings_cache_file_path(content_id, cache_name)
+	if not FileAccess.file_exists(path):
+		return {}
+	var file: FileAccess = FileAccess.open(path, FileAccess.READ)
+	if file == null:
+		return {}
+	var parsed: Variant = JSON.parse_string(file.get_as_text())
+	file.close()
+	return parsed if parsed is Dictionary else {}
+
+static func write_strings_cache(content_id: String, cache_name: String, values: Dictionary) -> bool:
+	if not ensure_layout():
+		return false
+	var directory: String = strings_path().path_join(content_id)
+	var directory_result: int = DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(directory) if directory.begins_with("user://") else directory)
+	if directory_result != OK and directory_result != ERR_ALREADY_EXISTS:
+		return false
+	var file: FileAccess = FileAccess.open(strings_cache_file_path(content_id, cache_name), FileAccess.WRITE)
 	if file == null:
 		return false
 	file.store_string(JSON.stringify(values, "\t"))

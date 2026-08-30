@@ -14,11 +14,32 @@ func _init() -> void:
 			quit(1)
 			return
 	var item_content: OpenMMOContent = OpenMMOContent.new()
-	item_content.source_profile = {"region": "Kanto"}
+	var item_table_offset: int = 0x100
+	var item_count: int = 375
+	item_content.rom_data.resize(item_table_offset + item_count * 44)
+	for internal_id in range(item_count):
+		var record_offset: int = item_table_offset + internal_id * 44
+		item_content.rom_data.encode_u16(record_offset + 14, internal_id)
+		item_content.rom_data[record_offset] = 0xBB
+		item_content.rom_data[record_offset + 1] = 0xFF
+		item_content.rom_data[record_offset + 16] = 0x2C
+		item_content.rom_data[record_offset + 17] = 0x01
+		item_content.rom_data[record_offset + 26] = 1
+	var potion_name: PackedByteArray = PackedByteArray([0xCA, 0xC9, 0xCE, 0xC3, 0xC9, 0xC8, 0xFF])
+	for position in range(potion_name.size()):
+		item_content.rom_data[item_table_offset + 44 + position] = potion_name[position]
+	var parcel_name: PackedByteArray = PackedByteArray([0xC9, 0xBB, 0xC5, 0xB4, 0xCD, 0x00, 0xCA, 0xBB, 0xCC, 0xBD, 0xBF, 0xBB, 0xC6, 0xFF])
+	var parcel_offset: int = item_table_offset + 349 * 44
+	for position in range(parcel_name.size()):
+		item_content.rom_data[parcel_offset + position] = parcel_name[position]
+	item_content.rom_data[parcel_offset + 26] = 2
 	item_content.battle_tables_scanned = true
+	item_content.battle_table_cache = {"item_table": item_table_offset}
+	var potion_info: Dictionary = item_content.battle_item_info(5001)
 	var parcel_info: Dictionary = item_content.battle_item_info(5349)
-	if str(parcel_info.get("name", "")) != "OAK'S PARCEL" or str(parcel_info.get("category", "")) != "key_item":
-		push_error("FireRed Oak's Parcel metadata did not resolve from item 349")
+	var last_info: Dictionary = item_content.battle_item_info(5374)
+	if str(potion_info.get("name", "")) != "POTION" or str(parcel_info.get("name", "")) != "OAK'S PARCEL" or str(parcel_info.get("category", "")) != "key_item" or str(last_info.get("name", "")) != "A":
+		push_error("ROM item table catalog did not resolve every item through the dynamic reader")
 		quit(1)
 		return
 	var path: String = OS.get_environment("MONWORLD_ROM")

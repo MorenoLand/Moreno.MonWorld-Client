@@ -8,7 +8,11 @@ const KANTO_GBA_CONTENT_ID: String = "kanto-gba-slice-v1"
 const FIRE_RED_REV1_SHA1: String = "dd5945db9b930750cb39d00c84da8571feebf417"
 const FIRE_RED_SHA1: String = "41cb23d8dccc8ebd7c649cd8fbb58eeace6e2fdc"
 const FIRE_RED_REV1_DIALOGUE_DELTAS: Array = [0x78, 0x73, 0x70]
-const FIRE_RED_SPECIAL_ITEM_NAMES: Dictionary = {349: "OAK'S PARCEL"}
+const ITEM_RECORD_SIZE: int = 44
+const ITEM_NAME_LENGTH: int = 14
+const ITEM_RECORD_ID_OFFSET: int = 14
+const ITEM_TABLE_MIN_RECORDS: int = 300
+const ITEM_TABLE_MAX_RECORDS: int = 512
 const GBA_TITLE_OFFSET: int = 0xA0
 const GBA_TITLE_LENGTH: int = 12
 const GBA_GAME_CODE_OFFSET: int = 0xAC
@@ -66,6 +70,10 @@ var battle_sprite_cache: Dictionary = {}
 var battle_name_cache: Dictionary = {}
 var battle_move_name_cache: Dictionary = {}
 var battle_item_info_cache: Dictionary = {}
+var battle_item_table_cache: Dictionary = {}
+var battle_item_table_scanned: bool = false
+var battle_item_catalog: Dictionary = {}
+var battle_item_catalog_loaded: bool = false
 var battle_move_info_cache: Dictionary = {}
 var battle_animation_sheet_cache: Dictionary = {}
 var battle_animation_plan_cache: Dictionary = {}
@@ -398,35 +406,126 @@ func battle_item_info(item_id: int) -> Dictionary:
 	var cache_key: String = str(item_id)
 	if battle_item_info_cache.has(cache_key):
 		return battle_item_info_cache[cache_key]
-	var internal_id: int = item_id - 5000
+	var internal_id: int = item_id - 5000 if item_id >= 5000 else item_id
 	var info: Dictionary = {"item_id": item_id, "internal_id": internal_id, "name": "Item", "price": 0, "pocket": 0, "category": "items"}
-	var tables: Dictionary = _battle_rom_tables()
-	var table_offset: int = int(tables.get("item_table", -1))
-	var offset: int = table_offset + internal_id * 44
-	if internal_id > 0 and table_offset >= 0 and _valid_range(offset, 44) and _read_u16(offset + 14) == internal_id:
-		var item_name: String = ""
-		for position in range(14):
-			var value: int = int(rom_data[offset + position])
-			if value == 0xFF:
-				break
-			item_name += _decode_rom_character(value)
-		var pocket: int = int(rom_data[offset + 26])
-		info["name"] = item_name.strip_edges() if not item_name.strip_edges().is_empty() else "Item"
-		info["price"] = _read_u16(offset + 16)
-		info["pocket"] = pocket
-		match pocket:
-			2: info["category"] = "key_item"
-			3: info["category"] = "balls"
-			4: info["category"] = "tm"
-			5: info["category"] = "berries"
-			_: info["category"] = "items"
-	elif str(source_profile.get("region", "")) == "Kanto" and FIRE_RED_SPECIAL_ITEM_NAMES.has(internal_id):
-		info["name"] = str(FIRE_RED_SPECIAL_ITEM_NAMES[internal_id])
-		info["pocket"] = 2
-		info["category"] = "key_item"
-	if not bool(tables.get("pending", false)) or str(info.get("name", "Item")) != "Item":
+	var catalog: Dictionary = _battle_item_catalog()
+	var cached_info: Variant = catalog.get(str(internal_id), null)
+	if cached_info is Dictionary:
+		info = (cached_info as Dictionary).duplicate(true)
+		info["item_id"] = item_id
+		info["internal_id"] = internal_id
 		battle_item_info_cache[cache_key] = info
 	return info
+
+func _battle_item_catalog() -> Dictionary:
+	if battle_item_catalog_loaded:
+		return battle_item_catalog
+	if rom_data.is_empty():
+		return {}
+	if not rom_sha1.is_empty():
+		var cached: Dictionary = OpenMMOStorage.read_strings_cache(string_catalog_id(), "items-%s" % rom_sha1)
+		var cached_items: Variant = cached.get("items", null)
+		if str(cached.get("rom_sha1", "")) == rom_sha1 and int(cached.get("schema_version", 0)) == 1 and cached_items is Dictionary:
+			battle_item_catalog = cached_items as Dictionary
+			battle_item_catalog_loaded = true
+			return battle_item_catalog
+	var table: Dictionary = _battle_item_table()
+	var table_offset: int = int(table.get("offset", -1))
+	var item_count: int = int(table.get("count", 0))
+	if table_offset < 0 or item_count <= 0:
+		battle_item_catalog_loaded = true
+		return {}
+	var catalog: Dictionary = {}
+	for internal_id in range(item_count):
+		var info: Dictionary = _battle_item_info_from_record(table_offset, internal_id)
+		if not str(info.get("name", "")).strip_edges().is_empty():
+			catalog[str(internal_id)] = info
+	battle_item_catalog = catalog
+	battle_item_catalog_loaded = true
+	if not rom_sha1.is_empty():
+		OpenMMOStorage.write_strings_cache(string_catalog_id(), "items-%s" % rom_sha1, {"schema_version": 1, "content_id": content_id(), "catalog_id": string_catalog_id(), "rom_sha1": rom_sha1, "record_size": ITEM_RECORD_SIZE, "items": catalog})
+	return battle_item_catalog
+
+func _battle_item_table() -> Dictionary:
+	if battle_item_table_scanned:
+		return battle_item_table_cache
+	var tables: Dictionary = _battle_rom_tables()
+	if bool(tables.get("pending", false)):
+		return {}
+	battle_item_table_scanned = true
+	var table_offset: int = int(tables.get("item_table", -1))
+	var item_count: int = _item_table_count(table_offset, ITEM_TABLE_MIN_RECORDS)
+	if item_count <= 0:
+		table_offset = _find_battle_item_table()
+		item_count = _item_table_count(table_offset, ITEM_TABLE_MIN_RECORDS)
+	if item_count <= 0:
+		battle_item_table_cache = {"offset": -1, "count": 0}
+		return battle_item_table_cache
+	battle_item_table_cache = {"offset": table_offset, "count": item_count}
+	tables["item_table"] = table_offset
+	battle_table_cache = tables
+	return battle_item_table_cache
+
+func _find_battle_item_table() -> int:
+	var cursor: int = 0
+	while cursor < rom_data.size():
+		var marker: int = rom_data.find(0x01, cursor)
+		if marker < 0:
+			return -1
+		if marker + 1 < rom_data.size() and int(rom_data[marker + 1]) == 0:
+			var candidate: int = marker - ITEM_RECORD_ID_OFFSET
+			if _valid_item_table_candidate(candidate):
+				return candidate
+		cursor = marker + 1
+	return -1
+
+func _valid_item_table_candidate(table_offset: int) -> bool:
+	if table_offset < 0 or table_offset % 4 != 0:
+		return false
+	for internal_id in [0, 1, 2, 3, 10, 50, 100, 200]:
+		var offset: int = table_offset + int(internal_id) * ITEM_RECORD_SIZE
+		if not _valid_range(offset, ITEM_RECORD_SIZE) or _read_u16(offset + ITEM_RECORD_ID_OFFSET) != int(internal_id):
+			return false
+	var item_count: int = _item_table_count(table_offset, ITEM_TABLE_MIN_RECORDS)
+	if item_count <= 0:
+		return false
+	for internal_id in [1, 2, 3]:
+		if _battle_item_name_from_record(table_offset + int(internal_id) * ITEM_RECORD_SIZE).is_empty():
+			return false
+	return true
+
+func _item_table_count(table_offset: int, minimum_count: int = 0) -> int:
+	if table_offset < 0 or table_offset % 4 != 0:
+		return 0
+	var item_count: int = 0
+	while item_count < ITEM_TABLE_MAX_RECORDS:
+		var offset: int = table_offset + item_count * ITEM_RECORD_SIZE
+		if not _valid_range(offset, ITEM_RECORD_SIZE) or _read_u16(offset + ITEM_RECORD_ID_OFFSET) != item_count:
+			break
+		item_count += 1
+	return item_count if item_count >= minimum_count else 0
+
+func _battle_item_info_from_record(table_offset: int, internal_id: int) -> Dictionary:
+	var offset: int = table_offset + internal_id * ITEM_RECORD_SIZE
+	var pocket: int = int(rom_data[offset + 26])
+	var category: String = "items"
+	match pocket:
+		2: category = "key_item"
+		3: category = "balls"
+		4: category = "tm"
+		5: category = "berries"
+	return {"item_id": 5000 + internal_id, "internal_id": internal_id, "name": _battle_item_name_from_record(offset), "price": _read_u16(offset + 16), "pocket": pocket, "category": category}
+
+func _battle_item_name_from_record(offset: int) -> String:
+	if not _valid_range(offset, ITEM_NAME_LENGTH):
+		return ""
+	var item_name: String = ""
+	for position in range(ITEM_NAME_LENGTH):
+		var value: int = int(rom_data[offset + position])
+		if value == 0xFF:
+			break
+		item_name += _decode_rom_character(value)
+	return item_name.strip_edges()
 
 func battle_move_info(move_id: int) -> Dictionary:
 	if move_id <= 0:
