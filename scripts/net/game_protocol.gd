@@ -11,6 +11,8 @@ const FACE_DIRECTION: int = 0x07
 const CHAT_SEND: int = 0x08
 const ENTITY_LEAVE: int = 0x08
 const CHAT_MESSAGE: int = 0x09
+const WORLD_FLAG_TABLE_RESET: int = 0x0A
+const WORLD_FLAG_SET: int = 0x0B
 const LOCAL_CHARACTER_DELTA: int = 0x0C
 const POKEMON_STORAGE: int = 0x13
 const POKEMON_CONTAINER_PARTY: int = 1
@@ -28,6 +30,7 @@ const SHOP_BUY: int = 0x23
 const SHOP_SELL: int = 0x24
 const DIALOG_CHOICE: int = 0x25
 const TILE_INTERACT: int = 0x27
+const STORY_FLAG_UPDATE: int = 0x2A
 const MAP_TRANSITION: int = 0x1B
 const RENDER_SCREEN: int = 0xB4
 const NPC_ANIMATION: int = 0xB2
@@ -52,6 +55,7 @@ const BATTLE_SIDE: int = 0x6B
 const BATTLE_PROMPT: int = 0x9D
 const BATTLE_TILE_MAP: int = 0xC4
 const BATTLE_START_SCENE: int = 0xCA
+const LOCAL_PLAYER_STATE: int = 0xF3
 const SPECIAL_MAP_ROM_TYPES: Array[int] = [2, 3, 4, 10]
 
 static func encode_join(user_id: int, session_token: PackedByteArray, hardware_id: PackedByteArray) -> PackedByteArray:
@@ -257,6 +261,71 @@ static func decode_load_map(payload: PackedByteArray) -> Dictionary:
 	if not result.ok:
 		result["error"] = "OpenMMO map packet is malformed"
 	return result
+
+static func decode_world_flag_table_reset(payload: PackedByteArray) -> Dictionary:
+	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
+	var group_count: int = reader.read_u8()
+	var groups: Array = []
+	if group_count > 32:
+		reader.failed = true
+	else:
+		for _index in group_count:
+			groups.append(reader.read_u16_bytes())
+	var result: Dictionary = {"groups": groups, "ok": not reader.failed and reader.remaining() == 0}
+	result["error"] = "OpenMMO world flag table packet is malformed" if not result.ok else ""
+	return result
+
+static func decode_world_flag_set(payload: PackedByteArray) -> Dictionary:
+	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
+	var result: Dictionary = {"group": reader.read_s8(), "index": reader.read_s16_le(), "value": reader.read_s8()}
+	result["ok"] = not reader.failed and reader.remaining() == 0
+	result["error"] = "OpenMMO world flag packet is malformed" if not result.ok else ""
+	return result
+
+static func decode_story_flag_update(payload: PackedByteArray) -> Dictionary:
+	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
+	var result: Dictionary = {"region_id": reader.read_s8(), "flag_id": reader.read_s16_le() & 0xFFFF, "enabled": reader.read_s16_le() != 0}
+	result["ok"] = not reader.failed and reader.remaining() == 0
+	result["error"] = "OpenMMO story flag packet is malformed" if not result.ok else ""
+	return result
+
+static func decode_local_player_state(payload: PackedByteArray) -> Dictionary:
+	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
+	var state: Dictionary = {"region": reader.read_s8(), "map_id": reader.read_s16_le(), "move_speed": reader.read_f32_le(), "x": reader.read_s16_le(), "y": reader.read_s16_le(), "z": reader.read_s16_le(), "money": reader.read_s32_le(), "gender": reader.read_s8(), "skin_tone": reader.read_s16_le(), "hair_color": reader.read_s16_le(), "playtime": reader.read_f64_le(), "flags": reader.read_s8()}
+	state["party_dex"] = _read_s16_list(reader, reader.read_u16_le(), 6)
+	state["party_forms"] = _read_s8_list(reader, reader.read_u8(), 6)
+	state["pokedex_seen"] = _read_s16_list(reader, reader.read_u16_le(), 4096)
+	state["pokedex_caught"] = _read_s16_list(reader, reader.read_u16_le(), 4096)
+	state["badges"] = _read_s16_list(reader, reader.read_u8(), 64)
+	var variable_count: int = reader.read_u16_le()
+	var variables: Array = []
+	if variable_count > 1024:
+		reader.failed = true
+	else:
+		for _index in variable_count:
+			variables.append({"key": reader.read_s8(), "value": reader.read_s16_le()})
+	state["variables"] = variables
+	var result: Dictionary = {"state": state, "ok": not reader.failed and reader.remaining() == 0}
+	result["error"] = "OpenMMO local player state packet is malformed" if not result.ok else ""
+	return result
+
+static func _read_s16_list(reader: OpenMMOCodec.Reader, count: int, max_count: int) -> Array:
+	if count < 0 or count > max_count:
+		reader.failed = true
+		return []
+	var values: Array = []
+	for _index in count:
+		values.append(reader.read_s16_le())
+	return values
+
+static func _read_s8_list(reader: OpenMMOCodec.Reader, count: int, max_count: int) -> Array:
+	if count < 0 or count > max_count:
+		reader.failed = true
+		return []
+	var values: Array = []
+	for _index in count:
+		values.append(reader.read_s8())
+	return values
 
 static func decode_shop_catalog(payload: PackedByteArray) -> Dictionary:
 	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)

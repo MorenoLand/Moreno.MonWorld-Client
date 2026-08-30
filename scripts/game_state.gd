@@ -16,6 +16,7 @@ signal render_screen_changed(visible: bool)
 signal connection_error(message: String)
 signal login_completed(result: Dictionary)
 signal game_connection_completed(result: Dictionary)
+signal story_state_changed(state: Dictionary)
 
 const SESSION_SCRIPT = preload("res://scripts/net/session.gd")
 const LOGIN_PROTOCOL_SCRIPT = preload("res://scripts/net/login_protocol.gd")
@@ -42,7 +43,13 @@ var server_maps: Dictionary = {}
 var pending_map_load: Dictionary = {}
 var awaiting_local_entity: bool = false
 var map_transition_pending: bool = false
+var map_load_spawn_window: bool = false
 var active_map_key: String = ""
+var story_region_id: int = -1
+var story_flags: Dictionary = {}
+var story_variables: Dictionary = {}
+var world_flag_groups: Array = []
+var world_flags: Dictionary = {}
 var battle_state: Dictionary = {}
 var battle_in_progress: bool = false
 var battle_presence: Dictionary = {}
@@ -105,6 +112,31 @@ func use_content(value: OpenMMOContent) -> Dictionary:
 	content = value
 	return {"ok": true}
 
+func is_story_flag_set(region_id: int, flag_id: int) -> bool:
+	var region_value: Variant = story_flags.get(str(region_id), {})
+	if not region_value is Dictionary:
+		return false
+	return bool((region_value as Dictionary).get(str(flag_id & 0xFFFF), false))
+
+func story_variable(region_id: int, variable_key: int, default_value: int = 0) -> int:
+	var region_value: Variant = story_variables.get(str(region_id), {})
+	if not region_value is Dictionary:
+		return default_value
+	return int((region_value as Dictionary).get(str(variable_key & 0xFF), default_value))
+
+func _story_state_snapshot() -> Dictionary:
+	return {"region_id": story_region_id, "flags": story_flags.duplicate(true), "variables": story_variables.duplicate(true)}
+
+func _clear_story_state() -> void:
+	story_region_id = -1
+	story_flags.clear()
+	story_variables.clear()
+	world_flag_groups.clear()
+	world_flags.clear()
+	if not current_character.is_empty():
+		current_character.erase("story_flags")
+		current_character.erase("story_variables")
+
 func login(username: String, password: String, stay_logged_in: bool = false, saved_token: String = "") -> Dictionary:
 	if login_flow != "idle" or game_flow != "idle":
 		return {"ok": false, "error": "another connection is already in progress"}
@@ -158,6 +190,8 @@ func select_character(character_id: int) -> bool:
 			break
 	active_map_key = ""
 	pending_map_load.clear()
+	map_load_spawn_window = false
+	_clear_story_state()
 	awaiting_local_entity = false
 	map_transition_pending = false
 	battle_state.clear()
@@ -233,6 +267,8 @@ func disconnect_game() -> void:
 	server_maps.clear()
 	awaiting_local_entity = false
 	map_transition_pending = false
+	map_load_spawn_window = false
+	_clear_story_state()
 	battle_state.clear()
 	battle_in_progress = false
 	battle_presence.clear()
@@ -335,6 +371,31 @@ func _on_game_packet(opcode: int, payload: PackedByteArray) -> void:
 				_finish_game_connection({"ok": false, "error": message})
 			else:
 				connection_error.emit(message)
+	elif opcode == GAME_PROTOCOL_SCRIPT.WORLD_FLAG_TABLE_RESET:
+		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_world_flag_table_reset(payload)
+		if response.ok:
+			world_flag_groups = response.get("groups", [])
+			world_flags.clear()
+		else:
+			connection_error.emit(str(response.get("error", "OpenMMO world flag table packet is malformed")))
+	elif opcode == GAME_PROTOCOL_SCRIPT.WORLD_FLAG_SET:
+		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_world_flag_set(payload)
+		if response.ok:
+			_apply_world_flag_set(response)
+		else:
+			connection_error.emit(str(response.get("error", "OpenMMO world flag packet is malformed")))
+	elif opcode == GAME_PROTOCOL_SCRIPT.STORY_FLAG_UPDATE:
+		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_story_flag_update(payload)
+		if response.ok:
+			_apply_story_flag_update(response)
+		else:
+			connection_error.emit(str(response.get("error", "OpenMMO story flag packet is malformed")))
+	elif opcode == GAME_PROTOCOL_SCRIPT.LOCAL_PLAYER_STATE:
+		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_local_player_state(payload)
+		if response.ok:
+			_apply_local_player_state(response.get("state", {}))
+		else:
+			connection_error.emit(str(response.get("error", "OpenMMO local player state packet is malformed")))
 	elif opcode == GAME_PROTOCOL_SCRIPT.CHAT_MESSAGE:
 		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_chat_message(payload)
 		if response.ok:
@@ -504,6 +565,7 @@ func _on_game_packet(opcode: int, payload: PackedByteArray) -> void:
 	elif opcode == GAME_PROTOCOL_SCRIPT.MAP_TRANSITION:
 		map_transition_pending = true
 		pending_map_load.clear()
+		map_load_spawn_window = false
 		awaiting_local_entity = false
 		render_screen_changed.emit(false)
 	elif opcode == GAME_PROTOCOL_SCRIPT.LOAD_MAP:
@@ -530,6 +592,7 @@ func _on_game_packet(opcode: int, payload: PackedByteArray) -> void:
 		map_transition_pending = false
 		active_map_key = str(response.get("key", ""))
 		pending_map_load = response
+		map_load_spawn_window = true
 		map_load_received.emit(response)
 	elif opcode == GAME_PROTOCOL_SCRIPT.NPC_SPAWN:
 		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_npc_spawn(payload)
@@ -538,7 +601,7 @@ func _on_game_packet(opcode: int, payload: PackedByteArray) -> void:
 			return
 		var npc: Dictionary = response.entity
 		npc["map_id"] = content.map_id_for_location(int(npc.get("bank_id", -1)), int(npc.get("wire_map_id", -1))) if content != null else ""
-		entity_update_received.emit({"player": npc, "local": false, "spawn": true, "map_load_spawn": not pending_map_load.is_empty()})
+		entity_update_received.emit({"player": npc, "local": false, "spawn": true, "map_load_spawn": map_load_spawn_window})
 	elif opcode == GAME_PROTOCOL_SCRIPT.NPC_UPDATE:
 		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_npc_update(payload)
 		if response.ok:
@@ -611,6 +674,8 @@ func _on_game_packet(opcode: int, payload: PackedByteArray) -> void:
 	elif opcode == GAME_PROTOCOL_SCRIPT.RENDER_SCREEN:
 		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_render_screen(payload)
 		if response.ok:
+			if bool(response.visible):
+				map_load_spawn_window = false
 			render_screen_changed.emit(bool(response.visible))
 		else:
 			connection_error.emit(str(response.error))
@@ -625,6 +690,53 @@ func _emit_entity_update(entity: Dictionary) -> void:
 			if entity.has(key):
 				current_character[key] = entity[key]
 	entity_update_received.emit({"player": entity, "local": entity_id == int(current_character.get("id", 0))})
+
+func _apply_world_flag_set(update: Dictionary) -> void:
+	var group_key: String = str(int(update.get("group", 0)) & 0xFF)
+	var group_value: Variant = world_flags.get(group_key, {})
+	var group: Dictionary = group_value.duplicate(true) if group_value is Dictionary else {}
+	group[str(int(update.get("index", 0)) & 0xFFFF)] = int(update.get("value", 0))
+	world_flags[group_key] = group
+
+func _apply_story_flag_update(update: Dictionary) -> void:
+	var region_id: int = int(update.get("region_id", -1))
+	var region_key: String = str(region_id)
+	var region_value: Variant = story_flags.get(region_key, {})
+	var flags: Dictionary = region_value.duplicate(true) if region_value is Dictionary else {}
+	var flag_key: String = str(int(update.get("flag_id", 0)) & 0xFFFF)
+	if bool(update.get("enabled", false)):
+		flags[flag_key] = true
+	else:
+		flags.erase(flag_key)
+	if flags.is_empty():
+		story_flags.erase(region_key)
+	else:
+		story_flags[region_key] = flags
+	story_region_id = region_id
+	current_character["story_flags"] = story_flags.duplicate(true)
+	story_state_changed.emit(_story_state_snapshot())
+
+func _apply_local_player_state(state: Dictionary) -> void:
+	story_region_id = int(state.get("region", -1))
+	story_flags.clear()
+	story_variables.clear()
+	var variables: Dictionary = {}
+	var variable_values: Variant = state.get("variables", [])
+	if variable_values is Array:
+		for value in variable_values as Array:
+			if value is Dictionary:
+				var variable: Dictionary = value
+				variables[str(int(variable.get("key", 0)) & 0xFF)] = int(variable.get("value", 0))
+	if story_region_id >= 0:
+		story_variables[str(story_region_id)] = variables
+	for key in ["region", "map_id", "move_speed", "x", "y", "z", "money", "gender", "skin_tone", "hair_color", "playtime", "flags", "party_dex", "party_forms", "pokedex_seen", "pokedex_caught", "badges"]:
+		if state.has(key):
+			current_character[key] = state[key]
+	current_character["story_flags"] = story_flags.duplicate(true)
+	current_character["story_variables"] = story_variables.duplicate(true)
+	_update_character_list_entry()
+	story_state_changed.emit(_story_state_snapshot())
+	character_state_changed.emit(current_character.duplicate(true))
 
 func _apply_character_updates(updates: Dictionary) -> void:
 	for key in updates:

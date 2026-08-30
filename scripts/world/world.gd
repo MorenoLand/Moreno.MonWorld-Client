@@ -42,6 +42,7 @@ var dialogue_string_vars: Dictionary = {}
 var connected_world_generation: int = 0
 var removed_npc_entities: Dictionary = {}
 var npc_entity_maps: Dictionary = {}
+var story_objects_by_map: Dictionary = {}
 var map_prepare_jobs: Dictionary = {}
 var map_preload_queue: Array[String] = []
 var map_preload_queued: Dictionary = {}
@@ -61,6 +62,7 @@ func _ready() -> void:
 	GameState.dialog_state_received.connect(_on_dialog_state_received)
 	GameState.battle_event_received.connect(_on_battle_event)
 	GameState.character_state_changed.connect(_on_character_state_changed)
+	GameState.story_state_changed.connect(_on_story_state_changed)
 	GameState.shop_catalog_received.connect(_on_shop_catalog)
 	_build_ui()
 	if not GameState.pending_map_load.is_empty():
@@ -293,6 +295,7 @@ func _load_map_texture(map_id: String, expected_width: int = 0, expected_height:
 		return false
 	map_has_animation = false
 	map_has_animation = not (result.get("animated_background_tiles", []) as Array).is_empty() or not (result.get("animated_foreground_tiles", []) as Array).is_empty()
+	_cache_story_objects(map_id, result.get("objects", []))
 	var root_region: Dictionary = {"map_id": map_id, "origin": Vector2i.ZERO, "width": int(result.get("width", 0)), "height": int(result.get("height", 0)), "background_texture": result.get("background_texture"), "foreground_texture": result.get("foreground_texture"), "objects": map_view.objects_for_mode(result.get("objects", [])), "warps": result.get("warps", []), "connections": result.get("connections", []), "animated_background_tiles": result.get("animated_background_tiles", []), "animated_foreground_tiles": result.get("animated_foreground_tiles", []), "music_id": int(result.get("music_id", 0)), "map_type": int(result.get("map_type", 0)), "ready": true}
 	var root_world: Dictionary = {"ok": true, "root_map_id": map_id, "regions": [root_region], "map_origins": {map_id: Vector2i.ZERO}}
 	map_view.set_world(root_world, map_id)
@@ -401,6 +404,7 @@ func _preload_connected_regions(world_value: Dictionary, root_map_id: String, ge
 			continue
 		region["background_texture"] = prepared.get("background_texture")
 		region["foreground_texture"] = prepared.get("foreground_texture")
+		_cache_story_objects(region_id, prepared.get("objects", []))
 		region["objects"] = map_view.objects_for_mode(prepared.get("objects", []))
 		region["warps"] = prepared.get("warps", [])
 		region["animated_background_tiles"] = prepared.get("animated_background_tiles", [])
@@ -420,8 +424,14 @@ func _on_entity_update(value: Dictionary) -> void:
 	if value.has("remove_entity_id"):
 		var removed_entity_id: int = int(value.get("remove_entity_id", 0))
 		var removed_key: String = str(removed_entity_id)
-		if npc_entity_maps.has(removed_key):
-			var removed_map_id: String = str(npc_entity_maps.get(removed_key, ""))
+		var removed_map_id: String = str(npc_entity_maps.get(removed_key, ""))
+		if removed_map_id.is_empty():
+			for stored_key in entities:
+				var stored_value: Variant = entities[stored_key]
+				if stored_value is Dictionary and int((stored_value as Dictionary).get("entity_id", (stored_value as Dictionary).get("character_id", 0))) == removed_entity_id:
+					removed_map_id = str((stored_value as Dictionary).get("map_id", ""))
+					break
+		if not removed_map_id.is_empty():
 			var removed_for_map: Dictionary = removed_npc_entities.get(removed_map_id, {}).duplicate()
 			removed_for_map[removed_key] = true
 			removed_npc_entities[removed_map_id] = removed_for_map
@@ -440,6 +450,7 @@ func _on_entity_update(value: Dictionary) -> void:
 		var key := str(entity.get("entity_id", entity.get("character_id", entity.get("user_id", 0))))
 		if bool(entity.get("npc", false)):
 			var entity_map_id: String = str(entity.get("map_id", ""))
+			entity["story_cutscene_spawn"] = bool(value.get("spawn", false)) and not bool(value.get("map_load_spawn", false))
 			npc_entity_maps[key] = entity_map_id
 			var removed_for_map: Dictionary = removed_npc_entities.get(entity_map_id, {}).duplicate()
 			if bool(value.get("spawn", false)) and removed_for_map.has(key):
@@ -571,6 +582,8 @@ func _sync_map_entities() -> void:
 	var players: Array = []
 	for key in entities:
 		var entity: Dictionary = (entities[key] as Dictionary).duplicate()
+		if _story_hides_entity(entity):
+			continue
 		var entity_id: int = int(entity.get("entity_id", entity.get("character_id", entity.get("user_id", 0))))
 		entity["battle"] = bool(GameState.battle_presence.get(str(entity_id), false))
 		players.append(entity)
@@ -591,6 +604,9 @@ func _on_character_state_changed(value: Dictionary) -> void:
 	if hud != null:
 		var party: Array = value.get("party", []) if value.get("party", []) is Array else []
 		hud.set_state(GameState.content, str(snapshot.get("map_id", "")), snapshot, party)
+
+func _on_story_state_changed(_value: Dictionary) -> void:
+	_sync_map_entities()
 
 func _on_shop_catalog(catalog: Dictionary) -> void:
 	if dialogue_overlay != null and dialogue_overlay.is_open():
@@ -626,6 +642,61 @@ func _retain_server_entities_for_map(target_map_id: String) -> void:
 		if str(entity.get("map_id", "")) == target_map_id:
 			retained[key] = entity
 	entities = retained
+
+func _cache_story_objects(map_id: String, values: Variant) -> void:
+	if map_id.is_empty() or not values is Array:
+		return
+	var entries: Array = []
+	for value in values as Array:
+		if not value is Dictionary:
+			continue
+		var object: Dictionary = value
+		var hide_flag_id: int = int(object.get("hide_flag_id", 0))
+		if str(object.get("kind", "")) != "object" or hide_flag_id <= 0:
+			continue
+		entries.append({"x": int(object.get("x", 0)), "y": int(object.get("y", 0)), "hide_flag_id": hide_flag_id})
+	story_objects_by_map[map_id] = entries
+
+func _story_hides_entity(entity: Dictionary) -> bool:
+	if not bool(entity.get("npc", false)) or bool(entity.get("story_cutscene_spawn", false)):
+		return false
+	var map_id: String = str(entity.get("map_id", ""))
+	var objects_value: Variant = story_objects_by_map.get(map_id, [])
+	if not objects_value is Array:
+		return false
+	var region_id: int = int(entity.get("region_id", GameState.story_region_id))
+	var entity_x: int = int(entity.get("x", -1))
+	var entity_y: int = int(entity.get("y", -1))
+	for object_value in objects_value as Array:
+		if not object_value is Dictionary:
+			continue
+		var object: Dictionary = object_value
+		if int(object.get("x", -2)) != entity_x or int(object.get("y", -2)) != entity_y:
+			continue
+		var hide_flag_id: int = int(object.get("hide_flag_id", 0))
+		if GameState.is_story_flag_set(region_id, hide_flag_id) or _oaks_lab_scene_hides(map_id, region_id, hide_flag_id):
+			return true
+	return false
+
+func _oaks_lab_scene_hides(map_id: String, region_id: int, hide_flag_id: int) -> bool:
+	if not _is_oaks_lab_map(map_id):
+		return false
+	var scene: int = GameState.story_variable(region_id, 0x55, -1)
+	if scene < 0:
+		return false
+	if hide_flag_id >= 40 and hide_flag_id <= 42:
+		return scene >= 3
+	return hide_flag_id == 45 and scene >= 4
+
+func _is_oaks_lab_map(map_id: String) -> bool:
+	var normalized: String = map_id.to_lower().replace("_", "").replace("-", "")
+	if normalized.contains("palletoakslab") or normalized.contains("pallettownprofessoroakslab"):
+		return true
+	if GameState.content == null:
+		return false
+	var map_value: Dictionary = GameState.content.map_data(map_id)
+	var map_name: String = str(map_value.get("name", "")).to_lower().replace("_", "").replace("-", "")
+	return map_name.contains("pallettown") and map_name.contains("oak") and map_name.contains("lab")
 
 func _process(delta: float) -> void:
 	if debug_panel != null and debug_panel.visible:

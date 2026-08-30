@@ -56,6 +56,22 @@ class Reader extends RefCounted:
 		offset += 8
 		return value
 
+	func read_f32_le() -> float:
+		if remaining() < 4:
+			failed = true
+			return 0.0
+		var value: float = data.decode_float(offset)
+		offset += 4
+		return value
+
+	func read_f64_le() -> float:
+		if remaining() < 8:
+			failed = true
+			return 0.0
+		var value: float = data.decode_double(offset)
+		offset += 8
+		return value
+
 	func read_bool() -> bool:
 		return read_u8() != 0
 
