@@ -64,6 +64,7 @@ var battle_tables_scanned: bool = false
 var battle_sprite_cache: Dictionary = {}
 var battle_name_cache: Dictionary = {}
 var battle_move_name_cache: Dictionary = {}
+var battle_item_info_cache: Dictionary = {}
 var battle_move_info_cache: Dictionary = {}
 var battle_animation_sheet_cache: Dictionary = {}
 var battle_animation_plan_cache: Dictionary = {}
@@ -392,6 +393,34 @@ func battle_move_name(move_id: int) -> String:
 	battle_move_name_cache[cache_key] = name
 	return name
 
+func battle_item_info(item_id: int) -> Dictionary:
+	var cache_key: String = str(item_id)
+	if battle_item_info_cache.has(cache_key):
+		return battle_item_info_cache[cache_key]
+	var internal_id: int = item_id - 5000
+	var info: Dictionary = {"item_id": item_id, "internal_id": internal_id, "name": "Item", "price": 0, "pocket": 0, "category": "items"}
+	var table_offset: int = int(_battle_rom_tables().get("item_table", -1))
+	var offset: int = table_offset + internal_id * 44
+	if internal_id > 0 and table_offset >= 0 and _valid_range(offset, 44) and _read_u16(offset + 14) == internal_id:
+		var item_name: String = ""
+		for position in range(14):
+			var value: int = int(rom_data[offset + position])
+			if value == 0xFF:
+				break
+			item_name += _decode_rom_character(value)
+		var pocket: int = int(rom_data[offset + 26])
+		info["name"] = item_name.strip_edges() if not item_name.strip_edges().is_empty() else "Item"
+		info["price"] = _read_u16(offset + 16)
+		info["pocket"] = pocket
+		match pocket:
+			2: info["category"] = "key_item"
+			3: info["category"] = "balls"
+			4: info["category"] = "tm"
+			5: info["category"] = "berries"
+			_: info["category"] = "items"
+	battle_item_info_cache[cache_key] = info
+	return info
+
 func battle_move_info(move_id: int) -> Dictionary:
 	if move_id <= 0:
 		return {"id": move_id, "name": "Move", "effect": -1, "type": -1, "type_name": "Unknown", "power": 0, "accuracy": 0, "pp": 0, "effect_chance": 0, "target": 0, "priority": 0, "flags": 0}
@@ -653,7 +682,7 @@ func _battle_rom_tables() -> Dictionary:
 		battle_table_cache = {"available": false}
 		battle_tables_scanned = true
 		return battle_table_cache
-	var tables: Dictionary = {"header_offset": header_offset, "front_sprite_table": _read_rom_pointer(header_offset + 40), "back_sprite_table": _read_rom_pointer(header_offset + 44), "palette_table": _read_rom_pointer(header_offset + 48), "species_name_table": _read_rom_pointer(header_offset + 68), "move_name_table": _read_rom_pointer(header_offset + 72), "move_table": _format_int("battle_move_table_offset", -1), "animation_pic_table": _format_int("battle_animation_pic_table_offset", -1), "animation_palette_table": _format_int("battle_animation_palette_table_offset", -1), "animation_move_table": _format_int("battle_animation_move_table_offset", -1)}
+	var tables: Dictionary = {"header_offset": header_offset, "front_sprite_table": _read_rom_pointer(header_offset + 40), "back_sprite_table": _read_rom_pointer(header_offset + 44), "palette_table": _read_rom_pointer(header_offset + 48), "species_name_table": _read_rom_pointer(header_offset + 68), "move_name_table": _read_rom_pointer(header_offset + 72), "item_table": _read_rom_pointer(header_offset + 200), "move_table": _format_int("battle_move_table_offset", -1), "animation_pic_table": _format_int("battle_animation_pic_table_offset", -1), "animation_palette_table": _format_int("battle_animation_palette_table_offset", -1), "animation_move_table": _format_int("battle_animation_move_table_offset", -1)}
 	if str(source_profile.get("id", "")) == "pokemon-fire-red" and rom_sha1 == FIRE_RED_SHA1:
 		tables["animation_pic_table"] = 0x3ACC08
 		tables["animation_palette_table"] = 0x3AD510
@@ -666,6 +695,7 @@ func _battle_rom_tables() -> Dictionary:
 	battle_tables_scanned = true
 	battle_name_cache.clear()
 	battle_move_name_cache.clear()
+	battle_item_info_cache.clear()
 	return battle_table_cache
 
 func battle_move_animation_plan(move_id: int) -> Dictionary:

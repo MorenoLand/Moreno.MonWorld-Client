@@ -2,6 +2,9 @@ class_name OpenMMOHud
 extends Control
 
 signal follow_requested(party_index: int)
+signal shop_buy_requested(item_id: int, quantity: int, exchange_type_index: int)
+signal shop_sell_requested(item_entity_id: int, quantity: int)
+signal shop_closed
 
 const PARTY_COUNT: int = 6
 var location_label: Label
@@ -31,6 +34,17 @@ var current_party: Array = []
 var clock_elapsed: float = 0.0
 var bag_open: bool = false
 var menu_open: bool = false
+var shop_panel: PanelContainer
+var shop_money_label: Label
+var shop_buy_button: Button
+var shop_sell_button: Button
+var shop_item_list: ItemList
+var shop_detail_label: Label
+var shop_quantity: SpinBox
+var shop_confirm_button: Button
+var shop_catalog: Dictionary = {}
+var shop_mode: String = "buy"
+var shop_open: bool = false
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_PASS
@@ -212,6 +226,54 @@ func _build_ui() -> void:
 	var menu_close: Button = _make_button("Close")
 	menu_close.pressed.connect(toggle_menu)
 	menu_box.add_child(menu_close)
+	shop_panel = _make_popup_panel("Mart")
+	shop_panel.set_anchors_preset(Control.PRESET_CENTER)
+	shop_panel.offset_left = -300.0
+	shop_panel.offset_top = -225.0
+	shop_panel.offset_right = 300.0
+	shop_panel.offset_bottom = 225.0
+	shop_panel.z_index = 20
+	add_child(shop_panel)
+	var shop_box: VBoxContainer = shop_panel.get_child(0) as VBoxContainer
+	shop_money_label = Label.new()
+	shop_money_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	shop_box.add_child(shop_money_label)
+	var shop_tabs: HBoxContainer = HBoxContainer.new()
+	shop_tabs.add_theme_constant_override("separation", 4)
+	shop_box.add_child(shop_tabs)
+	shop_buy_button = _make_button("Buy")
+	shop_buy_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	shop_buy_button.pressed.connect(_set_shop_mode.bind("buy"))
+	shop_tabs.add_child(shop_buy_button)
+	shop_sell_button = _make_button("Sell")
+	shop_sell_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	shop_sell_button.pressed.connect(_set_shop_mode.bind("sell"))
+	shop_tabs.add_child(shop_sell_button)
+	shop_item_list = ItemList.new()
+	shop_item_list.custom_minimum_size = Vector2(568.0, 250.0)
+	shop_item_list.select_mode = ItemList.SELECT_SINGLE
+	shop_item_list.item_selected.connect(_on_shop_item_selected)
+	shop_box.add_child(shop_item_list)
+	shop_detail_label = Label.new()
+	shop_detail_label.custom_minimum_size = Vector2(0.0, 28.0)
+	shop_box.add_child(shop_detail_label)
+	var shop_actions: HBoxContainer = HBoxContainer.new()
+	shop_actions.add_theme_constant_override("separation", 6)
+	shop_box.add_child(shop_actions)
+	shop_quantity = SpinBox.new()
+	shop_quantity.min_value = 1.0
+	shop_quantity.max_value = 999.0
+	shop_quantity.value = 1.0
+	shop_quantity.custom_minimum_size = Vector2(120.0, 38.0)
+	shop_quantity.value_changed.connect(_on_shop_quantity_changed)
+	shop_actions.add_child(shop_quantity)
+	shop_confirm_button = _make_button("Buy")
+	shop_confirm_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	shop_confirm_button.pressed.connect(_confirm_shop_action)
+	shop_actions.add_child(shop_confirm_button)
+	var shop_close: Button = _make_button("Close")
+	shop_close.pressed.connect(_close_shop)
+	shop_actions.add_child(shop_close)
 	_refresh_panels()
 
 func _make_button(text_value: String) -> Button:
@@ -299,12 +361,16 @@ func _process(delta: float) -> void:
 		_refresh_time()
 
 func toggle_bag() -> void:
+	if shop_open:
+		return
 	bag_open = not bag_open
 	if bag_open:
 		menu_open = false
 	_refresh_panels()
 
 func toggle_menu() -> void:
+	if shop_open:
+		return
 	menu_open = not menu_open
 	if menu_open:
 		bag_open = false
@@ -321,6 +387,93 @@ func _refresh_panels() -> void:
 		bag_panel.visible = bag_open
 	if menu_panel != null:
 		menu_panel.visible = menu_open
+	if shop_panel != null:
+		shop_panel.visible = shop_open
+
+func show_shop(catalog: Dictionary) -> void:
+	shop_catalog = catalog.duplicate(true)
+	shop_open = bool(catalog.get("open", false))
+	if shop_open:
+		bag_open = false
+		menu_open = false
+		shop_mode = "buy"
+	_refresh_shop()
+	_refresh_panels()
+
+func _set_shop_mode(mode: String) -> void:
+	shop_mode = mode
+	_refresh_shop()
+
+func _refresh_shop() -> void:
+	if shop_item_list == null:
+		return
+	shop_money_label.text = "$%s" % _format_money(int(current_state.get("money", 0)))
+	shop_buy_button.modulate = Color("9fc3ff") if shop_mode == "buy" else Color.WHITE
+	shop_sell_button.modulate = Color("9fc3ff") if shop_mode == "sell" else Color.WHITE
+	shop_item_list.clear()
+	var items: Array = shop_catalog.get("items", []) if shop_mode == "buy" and shop_catalog.get("items", []) is Array else current_state.get("bag", []) if current_state.get("bag", []) is Array else []
+	for item_value in items:
+		if not item_value is Dictionary:
+			continue
+		var item: Dictionary = item_value
+		var quantity: int = int(item.get("quantity", 0))
+		if shop_mode == "sell" and (quantity <= 0 or int(item.get("price", 0)) < 2):
+			continue
+		var item_name: String = str(item.get("name", "Item"))
+		var price: int = int(item.get("price", 0)) if shop_mode == "buy" else int(item.get("price", 0)) / 2
+		var text_value: String = "%s    $%s" % [item_name, _format_money(price)]
+		if shop_mode == "sell":
+			text_value = "%s  x%d    $%s" % [item_name, quantity, _format_money(price)]
+		var index: int = shop_item_list.add_item(text_value)
+		shop_item_list.set_item_metadata(index, item.duplicate(true))
+	shop_detail_label.text = "Select an item."
+	shop_quantity.value = 1.0
+	shop_quantity.max_value = 1.0
+	shop_confirm_button.text = "Buy" if shop_mode == "buy" else "Sell"
+	shop_confirm_button.disabled = true
+
+func _on_shop_item_selected(index: int) -> void:
+	var item: Dictionary = shop_item_list.get_item_metadata(index) if shop_item_list.get_item_metadata(index) is Dictionary else {}
+	if item.is_empty():
+		return
+	var available: int = int(item.get("stock", 0x7FFF)) if shop_mode == "buy" else int(item.get("quantity", 0))
+	shop_quantity.max_value = maxi(1, mini(available, 999))
+	shop_quantity.value = 1.0
+	shop_confirm_button.disabled = false
+	_update_shop_detail(item)
+
+func _on_shop_quantity_changed(_value: float) -> void:
+	var selected: PackedInt32Array = shop_item_list.get_selected_items()
+	if selected.is_empty():
+		return
+	var item: Variant = shop_item_list.get_item_metadata(selected[0])
+	if item is Dictionary:
+		_update_shop_detail(item)
+
+func _update_shop_detail(item: Dictionary) -> void:
+	var unit_price: int = int(item.get("price", 0)) if shop_mode == "buy" else int(item.get("price", 0)) / 2
+	var quantity: int = int(shop_quantity.value)
+	shop_detail_label.text = "%s x%d — $%s" % [str(item.get("name", "Item")), quantity, _format_money(unit_price * quantity)]
+
+func _confirm_shop_action() -> void:
+	var selected: PackedInt32Array = shop_item_list.get_selected_items()
+	if selected.is_empty():
+		return
+	var item: Variant = shop_item_list.get_item_metadata(selected[0])
+	if not item is Dictionary:
+		return
+	var quantity: int = int(shop_quantity.value)
+	if shop_mode == "buy":
+		shop_buy_requested.emit(int((item as Dictionary).get("item_id", 0)), quantity, 0)
+	else:
+		shop_sell_requested.emit(int((item as Dictionary).get("object_id", 0)), quantity)
+	shop_confirm_button.disabled = true
+
+func _close_shop() -> void:
+	shop_open = false
+	shop_catalog.clear()
+	_refresh_panels()
+	shop_closed.emit()
 
 func _refresh_bag() -> void:
 	if bag_label == null:
@@ -400,6 +553,8 @@ func _refresh() -> void:
 		_refresh_party_slot(index, member as Dictionary if member is Dictionary else {})
 	_refresh_bag()
 	_refresh_hotbar()
+	if shop_open:
+		_refresh_shop()
 
 func _refresh_time() -> void:
 	if time_label == null:

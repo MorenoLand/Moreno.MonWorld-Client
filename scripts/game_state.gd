@@ -7,6 +7,8 @@ signal world_snapshot_received(snapshot: Dictionary)
 signal entity_update_received(update: Dictionary)
 signal chat_received(message: Dictionary)
 signal battle_event_received(event: Dictionary)
+signal character_state_changed(state: Dictionary)
+signal shop_catalog_received(catalog: Dictionary)
 signal map_load_received(map_load: Dictionary)
 signal dialog_action_received(action: Dictionary)
 signal dialog_state_received(open: bool)
@@ -44,6 +46,7 @@ var active_map_key: String = ""
 var battle_state: Dictionary = {}
 var battle_in_progress: bool = false
 var battle_presence: Dictionary = {}
+var active_shop: Dictionary = {}
 
 func _ready() -> void:
 	login_session = SESSION_SCRIPT.new()
@@ -217,6 +220,14 @@ func send_battle_action(action: int, move_or_item_id: int = 0, target_entity_id:
 	var payload: PackedByteArray = GAME_PROTOCOL_SCRIPT.encode_battle_action_select(action, move_or_item_id, target_entity_id, extra_flag, slot_ref)
 	return not payload.is_empty() and game_session.send_packet(GAME_PROTOCOL_SCRIPT.BATTLE_ACTION_SELECT, payload)
 
+func send_shop_buy(item_id: int, quantity: int, exchange_type_index: int = 0) -> bool:
+	var payload: PackedByteArray = GAME_PROTOCOL_SCRIPT.encode_shop_buy(item_id, quantity, exchange_type_index)
+	return not payload.is_empty() and game_session.send_packet(GAME_PROTOCOL_SCRIPT.SHOP_BUY, payload)
+
+func send_shop_sell(item_entity_id: int, quantity: int) -> bool:
+	var payload: PackedByteArray = GAME_PROTOCOL_SCRIPT.encode_shop_sell(item_entity_id, quantity)
+	return not payload.is_empty() and game_session.send_packet(GAME_PROTOCOL_SCRIPT.SHOP_SELL, payload)
+
 func disconnect_game() -> void:
 	pending_map_load.clear()
 	server_maps.clear()
@@ -225,6 +236,7 @@ func disconnect_game() -> void:
 	battle_state.clear()
 	battle_in_progress = false
 	battle_presence.clear()
+	active_shop.clear()
 	game_session.close()
 
 func _on_login_established() -> void:
@@ -338,6 +350,40 @@ func _on_game_packet(opcode: int, payload: PackedByteArray) -> void:
 			chat_received.emit(notice)
 		else:
 			connection_error.emit(str(response.get("error", "OpenMMO server notice is malformed")))
+	elif opcode == GAME_PROTOCOL_SCRIPT.LOCAL_CHARACTER_DELTA:
+		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_local_character_delta(payload)
+		if response.ok:
+			_apply_character_updates(response.updates)
+		else:
+			connection_error.emit(str(response.get("error", "OpenMMO local character delta packet is malformed")))
+	elif opcode == GAME_PROTOCOL_SCRIPT.SHOP_CATALOG:
+		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_shop_catalog(payload)
+		if not response.ok:
+			connection_error.emit(str(response.get("error", "OpenMMO shop catalog packet is malformed")))
+			return
+		var items: Array = []
+		for item_value in response.get("items", []):
+			if not item_value is Dictionary:
+				continue
+			var item: Dictionary = (item_value as Dictionary).duplicate(true)
+			if content != null:
+				item.merge(content.battle_item_info(int(item.get("item_id", 0))))
+			items.append(item)
+		response["items"] = items
+		active_shop = response.duplicate(true) if bool(response.get("open", false)) else {}
+		shop_catalog_received.emit(response)
+	elif opcode == GAME_PROTOCOL_SCRIPT.BATTLE_SIDE_PARTY:
+		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_battle_side_party(payload)
+		if response.ok:
+			_apply_bag_snapshot(response)
+		else:
+			connection_error.emit(str(response.get("error", "OpenMMO bag snapshot packet is malformed")))
+	elif opcode == GAME_PROTOCOL_SCRIPT.BATTLE_SIDE_ADD_POKEMON:
+		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_battle_side_add_pokemon(payload)
+		if response.ok:
+			_apply_bag_stack(response)
+		else:
+			connection_error.emit(str(response.get("error", "OpenMMO bag update packet is malformed")))
 	elif opcode == GAME_PROTOCOL_SCRIPT.BATTLE_SIDE:
 		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_battle_side(payload)
 		if response.ok:
@@ -571,6 +617,73 @@ func _emit_entity_update(entity: Dictionary) -> void:
 			if entity.has(key):
 				current_character[key] = entity[key]
 	entity_update_received.emit({"player": entity, "local": entity_id == int(current_character.get("id", 0))})
+
+func _apply_character_updates(updates: Dictionary) -> void:
+	for key in updates:
+		current_character[key] = updates[key]
+	_update_character_list_entry()
+	character_state_changed.emit(current_character.duplicate(true))
+
+func _apply_bag_snapshot(packet: Dictionary) -> void:
+	if int(packet.get("side", -1)) != 1:
+		return
+	var entries: Array = packet.get("entries", []) if packet.get("entries", []) is Array else []
+	var bag: Array = [] if bool(packet.get("replace", false)) else _current_bag()
+	for entry_value in entries:
+		if not entry_value is Dictionary:
+			continue
+		var stack: Dictionary = _bag_stack_from_entry(entry_value as Dictionary)
+		if stack.is_empty():
+			return
+		_merge_bag_stack(bag, stack)
+	current_character["bag"] = bag
+	_update_character_list_entry()
+	character_state_changed.emit(current_character.duplicate(true))
+
+func _apply_bag_stack(packet: Dictionary) -> void:
+	if int(packet.get("side", -1)) != 1 or not packet.get("entry", {}) is Dictionary:
+		return
+	var stack: Dictionary = _bag_stack_from_entry(packet.entry)
+	if stack.is_empty():
+		return
+	var bag: Array = _current_bag()
+	_merge_bag_stack(bag, stack)
+	current_character["bag"] = bag
+	_update_character_list_entry()
+	character_state_changed.emit(current_character.duplicate(true))
+
+func _bag_stack_from_entry(entry: Dictionary) -> Dictionary:
+	var item_id: int = int(entry.get("front_sprite_id", 0))
+	if item_id < 5000:
+		return {}
+	var stack: Dictionary = content.battle_item_info(item_id).duplicate(true) if content != null else {"item_id": item_id, "name": "Item", "category": "items", "price": 0}
+	stack["object_id"] = int(entry.get("entity_id", 0))
+	stack["quantity"] = maxi(0, int(entry.get("back_sprite_id", 0)))
+	return stack
+
+func _current_bag() -> Array:
+	var value: Variant = current_character.get("bag", [])
+	return (value as Array).duplicate(true) if value is Array else []
+
+func _merge_bag_stack(bag: Array, stack: Dictionary) -> void:
+	var item_id: int = int(stack.get("item_id", 0))
+	for index in bag.size():
+		if not bag[index] is Dictionary or int((bag[index] as Dictionary).get("item_id", 0)) != item_id:
+			continue
+		if int(stack.get("quantity", 0)) <= 0:
+			bag.remove_at(index)
+		else:
+			bag[index] = stack
+		return
+	if int(stack.get("quantity", 0)) > 0:
+		bag.append(stack)
+
+func _update_character_list_entry() -> void:
+	var character_id: int = int(current_character.get("id", 0))
+	for index in characters.size():
+		if characters[index] is Dictionary and int((characters[index] as Dictionary).get("id", 0)) == character_id:
+			characters[index] = current_character.duplicate(true)
+			return
 
 func _apply_battle_move_event(event: Dictionary) -> void:
 	for target_value in event.get("targets", []):

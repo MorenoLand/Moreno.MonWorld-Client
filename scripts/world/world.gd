@@ -57,6 +57,8 @@ func _ready() -> void:
 	GameState.dialog_action_received.connect(_on_dialog_action_received)
 	GameState.dialog_state_received.connect(_on_dialog_state_received)
 	GameState.battle_event_received.connect(_on_battle_event)
+	GameState.character_state_changed.connect(_on_character_state_changed)
+	GameState.shop_catalog_received.connect(_on_shop_catalog)
 	_build_ui()
 	if not GameState.pending_map_load.is_empty():
 		call_deferred("_consume_pending_map_load")
@@ -78,6 +80,9 @@ func _build_ui() -> void:
 	hud = HUD_SCRIPT.new()
 	hud.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	hud.follow_requested.connect(_on_follow_requested)
+	hud.shop_buy_requested.connect(_on_shop_buy_requested)
+	hud.shop_sell_requested.connect(_on_shop_sell_requested)
+	hud.shop_closed.connect(_on_shop_closed)
 	add_child(hud)
 	chat_box = CHAT_SCRIPT.new()
 	chat_box.message_submitted.connect(_send_chat)
@@ -237,6 +242,8 @@ func _on_world_snapshot(value: Dictionary) -> void:
 			if selected_party is Array:
 				party = selected_party
 		snapshot["party"] = party
+		snapshot["money"] = int(GameState.current_character.get("money", 0))
+		snapshot["bag"] = GameState.current_character.get("bag", [])
 		hud.set_state(GameState.content, str(snapshot.get("map_id", "")), snapshot, party)
 	await _load_map_texture(str(snapshot.get("map_id", "")))
 	_sync_map_entities()
@@ -249,7 +256,7 @@ func _on_map_load(value: Dictionary) -> void:
 	await _wait_for_door_traversal()
 	while transition_reveal_pending and transition_overlay != null and not transition_overlay.visible:
 		await get_tree().process_frame
-	snapshot = {"map_id": map_id, "server_map": value, "party": GameState.current_character.get("party", []), "players": []}
+	snapshot = {"map_id": map_id, "server_map": value, "party": GameState.current_character.get("party", []), "money": int(GameState.current_character.get("money", 0)), "bag": GameState.current_character.get("bag", []), "players": []}
 	_retain_server_entities_for_map(map_id)
 	if hud != null:
 		hud.set_state(GameState.content, map_id, snapshot, snapshot.party)
@@ -548,6 +555,34 @@ func _on_battle_event(value: Dictionary) -> void:
 func _on_follow_requested(party_index: int) -> void:
 	if map_view != null:
 		map_view.set_following_party_index(party_index)
+
+func _on_character_state_changed(value: Dictionary) -> void:
+	for key in ["money", "bag", "party"]:
+		if value.has(key):
+			snapshot[key] = value[key]
+	if hud != null:
+		var party: Array = value.get("party", []) if value.get("party", []) is Array else []
+		hud.set_state(GameState.content, str(snapshot.get("map_id", "")), snapshot, party)
+
+func _on_shop_catalog(catalog: Dictionary) -> void:
+	if dialogue_overlay != null and dialogue_overlay.is_open():
+		dialogue_overlay.close_dialogue()
+	if map_view != null:
+		map_view.set_dialogue_active(bool(catalog.get("open", false)))
+		map_view.set_input_enabled(not bool(catalog.get("open", false)))
+	if hud != null:
+		hud.show_shop(catalog)
+
+func _on_shop_buy_requested(item_id: int, quantity: int, exchange_type_index: int) -> void:
+	GameState.send_shop_buy(item_id, quantity, exchange_type_index)
+
+func _on_shop_sell_requested(item_entity_id: int, quantity: int) -> void:
+	GameState.send_shop_sell(item_entity_id, quantity)
+
+func _on_shop_closed() -> void:
+	if map_view != null:
+		map_view.set_dialogue_active(false)
+		map_view.set_input_enabled(true)
 
 func set_battle_overlay_active(value: bool) -> void:
 	if map_view != null:

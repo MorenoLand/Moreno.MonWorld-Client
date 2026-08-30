@@ -11,6 +11,7 @@ const FACE_DIRECTION: int = 0x07
 const CHAT_SEND: int = 0x08
 const ENTITY_LEAVE: int = 0x08
 const CHAT_MESSAGE: int = 0x09
+const LOCAL_CHARACTER_DELTA: int = 0x0C
 const ENTITY_MOVE_SEQUENCE: int = 0x0D
 const DIALOG_STATE: int = 0x0E
 const SERVER_NOTICE: int = 0x74
@@ -20,6 +21,9 @@ const NPC_SPAWN: int = 0x12
 const ENTITY_MOVE_PP: int = 0x1A
 const DIALOG_ACTION: int = 0x21
 const ENTITY_INTERACT: int = 0x22
+const SHOP_CATALOG: int = 0x23
+const SHOP_BUY: int = 0x23
+const SHOP_SELL: int = 0x24
 const DIALOG_CHOICE: int = 0x25
 const TILE_INTERACT: int = 0x27
 const MAP_TRANSITION: int = 0x1B
@@ -40,6 +44,7 @@ const BATTLE_SWITCH_IN: int = 0x35
 const BATTLE_SLOT_FLAG: int = 0x36
 const BATTLE_LIST_EVENT: int = 0x37
 const BATTLE_SIDE_PARTY: int = 0x40
+const BATTLE_SIDE_ADD_POKEMON: int = 0x42
 const BATTLE_STAT_COUNTERS: int = 0x79
 const BATTLE_SIDE: int = 0x6B
 const BATTLE_PROMPT: int = 0x9D
@@ -157,6 +162,23 @@ static func encode_battle_action_select(action: int, move_or_item_id: int = 0, t
 			pass
 	return output
 
+static func encode_shop_buy(item_id: int, quantity: int, exchange_type_index: int = 0) -> PackedByteArray:
+	if item_id < -0x8000 or item_id > 0x7FFF or quantity <= 0 or quantity > 0x7FFF or exchange_type_index < -0x80 or exchange_type_index > 0x7F:
+		return PackedByteArray()
+	var output: PackedByteArray = PackedByteArray()
+	OpenMMOCodec.append_s16_le(output, item_id)
+	OpenMMOCodec.append_s16_le(output, quantity)
+	OpenMMOCodec.append_u8(output, exchange_type_index)
+	return output
+
+static func encode_shop_sell(item_entity_id: int, quantity: int) -> PackedByteArray:
+	if item_entity_id == 0 or quantity <= 0 or quantity > 0x7FFF:
+		return PackedByteArray()
+	var output: PackedByteArray = PackedByteArray()
+	OpenMMOCodec.append_s64_le(output, item_entity_id)
+	OpenMMOCodec.append_s16_le(output, quantity)
+	return output
+
 static func encode_entity_interact(entity_id: int, token: int = 0) -> PackedByteArray:
 	var output: PackedByteArray = PackedByteArray()
 	OpenMMOCodec.append_s64_le(output, entity_id)
@@ -233,6 +255,103 @@ static func decode_load_map(payload: PackedByteArray) -> Dictionary:
 	if not result.ok:
 		result["error"] = "OpenMMO map packet is malformed"
 	return result
+
+static func decode_shop_catalog(payload: PackedByteArray) -> Dictionary:
+	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
+	var kind: int = reader.read_s8()
+	var result: Dictionary = {"open": kind == 0, "kind": kind, "items": []}
+	if kind == 0:
+		result["shop_id"] = reader.read_s16_le()
+		result["exchange_value"] = reader.read_s32_le()
+		result["npc_entity_id"] = reader.read_s64_le()
+		var count: int = reader.read_u16_le()
+		if count > 512:
+			reader.failed = true
+		for _index in mini(count, 512):
+			(result["items"] as Array).append({"item_id": reader.read_s16_le(), "exchange_type_index": reader.read_s16_le(), "stock": reader.read_s16_le(), "price": reader.read_s32_le()})
+	elif kind != -1:
+		reader.failed = true
+	result["ok"] = not reader.failed and reader.remaining() == 0
+	if not bool(result.get("ok", false)):
+		result["error"] = "OpenMMO shop catalog packet is malformed"
+	return result
+
+static func decode_local_character_delta(payload: PackedByteArray) -> Dictionary:
+	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
+	var mask: int = reader.read_u16_le()
+	var updates: Dictionary = {}
+	if mask & 0x1:
+		updates["money"] = reader.read_s32_le()
+	if mask & 0x2:
+		updates["map_id"] = reader.read_s16_le()
+		updates["map_flag"] = reader.read_s8()
+	if mask & 0x4:
+		updates["value_4"] = reader.read_s16_le()
+	if mask & 0x8:
+		updates["value_8"] = [reader.read_s8(), reader.read_s8(), reader.read_s8()]
+	if mask & 0x10:
+		updates["value_16"] = [reader.read_s16_le(), reader.read_s16_le()]
+	if mask & 0x20:
+		updates["value_32"] = reader.read_s32_le()
+	if mask & 0x40:
+		var kind: int = reader.read_s8()
+		updates["value_64"] = {"kind": kind}
+		if kind != 0:
+			updates["value_64"]["a"] = reader.read_s16_le()
+			updates["value_64"]["b"] = reader.read_s16_le()
+	if mask & 0x80:
+		var status_count: int = reader.read_u8()
+		updates["status_conditions"] = []
+		if status_count > 64:
+			reader.failed = true
+		for _index in mini(status_count, 64):
+			(updates["status_conditions"] as Array).append(reader.read_s8())
+	if mask & 0x100:
+		updates["value_256"] = reader.read_s8()
+	var result: Dictionary = {"mask": mask, "updates": updates, "ok": not reader.failed and reader.remaining() == 0}
+	if not bool(result.get("ok", false)):
+		result["error"] = "OpenMMO local character delta packet is malformed"
+	return result
+
+static func decode_battle_side_party(payload: PackedByteArray) -> Dictionary:
+	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
+	var side: int = reader.read_s8()
+	var replace: bool = reader.read_u8() == 1
+	var count: int = reader.read_u16_le()
+	var entries: Array = []
+	if count > 512:
+		reader.failed = true
+	for _index in mini(count, 512):
+		entries.append(_read_battle_party_entry(reader))
+	var result: Dictionary = {"side": side, "replace": replace, "entries": entries, "ok": not reader.failed and reader.remaining() == 0}
+	if not bool(result.get("ok", false)):
+		result["error"] = "OpenMMO battle-side party packet is malformed"
+	return result
+
+static func decode_battle_side_add_pokemon(payload: PackedByteArray) -> Dictionary:
+	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
+	var side: int = reader.read_s8()
+	var entry: Dictionary = _read_battle_party_entry(reader)
+	var result: Dictionary = {"side": side, "entry": entry, "ok": not reader.failed and reader.remaining() == 0}
+	if not bool(result.get("ok", false)):
+		result["error"] = "OpenMMO battle-side add packet is malformed"
+	return result
+
+static func _read_battle_party_entry(reader: OpenMMOCodec.Reader) -> Dictionary:
+	var flags: int = reader.read_u8()
+	var entry: Dictionary = {"flags": flags, "entity_id": reader.read_s64_le()}
+	if flags & 0x1:
+		entry["linked_entity_id"] = reader.read_s64_le()
+	entry["front_sprite_id"] = reader.read_s16_le()
+	entry["back_sprite_id"] = reader.read_s16_le()
+	entry["side"] = reader.read_s8()
+	if flags & 0x2:
+		entry["value_2"] = reader.read_s8()
+	entry["slot"] = reader.read_s8() if flags & 0x4 else 0
+	entry["party_index"] = reader.read_s8() if flags & 0x8 else -1
+	if flags & 0x10:
+		entry["status"] = {"duration": reader.read_s32_le(), "type": reader.read_s8(), "source_slot": reader.read_s8()}
+	return entry
 
 static func decode_load_entity(payload: PackedByteArray) -> Dictionary:
 	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
