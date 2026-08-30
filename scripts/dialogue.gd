@@ -130,6 +130,14 @@ func set_pokemon_preview(species_id: int) -> void:
 	pokemon_preview.visible = open_state and pokemon_preview.texture != null
 	_position_pokemon_preview()
 
+func set_actor_preview(texture: Texture2D) -> void:
+	pokemon_preview_species_id = 0
+	if pokemon_preview == null:
+		return
+	pokemon_preview.texture = texture
+	pokemon_preview.visible = open_state and texture != null
+	_position_pokemon_preview()
+
 func clear_pokemon_preview() -> void:
 	pokemon_preview_species_id = 0
 	if pokemon_preview != null:

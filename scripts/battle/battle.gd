@@ -33,12 +33,14 @@ var send_out_tweens: Array[Tween] = []
 var release_glow_texture: Texture2D
 var state: Dictionary = {}
 var selection_mode: String = ""
+var selection_index: int = 0
+var selection_buttons: Array[Button] = []
 var input_locked: bool = true
 var log_scroll_following: bool = true
 var log_scroll_adjusting: bool = false
 
 func _ready() -> void:
-	set_process_unhandled_input(true)
+	set_process_input(true)
 	if not GameState.battle_event_received.is_connected(_on_battle_event):
 		GameState.battle_event_received.connect(_on_battle_event)
 	_build_ui()
@@ -136,6 +138,7 @@ func _build_ui() -> void:
 	log_view.bbcode_enabled = false
 	log_view.fit_content = false
 	log_view.scroll_active = true
+	log_view.scroll_following = true
 	log_view.custom_minimum_size = Vector2(0.0, 72.0)
 	log_view.add_theme_font_size_override("normal_font_size", 13)
 	log_panel.add_child(log_view)
@@ -281,17 +284,79 @@ func _return_to_world() -> void:
 		return
 	exit_requested.emit()
 
-func _unhandled_input(event: InputEvent) -> void:
+func _input(event: InputEvent) -> void:
 	if not event is InputEventKey:
 		return
 	var key_event: InputEventKey = event as InputEventKey
-	if not key_event.pressed or key_event.echo or key_event.keycode not in [KEY_ESCAPE, KEY_B, KEY_BACKSPACE]:
+	if not key_event.pressed or key_event.echo:
 		return
-	get_viewport().set_input_as_handled()
-	if not selection_mode.is_empty() and not bool(state.get("force_switch", false)):
-		_cancel_selection()
-	elif bool(state.get("battle_complete", false)):
-		_return_to_world()
+	var key_code: Key = key_event.keycode
+	var confirm_keys: Array[Key] = [KEY_A, KEY_F, KEY_E, KEY_Z, KEY_X, KEY_ENTER, KEY_KP_ENTER, KEY_SPACE]
+	if bool(state.get("battle_complete", false)):
+		if key_code in [KEY_ESCAPE, KEY_B, KEY_BACKSPACE] or key_code in confirm_keys:
+			get_viewport().set_input_as_handled()
+			_return_to_world()
+		return
+	if key_code in [KEY_ESCAPE, KEY_B, KEY_BACKSPACE]:
+		if not selection_mode.is_empty() and not bool(state.get("force_switch", false)):
+			get_viewport().set_input_as_handled()
+			_cancel_selection()
+		return
+	if input_locked or not bool(state.get("can_act", false)):
+		return
+	if key_code in [KEY_LEFT, KEY_UP, KEY_W]:
+		get_viewport().set_input_as_handled()
+		_move_selection(-1)
+		return
+	if key_code in [KEY_RIGHT, KEY_DOWN, KEY_D, KEY_S]:
+		get_viewport().set_input_as_handled()
+		_move_selection(1)
+		return
+	if key_code in confirm_keys:
+		get_viewport().set_input_as_handled()
+		_activate_selection(selection_index)
+		return
+	if key_code >= KEY_1 and key_code <= KEY_4:
+		get_viewport().set_input_as_handled()
+		_activate_selection(int(key_code - KEY_1))
+
+func _move_selection(delta: int) -> void:
+	if selection_buttons.is_empty():
+		return
+	var candidate: int = selection_index
+	for _step in selection_buttons.size():
+		candidate = wrapi(candidate + delta, 0, selection_buttons.size())
+		if not selection_buttons[candidate].disabled:
+			selection_index = candidate
+			selection_buttons[candidate].grab_focus()
+			return
+
+func _activate_selection(index: int) -> void:
+	if index < 0 or index >= selection_buttons.size():
+		return
+	var button: Button = selection_buttons[index]
+	if button.disabled:
+		return
+	button.pressed.emit()
+
+func _register_selection_button(button: Button) -> void:
+	button.focus_mode = Control.FOCUS_ALL
+	var index: int = selection_buttons.size()
+	selection_buttons.append(button)
+	button.focus_entered.connect(_on_selection_focus_entered.bind(index))
+
+func _on_selection_focus_entered(index: int) -> void:
+	if index >= 0 and index < selection_buttons.size():
+		selection_index = index
+
+func _focus_selection() -> void:
+	if selection_buttons.is_empty():
+		return
+	selection_index = clampi(selection_index, 0, selection_buttons.size() - 1)
+	if selection_buttons[selection_index].disabled:
+		_move_selection(1)
+		return
+	selection_buttons[selection_index].grab_focus()
 
 func _waiting_for_name() -> String:
 	var explicit_name: String = str(state.get("opponent_name", state.get("trainer_name", ""))).strip_edges()
@@ -445,6 +510,8 @@ func _battle_mon_name(mon: Dictionary, opponent: bool) -> String:
 func _render_actions() -> void:
 	if action_box == null:
 		return
+	selection_buttons.clear()
+	selection_index = 0
 	for child in action_box.get_children():
 		child.queue_free()
 	var heading := Label.new()
@@ -467,31 +534,41 @@ func _render_actions() -> void:
 		_render_move_selection()
 	elif selection_mode == "pokemon":
 		_render_pokemon_selection()
+	elif selection_mode == "bag":
+		_render_bag_selection()
 	else:
 		var buttons := GridContainer.new()
 		buttons.columns = 2
 		for entry in [["Fight", "fight"], ["Bag", "bag"], ["Pokémon", "pokemon"], ["Run", "run"]]:
-			var button := Button.new()
+			var button := _make_button("")
 			button.text = "Pokemon" if str(entry[1]) == "pokemon" else str(entry[0])
 			button.custom_minimum_size = Vector2(120, 42)
 			if str(entry[1]) == "fight":
 				button.pressed.connect(_choose_fight)
+			elif str(entry[1]) == "bag":
+				button.pressed.connect(_choose_bag)
 			elif str(entry[1]) == "pokemon":
 				button.pressed.connect(_choose_pokemon)
 			elif str(entry[1]) == "run":
 				button.pressed.connect(_send_run)
-			else:
-				button.disabled = true
-				button.tooltip_text = "The server has not provided an item list."
+			_register_selection_button(button)
 			buttons.add_child(button)
 		action_box.add_child(buttons)
+		_focus_selection()
 
 func _choose_fight() -> void:
 	selection_mode = "fight"
+	selection_index = 0
+	_render_actions()
+
+func _choose_bag() -> void:
+	selection_mode = "bag"
+	selection_index = 0
 	_render_actions()
 
 func _choose_pokemon() -> void:
 	selection_mode = "pokemon"
+	selection_index = 0
 	_render_actions()
 
 func _render_move_selection() -> void:
@@ -523,6 +600,7 @@ func _render_move_selection() -> void:
 		button.custom_minimum_size = Vector2(140, 44)
 		button.disabled = current_pp <= 0
 		button.pressed.connect(_send_move.bind(move_id))
+		_register_selection_button(button)
 		grid.add_child(button)
 	action_box.add_child(grid)
 	_add_cancel_button()
@@ -551,6 +629,7 @@ func _render_pokemon_selection() -> void:
 				button.icon = sprite.get("texture") as Texture2D
 			button.custom_minimum_size = Vector2(140, 50)
 			button.pressed.connect(_send_switch.bind(slot))
+			_register_selection_button(button)
 			grid.add_child(button)
 	if grid.get_child_count() == 0:
 		var empty := Label.new()
@@ -560,15 +639,78 @@ func _render_pokemon_selection() -> void:
 		action_box.add_child(grid)
 	if not bool(state.get("force_switch", false)):
 		_add_cancel_button()
+	else:
+		_focus_selection()
+
+func _render_bag_selection() -> void:
+	var items: Array = _battle_bag()
+	if items.is_empty():
+		var empty := Label.new()
+		empty.text = "Bag is empty."
+		action_box.add_child(empty)
+		_add_cancel_button()
+		return
+	var grid := GridContainer.new()
+	grid.columns = 2
+	for item_value in items:
+		if not item_value is Dictionary:
+			continue
+		var item: Dictionary = item_value
+		var item_id: int = _battle_item_id(item)
+		if item_id <= 0:
+			continue
+		var quantity: int = maxi(0, int(item.get("quantity", item.get("count", 1))))
+		if quantity <= 0:
+			continue
+		var item_name: String = _battle_item_name(item, item_id)
+		var button := _make_button("%s\nx%d" % [item_name, quantity])
+		button.custom_minimum_size = Vector2(140, 48)
+		button.pressed.connect(_send_item.bind(item_id, item_name))
+		_register_selection_button(button)
+		grid.add_child(button)
+	if grid.get_child_count() == 0:
+		var empty := Label.new()
+		empty.text = "Bag is empty."
+		action_box.add_child(empty)
+	else:
+		action_box.add_child(grid)
+	_add_cancel_button()
+
+func _battle_bag() -> Array:
+	var value: Variant = state.get("bag", null)
+	if not value is Array and GameState.current_character.get("bag", []) is Array:
+		value = GameState.current_character.get("bag", [])
+	var items: Array = []
+	if value is Array:
+		items = (value as Array).duplicate(true)
+	elif value is Dictionary:
+		for group_value in (value as Dictionary).values():
+			if group_value is Array:
+				items.append_array(group_value as Array)
+	return items
+
+func _battle_item_id(item: Dictionary) -> int:
+	return int(item.get("item_id", item.get("id", item.get("front_sprite_id", 0))))
+
+func _battle_item_name(item: Dictionary, item_id: int) -> String:
+	var item_name: String = str(item.get("name", item.get("item_name", ""))).strip_edges()
+	if (item_name.is_empty() or item_name.to_lower() == "item") and item_id > 0 and GameState.content != null:
+		var info: Dictionary = GameState.content.battle_item_info(item_id)
+		item_name = str(info.get("name", "")).strip_edges()
+	if item_name.is_empty() or item_name.to_lower() == "item":
+		item_name = "Item #%d" % item_id
+	return item_name
 
 func _add_cancel_button() -> void:
-	var cancel := Button.new()
-	cancel.text = "Back"
+	var cancel := _make_button("Back")
 	cancel.pressed.connect(_cancel_selection)
+	_register_selection_button(cancel)
 	action_box.add_child(cancel)
+	_focus_selection()
 
 func _cancel_selection() -> void:
 	selection_mode = ""
+	selection_index = 0
 	_render_actions()
 
 func _active_moves() -> Array:
@@ -599,10 +741,16 @@ func _send_switch(slot: int) -> void:
 func _send_run() -> void:
 	_send_battle_action(3, 0, "Run")
 
-func _send_battle_action(action: int, value: int, label: String) -> void:
+func _send_item(item_id: int, item_name: String) -> void:
+	var player_party: Variant = state.get("player_party", [])
+	var active_slot: int = int(state.get("active_slot", -1))
+	var active: Dictionary = _active_mon(player_party as Array, active_slot) if player_party is Array else {}
+	_send_battle_action(1, item_id, "Use %s" % item_name, int(active.get("entity_id", 0)))
+
+func _send_battle_action(action: int, value: int, label: String, target_entity_id: int = 0) -> void:
 	if input_locked or not bool(state.get("can_act", false)):
 		return
-	if GameState.send_battle_action(action, value):
+	if GameState.send_battle_action(action, value, target_entity_id):
 		input_locked = true
 		selection_mode = ""
 		_append_log("Sent: %s" % label)
@@ -613,9 +761,10 @@ func _send_battle_action(action: int, value: int, label: String) -> void:
 func _append_log(message: String) -> void:
 	if log_view != null:
 		var bar: VScrollBar = log_view.get_v_scroll_bar()
-		if bar.value >= bar.max_value - 2.0:
-			log_scroll_following = true
+		log_scroll_following = log_scroll_following or bar.value >= bar.max_value - 2.0
 		log_view.append_text(message + "\n")
+		if log_scroll_following:
+			log_view.scroll_following = true
 		call_deferred("_scroll_log_to_bottom")
 
 func _on_log_scroll_changed(value: float) -> void:
@@ -623,12 +772,18 @@ func _on_log_scroll_changed(value: float) -> void:
 		return
 	var bar: VScrollBar = log_view.get_v_scroll_bar()
 	log_scroll_following = value >= bar.max_value - 2.0
+	log_view.scroll_following = log_scroll_following
 
 func _scroll_log_to_bottom() -> void:
 	if log_view == null or not log_scroll_following:
 		return
+	await get_tree().process_frame
+	await get_tree().process_frame
+	if log_view == null or not log_scroll_following:
+		return
 	var bar: VScrollBar = log_view.get_v_scroll_bar()
 	log_scroll_adjusting = true
+	log_view.scroll_following = true
 	bar.value = bar.max_value
 	log_scroll_adjusting = false
 

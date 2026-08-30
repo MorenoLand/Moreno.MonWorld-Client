@@ -8,6 +8,7 @@ const KANTO_GBA_CONTENT_ID: String = "kanto-gba-slice-v1"
 const FIRE_RED_REV1_SHA1: String = "dd5945db9b930750cb39d00c84da8571feebf417"
 const FIRE_RED_SHA1: String = "41cb23d8dccc8ebd7c649cd8fbb58eeace6e2fdc"
 const FIRE_RED_REV1_DIALOGUE_DELTAS: Array = [0x78, 0x73, 0x70]
+const FIRE_RED_SPECIAL_ITEM_NAMES: Dictionary = {349: "OAK'S PARCEL"}
 const GBA_TITLE_OFFSET: int = 0xA0
 const GBA_TITLE_LENGTH: int = 12
 const GBA_GAME_CODE_OFFSET: int = 0xAC
@@ -399,7 +400,8 @@ func battle_item_info(item_id: int) -> Dictionary:
 		return battle_item_info_cache[cache_key]
 	var internal_id: int = item_id - 5000
 	var info: Dictionary = {"item_id": item_id, "internal_id": internal_id, "name": "Item", "price": 0, "pocket": 0, "category": "items"}
-	var table_offset: int = int(_battle_rom_tables().get("item_table", -1))
+	var tables: Dictionary = _battle_rom_tables()
+	var table_offset: int = int(tables.get("item_table", -1))
 	var offset: int = table_offset + internal_id * 44
 	if internal_id > 0 and table_offset >= 0 and _valid_range(offset, 44) and _read_u16(offset + 14) == internal_id:
 		var item_name: String = ""
@@ -418,7 +420,12 @@ func battle_item_info(item_id: int) -> Dictionary:
 			4: info["category"] = "tm"
 			5: info["category"] = "berries"
 			_: info["category"] = "items"
-	battle_item_info_cache[cache_key] = info
+	elif str(source_profile.get("region", "")) == "Kanto" and FIRE_RED_SPECIAL_ITEM_NAMES.has(internal_id):
+		info["name"] = str(FIRE_RED_SPECIAL_ITEM_NAMES[internal_id])
+		info["pocket"] = 2
+		info["category"] = "key_item"
+	if not bool(tables.get("pending", false)) or str(info.get("name", "Item")) != "Item":
+		battle_item_info_cache[cache_key] = info
 	return info
 
 func battle_move_info(move_id: int) -> Dictionary:

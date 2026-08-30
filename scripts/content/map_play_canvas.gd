@@ -1363,6 +1363,25 @@ func dialogue_anchor_screen(dialogue: Dictionary) -> Vector2:
 	var destination_position: Vector2 = (size - camera_world_size * tile_scale) * 0.5
 	return destination_position + Vector2((object_x - camera_origin.x) * tile_scale, (object_y - object_height - camera_origin.y) * tile_scale)
 
+func dialogue_actor_sprite(entity_id: int) -> Dictionary:
+	if entity_id <= 0 or content == null:
+		return {}
+	for entity_value in world_entities:
+		if not entity_value is Dictionary:
+			continue
+		var entity: Dictionary = entity_value
+		if int(entity.get("entity_id", 0)) != entity_id or not bool(entity.get("npc", false)):
+			continue
+		var texture: Texture2D = entity.get("texture") as Texture2D
+		if texture == null:
+			var sprite: Dictionary = content.render_facing_object_sprite(int(entity.get("graphics_id", 19)), int(entity.get("facing", 1)), false, 0)
+			texture = sprite.get("texture") as Texture2D
+			if texture != null:
+				return {"texture": texture, "width": int(sprite.get("width", texture.get_width())), "height": int(sprite.get("height", texture.get_height()))}
+		if texture != null:
+			return {"texture": texture, "width": int(entity.get("width", texture.get_width())), "height": int(entity.get("height", texture.get_height()))}
+	return {}
+
 func _face_interaction_object(object_value: Variant) -> void:
 	if not object_value is Dictionary:
 		return

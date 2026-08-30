@@ -6,6 +6,7 @@ var battle_screen: Control
 
 func _ready() -> void:
 	GameState.battle_event_received.connect(_on_battle_event)
+	GameState.dialog_action_received.connect(_on_dialog_action_received)
 	_show_auth()
 
 func _replace_screen(scene: PackedScene) -> Node:
@@ -52,6 +53,7 @@ func _show_battle() -> void:
 
 func _close_battle() -> void:
 	if is_instance_valid(battle_screen):
+		battle_screen.hide()
 		battle_screen.queue_free()
 	battle_screen = null
 	if is_instance_valid(current_screen) and current_screen.has_method("set_battle_overlay_active"):
@@ -61,6 +63,12 @@ func _close_battle() -> void:
 func _on_battle_event(event: Dictionary) -> void:
 	if str(event.get("type", "")) == "field_state" and not battle_screen_active:
 		_show_battle()
+
+func _on_dialog_action_received(_action: Dictionary) -> void:
+	if not battle_screen_active or not is_instance_valid(battle_screen):
+		return
+	if not GameState.battle_in_progress and bool(GameState.battle_state.get("battle_complete", false)):
+		_close_battle()
 
 func _show_local_preview() -> void:
 	_close_battle()

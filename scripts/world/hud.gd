@@ -498,7 +498,7 @@ func _refresh_bag() -> void:
 			var item: Dictionary = item_value
 			if not _bag_item_matches_category(item, category_container):
 				continue
-			var item_name: String = str(item.get("name", item.get("item_name", "Item"))).strip_edges()
+			var item_name: String = _item_display_name(item, "Item")
 			var quantity: int = int(item.get("quantity", item.get("count", 1)))
 			lines.append("%s  x%d" % [item_name if not item_name.is_empty() else "Item", quantity])
 	elif items is Dictionary:
@@ -508,12 +508,21 @@ func _refresh_bag() -> void:
 				var item: Dictionary = item_value
 				if not _bag_item_matches_category(item, category_container):
 					continue
-				var item_name: String = str(item.get("name", item.get("item_name", item_key))).strip_edges()
+				var item_name: String = _item_display_name(item, str(item_key))
 				var quantity: int = int(item.get("quantity", item.get("count", 1)))
 				lines.append("%s  x%d" % [item_name if not item_name.is_empty() else str(item_key), quantity])
 			elif bag_category == "Items":
-				lines.append("%s  x%d" % [str(item_key), int(item_value)])
+				var item_id: int = int(item_key)
+				var item_name: String = current_content.battle_item_info(item_id).get("name", str(item_key)) if current_content != null and item_id > 0 else str(item_key)
+				lines.append("%s  x%d" % [item_name if not item_name.is_empty() else str(item_key), int(item_value)])
 	bag_label.text = "\n".join(lines) if not lines.is_empty() else "No items available."
+
+func _item_display_name(item: Dictionary, fallback: String) -> String:
+	var item_name: String = str(item.get("name", item.get("item_name", ""))).strip_edges()
+	var item_id: int = int(item.get("item_id", item.get("id", item.get("front_sprite_id", 0))))
+	if (item_name.is_empty() or item_name.to_lower() == "item") and current_content != null and item_id > 0:
+		item_name = str(current_content.battle_item_info(item_id).get("name", "")).strip_edges()
+	return fallback if item_name.is_empty() or item_name.to_lower() == "item" else item_name
 
 func _bag_category_keys() -> Array:
 	match bag_category:

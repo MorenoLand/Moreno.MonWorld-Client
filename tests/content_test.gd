@@ -13,6 +13,14 @@ func _init() -> void:
 			push_error("ROM profile registry did not identify %s" % str(profile_case.get("code", "")))
 			quit(1)
 			return
+	var item_content: OpenMMOContent = OpenMMOContent.new()
+	item_content.source_profile = {"region": "Kanto"}
+	item_content.battle_tables_scanned = true
+	var parcel_info: Dictionary = item_content.battle_item_info(5349)
+	if str(parcel_info.get("name", "")) != "OAK'S PARCEL" or str(parcel_info.get("category", "")) != "key_item":
+		push_error("FireRed Oak's Parcel metadata did not resolve from item 349")
+		quit(1)
+		return
 	var path: String = OS.get_environment("MONWORLD_ROM")
 	var args: PackedStringArray = OS.get_cmdline_user_args()
 	var index: int = 0

@@ -12,7 +12,7 @@ func _run() -> void:
 	var battle: Control = BATTLE_SCRIPT.new()
 	get_tree().root.add_child(battle)
 	var log_view: RichTextLabel = battle.get("log_view") as RichTextLabel
-	if log_view == null or not log_view.scroll_active:
+	if log_view == null or not log_view.scroll_active or not log_view.scroll_following:
 		_fail(battle, previous_state, "battle log was not configured for manual scrolling")
 		return
 	if str(battle.call("_waiting_text")) != "Waiting for FOEMON...":

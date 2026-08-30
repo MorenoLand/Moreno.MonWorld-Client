@@ -39,6 +39,7 @@ var server_dialogue_sequence: int = 0
 var server_dialogue_action_type: int = -1
 var server_dialogue_detail: PackedByteArray = PackedByteArray()
 var dialogue_string_vars: Dictionary = {}
+var trainer_battle_dialogue_pending: bool = false
 var connected_world_generation: int = 0
 var removed_npc_entities: Dictionary = {}
 var npc_entity_maps: Dictionary = {}
@@ -593,8 +594,12 @@ func _sync_map_entities() -> void:
 	map_view.set_world_entities(players, selected_character_id)
 
 func _on_battle_event(value: Dictionary) -> void:
-	if str(value.get("type", "")) == "presence":
-		_sync_map_entities()
+	match str(value.get("type", "")):
+		"field_state":
+			var battle_value: Variant = value.get("state", {})
+			trainer_battle_dialogue_pending = bool((battle_value as Dictionary).get("trainer", false)) if battle_value is Dictionary else false
+		"presence":
+			_sync_map_entities()
 
 func _on_follow_requested(party_index: int) -> void:
 	if map_view != null:
@@ -746,6 +751,7 @@ func _on_dialog_action_received(action: Dictionary) -> void:
 		server_dialogue_active = false
 		server_dialogue_action_type = -1
 		server_dialogue_detail = PackedByteArray()
+		trainer_battle_dialogue_pending = false
 		dialogue_overlay.close_dialogue()
 		map_view.set_dialogue_active(false)
 		map_view.restore_interaction_facing()
@@ -779,6 +785,9 @@ func _on_dialog_action_received(action: Dictionary) -> void:
 	else:
 		dialogue_overlay.show_choice(pages, choices, false, anchor)
 	dialogue_overlay.set_pokemon_preview(preview_species)
+	if preview_species <= 0 and trainer_battle_dialogue_pending:
+		var actor_sprite: Dictionary = map_view.dialogue_actor_sprite(entity_id)
+		dialogue_overlay.set_actor_preview(actor_sprite.get("texture") as Texture2D)
 	audio.play_effect("dialogue")
 
 func _dialogue_preview_species(action: Dictionary, pages: Array) -> int:
