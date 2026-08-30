@@ -36,6 +36,20 @@ func _run() -> void:
 	if dialogue.is_open():
 		_fail("dialogue did not close after the final page")
 		return
+	var previous_character: Dictionary = GameState.current_character.duplicate(true)
+	var world: Control = load("res://scripts/world/world.gd").new()
+	GameState.current_character = {"name": "KANTO", "rival_sex": 0}
+	var resolved: Array = world.call("_resolve_dialogue_pages", ["{01}'s house", "{06}'s house", "{RIVAL}'s house"])
+	if resolved != ["KANTO's house", "GREEN's house", "GREEN's house"]:
+		_fail("FireRed rival placeholders did not resolve to the male default")
+		return
+	GameState.current_character = {"name": "KANTO", "rival_name": "BLUE", "rival_sex": 1}
+	resolved = world.call("_resolve_dialogue_pages", ["{01}'s house", "{06}'s house", "{RIVAL}'s house"])
+	if resolved != ["KANTO's house", "BLUE's house", "BLUE's house"]:
+		_fail("FireRed rival placeholders did not preserve the stored rival name")
+		return
+	GameState.current_character = previous_character
+	world.free()
 	dialogue.free()
 	quit(0)
 

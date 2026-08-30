@@ -780,8 +780,8 @@ func _dialogue_placeholder_values() -> Dictionary:
 		string_1 = "POKEMON"
 	var rival_name: String = str(GameState.current_character.get("rival_name", "")).strip_edges()
 	if rival_name.is_empty():
-		rival_name = "GARY"
-	var values: Dictionary = {"00": str(vars.get("00", "")), "01": character_name, "02": string_1, "03": string_2, "04": string_3, "05": "KUN", "06": region_name, "07": version_name, "08": "MAGMA", "09": "AQUA", "0A": "MAXIE", "0B": "ARCHIE", "0C": "GROUDON", "0D": "KYOGRE", "PLAYER": character_name, "PLAYER_NAME": character_name, "STRING_VAR_1": string_1, "STRING_VAR_2": string_2, "STRING_VAR_3": string_3, "STR_VAR_1": string_1, "STR_VAR_2": string_2, "STR_VAR_3": string_3, "RIVAL": rival_name, "RIVAL_NAME": rival_name, "KUN": "KUN", "CHAN": "CHAN", "VERSION": version_name, "DYNAMIC": "", "CONTROL": ""}
+		rival_name = "RED" if int(GameState.current_character.get("rival_sex", 0)) == 1 else "GREEN"
+	var values: Dictionary = {"00": str(vars.get("00", "")), "01": character_name, "02": string_1, "03": string_2, "04": string_3, "05": "KUN", "06": rival_name, "07": version_name, "08": "MAGMA", "09": "AQUA", "0A": "MAXIE", "0B": "ARCHIE", "0C": "GROUDON", "0D": "KYOGRE", "PLAYER": character_name, "PLAYER_NAME": character_name, "STRING_VAR_1": string_1, "STRING_VAR_2": string_2, "STRING_VAR_3": string_3, "STR_VAR_1": string_1, "STR_VAR_2": string_2, "STR_VAR_3": string_3, "RIVAL": rival_name, "RIVAL_NAME": rival_name, "REGION": region_name, "KUN": "KUN", "CHAN": "CHAN", "VERSION": version_name, "DYNAMIC": "", "CONTROL": ""}
 	return values
 
 func _dialogue_pokemon_name(value: Variant) -> String:
