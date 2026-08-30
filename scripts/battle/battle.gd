@@ -22,7 +22,10 @@ var opponent_sprite: TextureRect
 var player_sprite: TextureRect
 var effects_layer: Control
 var hp_tweens: Dictionary = {}
+var move_hp_tweens: Array[Tween] = []
 var move_tween: Tween
+var move_animation_active: bool = false
+var move_effects_pending: int = 0
 var hp_tween_delay: float = 0.0
 var battle_event_queue: Array[Dictionary] = []
 var battle_event_busy: bool = false
@@ -329,6 +332,9 @@ func _update_mon_card(name_label: Label, level_label: Label, hp_bar: ProgressBar
 			hp_bar.set_meta("target_hp", target_hp)
 			var tween: Tween = create_tween()
 			hp_tweens[tween_key] = tween
+			if move_animation_active:
+				move_hp_tweens.append(tween)
+				tween.finished.connect(_on_move_hp_tween_finished.bind(tween))
 			if hp_tween_delay > 0.0:
 				tween.tween_interval(hp_tween_delay)
 			tween.tween_method(_set_hp_display.bind(hp_bar, hp_label, max_hp), float(hp_bar.value), target_hp, 0.5).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
@@ -341,6 +347,10 @@ func _set_hp_display(value: float, hp_bar: ProgressBar, hp_label: Label, max_hp:
 	var shown_hp: int = clampi(roundi(value), 0, max_hp)
 	hp_bar.value = value
 	hp_label.text = "%d / %d HP" % [shown_hp, max_hp]
+
+func _on_move_hp_tween_finished(tween: Tween) -> void:
+	move_hp_tweens.erase(tween)
+	_try_finish_move_sequence()
 
 func _update_sprite(sprite: TextureRect, mon: Dictionary, back: bool) -> void:
 	var species_id: int = int(mon.get("species", mon.get("species_id", mon.get("dex_id", 0))))
@@ -618,6 +628,9 @@ func _battle_entity_name(entity_id: int) -> String:
 	return "Pokemon"
 
 func _animate_move(event: Dictionary, next_state: Dictionary) -> void:
+	move_animation_active = true
+	move_effects_pending = 0
+	move_hp_tweens.clear()
 	var source_entity: int = int(event.get("source_entity", 0))
 	var attacker: TextureRect = _sprite_for_entity(source_entity)
 	var target_entity: int = 0
@@ -636,7 +649,7 @@ func _animate_move(event: Dictionary, next_state: Dictionary) -> void:
 	if defender == null or defender == attacker:
 		defender = opponent_sprite if attacker == player_sprite else player_sprite
 	if attacker == null or defender == null:
-		_finish_move_event.call_deferred()
+		_finish_move_sequence.call_deferred()
 		return
 	attacker.modulate = Color.WHITE
 	defender.modulate = Color.WHITE
@@ -665,7 +678,7 @@ func _animate_move(event: Dictionary, next_state: Dictionary) -> void:
 	if contact:
 		move_tween.tween_property(attacker, "position", base_position, 0.2).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN_OUT)
 	move_tween.tween_callback(_finish_move_animation.bind(attacker, base_position, defender, event))
-	move_tween.tween_callback(_finish_move_event)
+	move_tween.tween_callback(_finish_move_sequence)
 
 func _apply_move_hit_state(next_state: Dictionary, event: Dictionary) -> void:
 	if not next_state.is_empty():
@@ -761,6 +774,7 @@ func _spawn_move_effect(attacker: TextureRect, target: TextureRect, plan: Dictio
 		var sheet: Dictionary = GameState.content.battle_animation_sheet(int(spawn.get("tag", 0)))
 		if not bool(sheet.get("ok", false)):
 			continue
+		move_effects_pending += 1
 		var delay: float = float(spawn.get("delay", 0)) / 60.0
 		var tween: Tween = create_tween()
 		if delay > 0.0:
@@ -769,9 +783,11 @@ func _spawn_move_effect(attacker: TextureRect, target: TextureRect, plan: Dictio
 
 func _create_battle_effect(attacker: TextureRect, target: TextureRect, spawn: Dictionary, sheet: Dictionary) -> void:
 	if effects_layer == null:
+		_finish_battle_effect(null)
 		return
 	var frames: Array = sheet.get("frames", [])
 	if frames.is_empty():
+		_finish_battle_effect(null)
 		return
 	var effect := TextureRect.new()
 	effect.texture = frames[0] as Texture2D
@@ -807,7 +823,13 @@ func _create_battle_effect(attacker: TextureRect, target: TextureRect, spawn: Di
 		effect.scale = Vector2(0.65, 0.65)
 		motion.tween_property(effect, "scale", Vector2(1.2, 1.2), lifetime * 0.45).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
 	motion.parallel().tween_property(effect, "modulate", Color(1.0, 1.0, 1.0, 0.0), lifetime).set_delay(lifetime * 0.55)
-	motion.tween_callback(effect.queue_free)
+	motion.tween_callback(_finish_battle_effect.bind(effect))
+
+func _finish_battle_effect(effect: TextureRect) -> void:
+	if effect != null and is_instance_valid(effect):
+		effect.queue_free()
+	move_effects_pending = maxi(0, move_effects_pending - 1)
+	_try_finish_move_sequence()
 
 func _set_effect_frame(value: float, effect: TextureRect, frames: Array) -> void:
 	if effect == null or not is_instance_valid(effect) or frames.is_empty():
@@ -938,6 +960,16 @@ func _finish_move_event() -> void:
 	move_tween = null
 	battle_event_busy = false
 	_process_battle_event_queue()
+
+func _finish_move_sequence() -> void:
+	move_tween = null
+	move_animation_active = false
+	_try_finish_move_sequence()
+
+func _try_finish_move_sequence() -> void:
+	if move_animation_active or move_effects_pending > 0 or not move_hp_tweens.is_empty():
+		return
+	_finish_move_event()
 
 func _apply_battle_event(value: Dictionary) -> void:
 	var event_type: String = str(value.get("type", "update"))
