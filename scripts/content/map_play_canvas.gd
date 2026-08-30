@@ -12,6 +12,7 @@ const CAMERA_MAX_CELLS_Y: int = 20
 const MAX_TILE_SCALE: float = 4.0
 const REFERENCE_VIEWPORT_SIZE: Vector2 = Vector2(1280.0, 720.0)
 const NORMAL_STEP_DURATION: float = 0.17
+const PLAYER_WALK_ANIMATION_RATE: float = 0.9
 const ANIMATION_FRAME_INTERVAL: float = 0.125
 const DOOR_ANIMATION_DURATION: float = 16.0 / 60.0
 const DOOR_TRAVERSAL_DURATION: float = 44.0 / 60.0
@@ -1331,7 +1332,7 @@ func _update_player_texture() -> void:
 		return
 	var frame_step: int = 0
 	if movement_active and movement_duration > 0.0:
-		frame_step = int(floorf(clampf(movement_elapsed / movement_duration, 0.0, 0.999) * 4.0))
+		frame_step = int(floorf(clampf(movement_elapsed / movement_duration, 0.0, 0.999) * 4.0 * PLAYER_WALK_ANIMATION_RATE))
 	var movement_key: int = 1 if movement_active and movement_animation_active else 0
 	var texture_key: String = "%d:%d:%d" % [player_facing, movement_key, frame_step]
 	if player_texture != null and player_texture_key == texture_key:
