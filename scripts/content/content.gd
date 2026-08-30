@@ -13,6 +13,8 @@ const ITEM_NAME_LENGTH: int = 14
 const ITEM_RECORD_ID_OFFSET: int = 14
 const ITEM_TABLE_MIN_RECORDS: int = 300
 const ITEM_TABLE_MAX_RECORDS: int = 512
+const SPECIES_NAME_LENGTH: int = 11
+const SPECIES_TABLE_MAX_RECORDS: int = 512
 const GBA_TITLE_OFFSET: int = 0xA0
 const GBA_TITLE_LENGTH: int = 12
 const GBA_GAME_CODE_OFFSET: int = 0xAC
@@ -68,6 +70,8 @@ var battle_table_cache: Dictionary = {}
 var battle_tables_scanned: bool = false
 var battle_sprite_cache: Dictionary = {}
 var battle_name_cache: Dictionary = {}
+var battle_species_catalog: Dictionary = {}
+var battle_species_catalog_loaded: bool = false
 var battle_move_name_cache: Dictionary = {}
 var battle_item_info_cache: Dictionary = {}
 var battle_item_table_cache: Dictionary = {}
@@ -382,12 +386,50 @@ func battle_pokemon_name(species_id: int) -> String:
 	var cache_key: String = str(species_id)
 	if battle_name_cache.has(cache_key):
 		return str(battle_name_cache[cache_key])
+	var internal_id: int = _battle_internal_species_id(species_id)
+	var names: Dictionary = _battle_species_catalog()
+	var name: String = str(names.get(str(internal_id), "")).strip_edges()
+	if not name.is_empty():
+		battle_name_cache[cache_key] = name
+		return name
 	var tables: Dictionary = _battle_rom_tables()
 	if bool(tables.get("pending", false)):
 		return "POKEMON #%d" % species_id
-	var name: String = _battle_fixed_name(int(tables.get("species_name_table", -1)), _battle_internal_species_id(species_id), 11, "POKEMON #%d" % species_id)
+	name = _battle_fixed_name(int(tables.get("species_name_table", -1)), internal_id, SPECIES_NAME_LENGTH, "")
+	if name.is_empty():
+		return "POKEMON #%d" % species_id
 	battle_name_cache[cache_key] = name
 	return name
+
+func _battle_species_catalog() -> Dictionary:
+	if battle_species_catalog_loaded:
+		return battle_species_catalog
+	if rom_data.is_empty():
+		return {}
+	if not rom_sha1.is_empty():
+		var cached: Dictionary = OpenMMOStorage.read_strings_cache(string_catalog_id(), "pokemon-%s" % rom_sha1)
+		var cached_names: Variant = cached.get("names", null)
+		if str(cached.get("rom_sha1", "")) == rom_sha1 and int(cached.get("schema_version", 0)) == 1 and cached_names is Dictionary:
+			battle_species_catalog = cached_names as Dictionary
+			battle_species_catalog_loaded = true
+			return battle_species_catalog
+	var tables: Dictionary = _battle_rom_tables()
+	if bool(tables.get("pending", false)):
+		return {}
+	var table_offset: int = int(tables.get("species_name_table", -1))
+	if table_offset < 0 or not _valid_range(table_offset + SPECIES_NAME_LENGTH, SPECIES_NAME_LENGTH):
+		battle_species_catalog_loaded = true
+		return {}
+	var names: Dictionary = {}
+	for internal_id in range(1, SPECIES_TABLE_MAX_RECORDS):
+		var name: String = _battle_fixed_name(table_offset, internal_id, SPECIES_NAME_LENGTH, "")
+		if not name.is_empty() and name.find("{0x") < 0:
+			names[str(internal_id)] = name
+	battle_species_catalog = names
+	battle_species_catalog_loaded = true
+	if not rom_sha1.is_empty():
+		OpenMMOStorage.write_strings_cache(string_catalog_id(), "pokemon-%s" % rom_sha1, {"schema_version": 1, "content_id": content_id(), "catalog_id": string_catalog_id(), "rom_sha1": rom_sha1, "record_size": SPECIES_NAME_LENGTH, "names": names})
+	return battle_species_catalog
 
 func battle_move_name(move_id: int) -> String:
 	if move_id <= 0:

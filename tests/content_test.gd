@@ -16,7 +16,8 @@ func _init() -> void:
 	var item_content: OpenMMOContent = OpenMMOContent.new()
 	var item_table_offset: int = 0x100
 	var item_count: int = 375
-	item_content.rom_data.resize(item_table_offset + item_count * 44)
+	var species_table_offset: int = item_table_offset + item_count * 44 + 0x100
+	item_content.rom_data.resize(species_table_offset + 512 * 11)
 	for internal_id in range(item_count):
 		var record_offset: int = item_table_offset + internal_id * 44
 		item_content.rom_data.encode_u16(record_offset + 14, internal_id)
@@ -33,12 +34,22 @@ func _init() -> void:
 	for position in range(parcel_name.size()):
 		item_content.rom_data[parcel_offset + position] = parcel_name[position]
 	item_content.rom_data[parcel_offset + 26] = 2
+	var charmander_name: PackedByteArray = PackedByteArray([0xBD, 0xC2, 0xBB, 0xCC, 0xC7, 0xBB, 0xC8, 0xBE, 0xBF, 0xCC, 0xFF])
+	var charmander_offset: int = species_table_offset + 4 * 11
+	for position in range(charmander_name.size()):
+		item_content.rom_data[charmander_offset + position] = charmander_name[position]
+	var treecko_name: PackedByteArray = PackedByteArray([0xCE, 0xCC, 0xBF, 0xBF, 0xBD, 0xC5, 0xC9, 0xFF])
+	var treecko_offset: int = species_table_offset + 277 * 11
+	for position in range(treecko_name.size()):
+		item_content.rom_data[treecko_offset + position] = treecko_name[position]
 	item_content.battle_tables_scanned = true
-	item_content.battle_table_cache = {"item_table": item_table_offset}
+	item_content.battle_table_cache = {"item_table": item_table_offset, "species_name_table": species_table_offset}
 	var potion_info: Dictionary = item_content.battle_item_info(5001)
 	var parcel_info: Dictionary = item_content.battle_item_info(5349)
 	var last_info: Dictionary = item_content.battle_item_info(5374)
-	if str(potion_info.get("name", "")) != "POTION" or str(parcel_info.get("name", "")) != "OAK'S PARCEL" or str(parcel_info.get("category", "")) != "key_item" or str(last_info.get("name", "")) != "A":
+	var charmander: String = item_content.battle_pokemon_name(4)
+	var treecko: String = item_content.battle_pokemon_name(252)
+	if str(potion_info.get("name", "")) != "POTION" or str(parcel_info.get("name", "")) != "OAK'S PARCEL" or str(parcel_info.get("category", "")) != "key_item" or str(last_info.get("name", "")) != "A" or charmander != "CHARMANDER" or treecko != "TREECKO":
 		push_error("ROM item table catalog did not resolve every item through the dynamic reader")
 		quit(1)
 		return
