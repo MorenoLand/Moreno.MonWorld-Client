@@ -659,6 +659,9 @@ func _animate_move(event: Dictionary, next_state: Dictionary) -> void:
 		direction = 1.0 if attacker == player_sprite else -1.0
 	var move_id: int = int(event.get("source_move", event.get("move_id", 0)))
 	var move_info: Dictionary = GameState.content.battle_move_info(move_id) if GameState.content != null else {}
+	if _is_attacker_motion_move(move_id, move_info):
+		_animate_attacker_motion(attacker, base_position, direction, defender, next_state, event)
+		return
 	var contact: bool = (int(move_info.get("flags", 0)) & 1) != 0
 	var damaging: bool = int(move_info.get("power", 0)) > 0
 	var animation_plan: Dictionary = GameState.content.battle_move_animation_plan(move_id) if GameState.content != null else {"ok": false}
@@ -677,6 +680,19 @@ func _animate_move(event: Dictionary, next_state: Dictionary) -> void:
 	move_tween.tween_interval(maxf(0.52, duration - hit_delay))
 	if contact:
 		move_tween.tween_property(attacker, "position", base_position, 0.2).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN_OUT)
+	move_tween.tween_callback(_finish_move_animation.bind(attacker, base_position, defender, event))
+	move_tween.tween_callback(_finish_move_sequence)
+
+func _is_attacker_motion_move(move_id: int, move_info: Dictionary) -> bool:
+	var normalized_name: String = str(move_info.get("name", "")).replace(" ", "").replace("_", "").to_upper()
+	return move_id == 39 or normalized_name == "TAILWHIP"
+
+func _animate_attacker_motion(attacker: TextureRect, base_position: Vector2, direction: float, defender: TextureRect, next_state: Dictionary, event: Dictionary) -> void:
+	var offsets: Array[Vector2] = [Vector2(10.0 * direction, -3.0), Vector2(-8.0 * direction, -6.0), Vector2(-12.0 * direction, 1.0), Vector2(6.0 * direction, 5.0), Vector2(10.0 * direction, -3.0), Vector2(-8.0 * direction, -6.0), Vector2(-12.0 * direction, 1.0), Vector2(6.0 * direction, 5.0), Vector2.ZERO]
+	move_tween = create_tween()
+	for offset in offsets:
+		move_tween.tween_property(attacker, "position", base_position + offset, 0.08).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	move_tween.tween_callback(_apply_move_hit_state.bind(next_state, event))
 	move_tween.tween_callback(_finish_move_animation.bind(attacker, base_position, defender, event))
 	move_tween.tween_callback(_finish_move_sequence)
 

@@ -11,6 +11,9 @@ func _run() -> void:
 	GameState.battle_state = initial.duplicate(true)
 	var battle: Control = BATTLE_SCRIPT.new()
 	get_tree().root.add_child(battle)
+	if not bool(battle.call("_is_attacker_motion_move", 39, {"name": "TAILWHIP"})):
+		_fail(battle, previous_state, "Tail Whip was not classified as attacker-only motion")
+		return
 	var player_hit: Dictionary = {"type": "move_event", "event": {"source_entity": -10, "source_move": 33, "targets": [{"entity_id": -20, "events": [{"current_hp": 14}]}]}, "state": _state(20, 14)}
 	var opponent_hit: Dictionary = {"type": "move_event", "event": {"source_entity": -20, "source_move": 33, "targets": [{"entity_id": -10, "events": [{"current_hp": 15}]}]}, "state": _state(15, 14)}
 	battle.call("_on_battle_event", player_hit)
