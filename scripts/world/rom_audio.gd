@@ -643,6 +643,8 @@ func _render_event(mix: PackedFloat32Array, frame_count: int, data: PackedByteAr
 		else:
 			var frequency_fixed: int = _midi_key_to_freq(wave, note_key, fine_adjust)
 			phase_step = float(frequency_fixed) * M4A_DIV_FREQ / 8388608.0
+	if (type & 0x0F) == 4 or (type & 0x0F) == 12:
+		noise_state = _noise_state_after(noise_state, maxi(mix_start - start_frame, 0))
 	phase = float(mix_start - start_frame) * phase_step
 	for frame in range(mix_start, mix_end):
 		var local_frame: int = frame - start_frame
@@ -656,6 +658,13 @@ func _render_event(mix: PackedFloat32Array, frame_count: int, data: PackedByteAr
 		phase += phase_step
 
 var _voice_sample_state: int = 0x7FFF
+
+func _noise_state_after(state: int, sample_count: int) -> int:
+	var current: int = state & 0x7FFF
+	for _index in range(sample_count):
+		var bit: int = (current ^ (current >> 1)) & 1
+		current = (current >> 1) | (bit << 14)
+	return current
 
 func _voice_sample(data: PackedByteArray, tone: Dictionary, type: int, phase: float, wave: Dictionary, noise_state: int) -> float:
 	var base_type: int = type & 0x0F

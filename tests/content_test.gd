@@ -312,7 +312,7 @@ func _init() -> void:
 			quit(1)
 			return
 		var stream: AudioStreamWAV = rom_audio.build_song_stream(content, int(song_id)) as AudioStreamWAV
-		if stream == null or stream.data.is_empty() or stream.mix_rate != 22050 or not stream.stereo:
+		if stream == null or stream.data.is_empty() or stream.mix_rate != 13379 or not stream.stereo:
 			push_error("ROM audio song %d did not produce a stereo PCM stream" % song_id)
 			quit(1)
 			return
