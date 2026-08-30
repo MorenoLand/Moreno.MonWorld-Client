@@ -188,6 +188,8 @@ func select_character(character_id: int) -> bool:
 	for character_value in characters:
 		if character_value is Dictionary and int(character_value.get("id", 0)) == character_id:
 			current_character = (character_value as Dictionary).duplicate(true)
+			if current_character.get("bag", []) is Array:
+				current_character["bag"] = _normalise_bag(current_character.get("bag", []))
 			break
 	active_map_key = ""
 	pending_map_load.clear()
@@ -743,7 +745,7 @@ func _apply_local_player_state(state: Dictionary) -> void:
 
 func _apply_character_updates(updates: Dictionary) -> void:
 	for key in updates:
-		current_character[key] = updates[key]
+		current_character[key] = _normalise_bag(updates[key]) if key == "bag" and updates[key] is Array else updates[key]
 	_update_character_list_entry()
 	character_state_changed.emit(current_character.duplicate(true))
 
@@ -814,17 +816,51 @@ func _apply_bag_stack(packet: Dictionary) -> void:
 	character_state_changed.emit(current_character.duplicate(true))
 
 func _bag_stack_from_entry(entry: Dictionary) -> Dictionary:
-	var item_id: int = int(entry.get("front_sprite_id", 0))
-	if item_id < 5000:
+	var object_id: int = int(entry.get("entity_id", 0))
+	var item_id: int = content.battle_item_id(entry) if content != null else _bag_item_id_from_value(entry)
+	if (object_id & 0xFFFF) != 0x5000 or item_id <= 0:
 		return {}
-	var stack: Dictionary = content.battle_item_info(item_id).duplicate(true) if content != null else {"item_id": item_id, "name": "Item", "category": "items", "price": 0}
-	stack["object_id"] = int(entry.get("entity_id", 0))
+	var stack: Dictionary = content.battle_item_info(item_id).duplicate(true) if content != null else {"item_id": item_id, "internal_id": item_id, "name": "", "category": "items", "price": 0}
+	stack["object_id"] = object_id
 	stack["quantity"] = maxi(0, int(entry.get("back_sprite_id", 0)))
 	return stack
 
 func _current_bag() -> Array:
 	var value: Variant = current_character.get("bag", [])
-	return (value as Array).duplicate(true) if value is Array else []
+	return _normalise_bag(value) if value is Array else []
+
+func _normalise_bag(value: Variant) -> Array:
+	if not value is Array:
+		return []
+	var bag: Array = (value as Array).duplicate(true)
+	for index in bag.size():
+		if bag[index] is Dictionary:
+			bag[index] = _normalise_bag_entry(bag[index] as Dictionary)
+	return bag
+
+func _normalise_bag_entry(entry: Dictionary) -> Dictionary:
+	var item: Dictionary = entry.duplicate(true)
+	var item_id: int = content.battle_item_id(item) if content != null else _bag_item_id_from_value(item)
+	if item_id <= 0:
+		return item
+	item["item_id"] = item_id
+	if content != null:
+		var info: Dictionary = content.battle_item_info(item_id)
+		for key in ["internal_id", "name", "price", "pocket", "category"]:
+			if info.has(key):
+				item[key] = info[key]
+	return item
+
+func _bag_item_id_from_value(value: Variant) -> int:
+	if not value is Dictionary:
+		return int(value)
+	var item: Dictionary = value
+	for key in ["item_id", "front_sprite_id", "id", "internal_id"]:
+		var candidate: int = int(item.get(key, 0))
+		if candidate > 0:
+			return candidate
+	var object_id: int = int(item.get("object_id", item.get("entity_id", 0)))
+	return object_id >> 16 if (object_id & 0xFFFF) == 0x5000 else 0
 
 func _merge_bag_stack(bag: Array, stack: Dictionary) -> void:
 	var item_id: int = int(stack.get("item_id", 0))

@@ -445,19 +445,46 @@ func battle_move_name(move_id: int) -> String:
 	battle_move_name_cache[cache_key] = name
 	return name
 
+func battle_item_id(value: Variant) -> int:
+	if value is Dictionary:
+		var item: Dictionary = value
+		for key in ["item_id", "front_sprite_id", "id"]:
+			var candidate: int = int(item.get(key, 0))
+			if candidate > 0:
+				return candidate
+		var internal_id: int = int(item.get("internal_id", 0))
+		if internal_id > 0:
+			return internal_id
+		var object_id: int = int(item.get("object_id", item.get("entity_id", 0)))
+		if (object_id & 0xFFFF) == 0x5000:
+			return object_id >> 16
+	elif value is int or value is float:
+		return int(value)
+	return 0
+
 func battle_item_info(item_id: int) -> Dictionary:
 	var cache_key: String = str(item_id)
 	if battle_item_info_cache.has(cache_key):
 		return battle_item_info_cache[cache_key]
 	var internal_id: int = item_id - 5000 if item_id >= 5000 else item_id
-	var info: Dictionary = {"item_id": item_id, "internal_id": internal_id, "name": "Item", "price": 0, "pocket": 0, "category": "items"}
+	var info: Dictionary = {"item_id": item_id, "internal_id": internal_id, "name": "", "price": 0, "pocket": 0, "category": "items"}
 	var catalog: Dictionary = _battle_item_catalog()
-	var cached_info: Variant = catalog.get(str(internal_id), null)
-	if cached_info is Dictionary:
+	var cached_info: Variant = catalog.get(str(internal_id), catalog.get(str(item_id), null))
+	if cached_info is Dictionary and not str((cached_info as Dictionary).get("name", "")).strip_edges().is_empty() and str((cached_info as Dictionary).get("name", "")).strip_edges().to_lower() != "item":
 		info = (cached_info as Dictionary).duplicate(true)
 		info["item_id"] = item_id
 		info["internal_id"] = internal_id
 		battle_item_info_cache[cache_key] = info
+		return info
+	var table: Dictionary = _battle_item_table()
+	var table_offset: int = int(table.get("offset", -1))
+	var item_count: int = int(table.get("count", 0))
+	if internal_id >= 0 and internal_id < item_count and table_offset >= 0 and _item_table_record_matches_index(table_offset, internal_id):
+		info = _battle_item_info_from_record(table_offset, internal_id)
+		info["item_id"] = item_id
+		info["internal_id"] = internal_id
+		if not str(info.get("name", "")).strip_edges().is_empty():
+			battle_item_info_cache[cache_key] = info
 	return info
 
 func _battle_item_catalog() -> Dictionary:
@@ -480,6 +507,8 @@ func _battle_item_catalog() -> Dictionary:
 		return {}
 	var catalog: Dictionary = {}
 	for internal_id in range(item_count):
+		if not _item_table_record_matches_index(table_offset, internal_id):
+			continue
 		var info: Dictionary = _battle_item_info_from_record(table_offset, internal_id)
 		if not str(info.get("name", "")).strip_edges().is_empty():
 			catalog[str(internal_id)] = info
@@ -526,8 +555,7 @@ func _valid_item_table_candidate(table_offset: int) -> bool:
 	if table_offset < 0 or table_offset % 4 != 0:
 		return false
 	for internal_id in [0, 1, 2, 3, 10, 50, 100, 200]:
-		var offset: int = table_offset + int(internal_id) * ITEM_RECORD_SIZE
-		if not _valid_range(offset, ITEM_RECORD_SIZE) or _read_u16(offset + ITEM_RECORD_ID_OFFSET) != int(internal_id):
+		if not _item_table_record_matches_index(table_offset, int(internal_id)):
 			return false
 	var item_count: int = _item_table_count(table_offset, ITEM_TABLE_MIN_RECORDS)
 	if item_count <= 0:
@@ -542,11 +570,23 @@ func _item_table_count(table_offset: int, minimum_count: int = 0) -> int:
 		return 0
 	var item_count: int = 0
 	while item_count < ITEM_TABLE_MAX_RECORDS:
-		var offset: int = table_offset + item_count * ITEM_RECORD_SIZE
-		if not _valid_range(offset, ITEM_RECORD_SIZE) or _read_u16(offset + ITEM_RECORD_ID_OFFSET) != item_count:
+		if not _item_table_record_matches_index(table_offset, item_count):
 			break
 		item_count += 1
 	return item_count if item_count >= minimum_count else 0
+
+func _item_table_record_matches_index(table_offset: int, internal_id: int) -> bool:
+	var offset: int = table_offset + internal_id * ITEM_RECORD_SIZE
+	if not _valid_range(offset, ITEM_RECORD_SIZE):
+		return false
+	if _read_u16(offset + ITEM_RECORD_ID_OFFSET) == internal_id:
+		return true
+	if internal_id <= 0 or _read_u16(offset + ITEM_RECORD_ID_OFFSET) != 0:
+		return false
+	for position in range(ITEM_RECORD_SIZE):
+		if int(rom_data[offset + position]) != int(rom_data[table_offset + position]):
+			return false
+	return true
 
 func _battle_item_info_from_record(table_offset: int, internal_id: int) -> Dictionary:
 	var offset: int = table_offset + internal_id * ITEM_RECORD_SIZE

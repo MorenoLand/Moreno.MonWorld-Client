@@ -690,7 +690,7 @@ func _battle_bag() -> Array:
 	return items
 
 func _battle_item_id(item: Dictionary) -> int:
-	return int(item.get("item_id", item.get("id", item.get("front_sprite_id", 0))))
+	return GameState.content.battle_item_id(item) if GameState.content != null else int(item.get("item_id", item.get("id", item.get("front_sprite_id", item.get("internal_id", 0)))))
 
 func _battle_item_name(item: Dictionary, item_id: int) -> String:
 	var item_name: String = str(item.get("name", item.get("item_name", ""))).strip_edges()

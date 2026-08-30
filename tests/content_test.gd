@@ -47,9 +47,10 @@ func _init() -> void:
 	var potion_info: Dictionary = item_content.battle_item_info(5001)
 	var parcel_info: Dictionary = item_content.battle_item_info(5349)
 	var last_info: Dictionary = item_content.battle_item_info(5374)
+	var parcel_entry: Dictionary = {"entity_id": (5004 << 16) | 0x5000, "front_sprite_id": 5349, "back_sprite_id": 1}
 	var charmander: String = item_content.battle_pokemon_name(4)
 	var treecko: String = item_content.battle_pokemon_name(252)
-	if str(potion_info.get("name", "")) != "POTION" or str(parcel_info.get("name", "")) != "OAK'S PARCEL" or str(parcel_info.get("category", "")) != "key_item" or str(last_info.get("name", "")) != "A" or charmander != "CHARMANDER" or treecko != "TREECKO":
+	if item_content.battle_item_id(parcel_entry) != 5349 or str(potion_info.get("name", "")) != "POTION" or str(parcel_info.get("name", "")) != "OAK'S PARCEL" or str(parcel_info.get("category", "")) != "key_item" or str(last_info.get("name", "")) != "A" or charmander != "CHARMANDER" or treecko != "TREECKO":
 		push_error("ROM item table catalog did not resolve every item through the dynamic reader")
 		quit(1)
 		return
@@ -73,6 +74,11 @@ func _init() -> void:
 	var content: OpenMMOContent = result.get("content") as OpenMMOContent
 	if str(content.source_profile.get("id", "")) != "pokemon-fire-red":
 		push_error("FireRed ROM did not select the FireRed source profile")
+		quit(1)
+		return
+	var live_parcel: Dictionary = content.battle_item_info(349)
+	if str(live_parcel.get("name", "")) != "OAK'S PARCEL" or str(live_parcel.get("category", "")) != "key_item":
+		push_error("FireRed item catalog did not resolve Oak's Parcel from the selected ROM")
 		quit(1)
 		return
 	for door_frame_index in range(1, 4):
@@ -453,10 +459,46 @@ func _init() -> void:
 		var from_position: Vector2i = door_position - vector
 		var door_movement: Dictionary = content.movement_result("pallet-town", from_position.x, from_position.y, direction)
 		if bool(door_movement.get("ok", false)) and int(door_movement.get("x", -1)) == door_position.x and int(door_movement.get("y", -1)) == door_position.y:
+			if not bool(door_movement.get("door", false)):
+				push_error("Pallet Town door warp was not identified as a door traversal")
+				quit(1)
+				return
 			door_entry_found = true
 			break
 	if not door_entry_found:
 		push_error("Pallet Town door warp could not be entered from an adjacent tile")
+		quit(1)
+		return
+	var non_door_warp_found: bool = false
+	for warp_map_id in ["pallet-oaks-lab", "viridian-pokemon-center-1f", "viridian-pokemon-center-2f"]:
+		var warp_map: Dictionary = content.prepare_map(warp_map_id, false)
+		for warp_value in warp_map.get("warps", []) as Array:
+			if not warp_value is Dictionary:
+				continue
+			var interior_warp: Dictionary = warp_value
+			var warp_x: int = int(interior_warp.get("x", -1))
+			var warp_y: int = int(interior_warp.get("y", -1))
+			for direction in [1, 2, 3, 4]:
+				var vector: Vector2i = Vector2i.ZERO
+				match direction:
+					1:
+						vector = Vector2i(0, 1)
+					2:
+						vector = Vector2i(0, -1)
+					3:
+						vector = Vector2i(-1, 0)
+					4:
+						vector = Vector2i(1, 0)
+				var movement: Dictionary = content.movement_result(warp_map_id, warp_x - vector.x, warp_y - vector.y, direction)
+				if bool(movement.get("ok", false)) and int(movement.get("x", -1)) == warp_x and int(movement.get("y", -1)) == warp_y and not bool(movement.get("door", false)):
+					non_door_warp_found = true
+					break
+			if non_door_warp_found:
+				break
+		if non_door_warp_found:
+			break
+	if not non_door_warp_found:
+		push_error("interior non-door warp was incorrectly identified as a door traversal")
 		quit(1)
 		return
 	var provider: OpenMMOContentProvider = OpenMMOContentProvider.new()
