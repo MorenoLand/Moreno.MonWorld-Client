@@ -694,13 +694,13 @@ func _world_entity_index(entity_id: int) -> int:
 func _scripted_step_info(action: int) -> Dictionary:
 	match action:
 		0x00:
-			return {"direction": 1, "walk": false, "animate": false, "duration": 0.08}
+			return {"direction": 1, "walk": false, "animate": false, "duration": 0.12}
 		0x01:
-			return {"direction": 2, "walk": false, "animate": false, "duration": 0.08}
+			return {"direction": 2, "walk": false, "animate": false, "duration": 0.12}
 		0x02:
-			return {"direction": 3, "walk": false, "animate": false, "duration": 0.08}
+			return {"direction": 3, "walk": false, "animate": false, "duration": 0.12}
 		0x03:
-			return {"direction": 4, "walk": false, "animate": false, "duration": 0.08}
+			return {"direction": 4, "walk": false, "animate": false, "duration": 0.12}
 		0x10:
 			return {"direction": 1, "walk": true, "animate": true, "duration": 0.25}
 		0x11:
@@ -807,19 +807,25 @@ func _update_world_entity_texture(entity: Dictionary) -> void:
 	var frame_step: int = 0
 	if moving and float(entity.get("movement_duration", 0.0)) > 0.0:
 		frame_step = int(floorf(clampf(float(entity.get("movement_elapsed", 0.0)) / float(entity.get("movement_duration", 1.0)), 0.0, 0.999) * 4.0))
+	var movement_frame: int = frame_step if moving else -1
+	if int(entity.get("movement_frame", -2)) == movement_frame:
+		return
 	var sprite: Dictionary = content.render_facing_object_sprite(int(entity.get("graphics_id", 19)), int(entity.get("facing", 1)), moving, frame_step)
 	if bool(sprite.get("ok", false)):
 		entity["texture"] = sprite.get("texture")
 		entity["width"] = int(sprite.get("width", 0))
 		entity["height"] = int(sprite.get("height", 0))
+		entity["movement_frame"] = movement_frame
 
 func _process_world_entity_movements(delta: float) -> void:
+	var redraw_needed: bool = false
 	for index in world_entities.size():
 		if not world_entities[index] is Dictionary:
 			continue
 		var entity: Dictionary = (world_entities[index] as Dictionary).duplicate()
 		if not bool(entity.get("movement_active", false)):
 			continue
+		redraw_needed = true
 		var elapsed: float = float(entity.get("movement_elapsed", 0.0)) + delta
 		var duration: float = maxf(float(entity.get("movement_duration", NORMAL_STEP_DURATION)), 0.01)
 		if elapsed >= duration:
@@ -838,6 +844,8 @@ func _process_world_entity_movements(delta: float) -> void:
 			entity["movement_elapsed"] = elapsed
 			_update_world_entity_texture(entity)
 			world_entities[index] = entity
+	if redraw_needed:
+		queue_redraw()
 
 func _apply_map(result: Dictionary, reset_spawn: bool) -> void:
 	map_texture = result.get("texture", result.get("background_texture")) as Texture2D

@@ -100,17 +100,17 @@ func _build_ui() -> void:
 	stage_root.add_child(player_card)
 	opponent_sprite = _make_sprite()
 	opponent_sprite.anchor_left = 0.64
-	opponent_sprite.anchor_top = 0.18
+	opponent_sprite.anchor_top = 0.20
 	opponent_sprite.anchor_right = 0.94
-	opponent_sprite.anchor_bottom = 0.60
+	opponent_sprite.anchor_bottom = 0.62
 	opponent_sprite.pivot_offset = Vector2(130.0, 100.0)
 	opponent_sprite.z_index = 1
 	stage_root.add_child(opponent_sprite)
 	player_sprite = _make_sprite()
-	player_sprite.anchor_left = 0.15
-	player_sprite.anchor_top = 0.49
-	player_sprite.anchor_right = 0.45
-	player_sprite.anchor_bottom = 0.76
+	player_sprite.anchor_left = 0.12
+	player_sprite.anchor_top = 0.50
+	player_sprite.anchor_right = 0.48
+	player_sprite.anchor_bottom = 0.92
 	player_sprite.pivot_offset = Vector2(150.0, 110.0)
 	player_sprite.z_index = 1
 	stage_root.add_child(player_sprite)
@@ -135,9 +135,10 @@ func _build_ui() -> void:
 	log_panel.add_child(log_view)
 	var action_panel := PanelContainer.new()
 	action_panel.anchor_left = 0.025
-	action_panel.anchor_top = 0.77
+	action_panel.anchor_top = 0.74
 	action_panel.anchor_right = 0.535
 	action_panel.anchor_bottom = 0.97
+	action_panel.z_index = 3
 	action_panel.add_theme_stylebox_override("panel", _panel_style(Color(0.035, 0.055, 0.04, 0.94), Color("71866f"), 5, 1))
 	stage_root.add_child(action_panel)
 	action_box = VBoxContainer.new()
@@ -333,10 +334,10 @@ func _update_mon_card(name_label: Label, level_label: Label, hp_bar: ProgressBar
 			tween.tween_method(_set_hp_display.bind(hp_bar, hp_label, max_hp), float(hp_bar.value), target_hp, 0.5).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 		elif absf(float(hp_bar.value) - target_hp) <= 0.1:
 			hp_bar.value = target_hp
-	_set_hp_display(hp_bar, hp_label, max_hp, float(hp_bar.value))
+	_set_hp_display(float(hp_bar.value), hp_bar, hp_label, max_hp)
 	name_label.text = _battle_mon_name(mon, name_label == opponent_name_label)
 
-func _set_hp_display(hp_bar: ProgressBar, hp_label: Label, max_hp: int, value: float) -> void:
+func _set_hp_display(value: float, hp_bar: ProgressBar, hp_label: Label, max_hp: int) -> void:
 	var shown_hp: int = clampi(roundi(value), 0, max_hp)
 	hp_bar.value = value
 	hp_label.text = "%d / %d HP" % [shown_hp, max_hp]
@@ -616,11 +617,9 @@ func _battle_entity_name(entity_id: int) -> String:
 				return _battle_mon_name(mon_value as Dictionary, party_key == "opponent_party")
 	return "Pokemon"
 
-func _animate_move(event: Dictionary) -> void:
+func _animate_move(event: Dictionary, next_state: Dictionary) -> void:
 	var source_entity: int = int(event.get("source_entity", 0))
 	var attacker: TextureRect = _sprite_for_entity(source_entity)
-	if attacker == null:
-		attacker = player_sprite if _entity_in_party(source_entity, "player_party") else opponent_sprite
 	var target_entity: int = 0
 	var targets: Variant = event.get("targets", [])
 	if targets is Array:
@@ -630,6 +629,10 @@ func _animate_move(event: Dictionary) -> void:
 				if target_entity != 0:
 					break
 	var defender: TextureRect = _sprite_for_entity(target_entity)
+	if attacker == null and defender != null:
+		attacker = opponent_sprite if defender == player_sprite else player_sprite
+	if attacker == null:
+		attacker = player_sprite if _entity_in_party(source_entity, "player_party") else opponent_sprite
 	if defender == null or defender == attacker:
 		defender = opponent_sprite if attacker == player_sprite else player_sprite
 	if attacker == null or defender == null:
@@ -655,13 +658,75 @@ func _animate_move(event: Dictionary) -> void:
 		move_tween.tween_interval(0.08)
 	move_tween.tween_callback(_spawn_move_effect.bind(attacker, defender, animation_plan))
 	move_tween.tween_interval(maxf(0.0, hit_delay))
+	move_tween.tween_callback(_apply_move_hit_state.bind(next_state, event))
 	if damaging:
 		move_tween.tween_callback(_blink_sprite.bind(defender))
-	move_tween.tween_interval(maxf(0.12, duration - hit_delay))
+	move_tween.tween_interval(maxf(0.52, duration - hit_delay))
 	if contact:
 		move_tween.tween_property(attacker, "position", base_position, 0.2).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN_OUT)
 	move_tween.tween_callback(_finish_move_animation.bind(attacker, base_position, defender, event))
 	move_tween.tween_callback(_finish_move_event)
+
+func _apply_move_hit_state(next_state: Dictionary, event: Dictionary) -> void:
+	if not next_state.is_empty():
+		state = next_state.duplicate(true)
+	_apply_move_hp_events(event)
+	hp_tween_delay = 0.0
+	_render_state()
+
+func _apply_move_hp_events(event: Dictionary) -> void:
+	var source_entity: int = int(event.get("source_entity", 0))
+	var targets: Variant = event.get("targets", [])
+	if not targets is Array:
+		return
+	for target_value in targets as Array:
+		if not target_value is Dictionary:
+			continue
+		var target: Dictionary = target_value
+		var target_entity: int = int(target.get("entity_id", 0))
+		for event_value in target.get("events", []):
+			if not event_value is Dictionary or not (event_value as Dictionary).has("current_hp"):
+				continue
+			var current_hp: int = int((event_value as Dictionary).get("current_hp", 0))
+			if not _set_battle_entity_hp(target_entity, current_hp):
+				var target_party: String = "opponent_party" if _entity_in_party(source_entity, "player_party") else "player_party"
+				_set_active_battle_hp(target_party, current_hp)
+
+func _set_battle_entity_hp(entity_id: int, current_hp: int) -> bool:
+	if entity_id == 0:
+		return false
+	for party_key in ["player_party", "opponent_party"]:
+		var party_value: Variant = state.get(party_key, [])
+		if not party_value is Array:
+			continue
+		var party: Array = (party_value as Array).duplicate(true)
+		for index in range(party.size()):
+			if not party[index] is Dictionary or int((party[index] as Dictionary).get("entity_id", 0)) != entity_id:
+				continue
+			var mon: Dictionary = (party[index] as Dictionary).duplicate(true)
+			mon["current_hp"] = current_hp
+			mon["faint"] = current_hp <= 0
+			party[index] = mon
+			state[party_key] = party
+			return true
+	return false
+
+func _set_active_battle_hp(party_key: String, current_hp: int) -> void:
+	var party_value: Variant = state.get(party_key, [])
+	if not party_value is Array:
+		return
+	var active_key: String = "active_slot" if party_key == "player_party" else "opponent_active_slot"
+	var active_slot: int = int(state.get(active_key, -1))
+	var party: Array = (party_value as Array).duplicate(true)
+	for index in range(party.size()):
+		if not party[index] is Dictionary or int((party[index] as Dictionary).get("slot", -1)) != active_slot:
+			continue
+		var mon: Dictionary = (party[index] as Dictionary).duplicate(true)
+		mon["current_hp"] = current_hp
+		mon["faint"] = current_hp <= 0
+		party[index] = mon
+		state[party_key] = party
+		return
 
 func _blink_sprite(sprite: TextureRect) -> void:
 	if sprite == null:
@@ -878,11 +943,15 @@ func _apply_battle_event(value: Dictionary) -> void:
 	var event_type: String = str(value.get("type", "update"))
 	var event_state: Variant = value.get("state", null)
 	var move_event: Dictionary = {}
+	var move_state: Dictionary = {}
 	var switch_event: Dictionary = {}
+	var resolved_state: Dictionary = GameState.battle_state.duplicate(true)
 	if event_state is Dictionary:
-		state = (event_state as Dictionary).duplicate(true)
+		resolved_state = (event_state as Dictionary).duplicate(true)
+	if event_type == "move_event":
+		move_state = resolved_state
 	else:
-		state = GameState.battle_state.duplicate(true)
+		state = resolved_state
 	match event_type:
 		"field_state":
 			input_locked = true
@@ -916,10 +985,11 @@ func _apply_battle_event(value: Dictionary) -> void:
 			_reset_battle_sprite_visuals()
 			_append_log("Battle scene initialized.")
 			_trigger_flash(Color(1.0, 1.0, 1.0, 0.72))
-	_render_state()
+	if move_event.is_empty():
+		_render_state()
 	hp_tween_delay = 0.0
 	if not move_event.is_empty():
-		_animate_move(move_event)
+		_animate_move(move_event, move_state)
 	elif not switch_event.is_empty():
 		_animate_send_out(switch_event)
 	elif battle_event_busy:
