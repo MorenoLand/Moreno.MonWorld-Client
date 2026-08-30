@@ -337,7 +337,7 @@ func set_map(texture: Texture2D, map_width: int, map_height: int, map_objects: A
 	var visible_objects: Array = objects_for_mode(map_objects)
 	if not selected_map_id.is_empty():
 		map_id = selected_map_id
-	regions = [{"map_id": map_id, "origin": Vector2i.ZERO, "width": map_width, "height": map_height, "background_texture": texture, "foreground_texture": map_foreground_texture, "objects": visible_objects, "ready": true}]
+	regions = [{"map_id": map_id, "origin": Vector2i.ZERO, "width": map_width, "height": map_height, "render_origin": Vector2i.ZERO, "render_width": map_width, "render_height": map_height, "background_texture": texture, "foreground_texture": map_foreground_texture, "objects": visible_objects, "ready": true}]
 	region_origins = {map_id: Vector2i.ZERO}
 	_rebuild_world_bounds()
 	map_texture = texture
@@ -442,6 +442,9 @@ func _ensure_region_rendered(selected_map_id: String) -> bool:
 			return false
 		region["background_texture"] = prepared.get("background_texture", prepared.get("texture"))
 		region["foreground_texture"] = prepared.get("foreground_texture")
+		region["render_origin"] = Vector2i(region.get("origin", Vector2i.ZERO)) + Vector2i(prepared.get("render_origin", Vector2i.ZERO))
+		region["render_width"] = int(prepared.get("render_width", region.get("width", 0)))
+		region["render_height"] = int(prepared.get("render_height", region.get("height", 0)))
 		region["objects"] = objects_for_mode(prepared.get("objects", []))
 		region["warps"] = prepared.get("warps", [])
 		region["connections"] = prepared.get("connections", region.get("connections", []))
@@ -484,8 +487,8 @@ func _rebuild_world_bounds() -> void:
 		var region: Dictionary = region_value
 		if not bool(region.get("ready", false)) or bool(region.get("corner_filler", false)):
 			continue
-		var origin: Vector2i = _region_origin(str(region.get("map_id", "")))
-		var extent: Vector2i = origin + Vector2i(int(region.get("width", 0)), int(region.get("height", 0)))
+		var origin: Vector2i = _region_render_origin(str(region.get("map_id", "")))
+		var extent: Vector2i = origin + Vector2i(int(region.get("render_width", region.get("width", 0))), int(region.get("render_height", region.get("height", 0))))
 		if not has_bounds:
 			minimum = origin
 			maximum = extent
@@ -505,6 +508,21 @@ func _region_origin(selected_map_id: String) -> Vector2i:
 	if value is Vector2:
 		return Vector2i(value)
 	return Vector2i.ZERO
+
+func _region_render_origin(selected_map_id: String) -> Vector2i:
+	for region_value in regions:
+		if not region_value is Dictionary:
+			continue
+		var region: Dictionary = region_value
+		if str(region.get("map_id", "")) != selected_map_id:
+			continue
+		var value: Variant = region.get("render_origin", region.get("origin", Vector2i.ZERO))
+		if value is Vector2i:
+			return value
+		if value is Vector2:
+			return Vector2i(value)
+		break
+	return _region_origin(selected_map_id)
 
 func _world_position(selected_map_id: String, local_position: Vector2) -> Vector2:
 	return Vector2(_region_origin(selected_map_id)) + local_position
@@ -1501,8 +1519,8 @@ func _draw() -> void:
 		if not bool(region.get("ready", false)):
 			continue
 		var region_id: String = str(region.get("map_id", ""))
-		var region_origin: Vector2 = Vector2(_region_origin(region_id)) * TILE_PIXELS
-		var region_size: Vector2 = Vector2(int(region.get("width", 0)), int(region.get("height", 0))) * TILE_PIXELS
+		var region_origin: Vector2 = Vector2(_region_render_origin(region_id)) * TILE_PIXELS
+		var region_size: Vector2 = Vector2(int(region.get("render_width", region.get("width", 0))), int(region.get("render_height", region.get("height", 0)))) * TILE_PIXELS
 		var region_rect: Rect2 = Rect2(region_origin, region_size)
 		var visible_region: Rect2 = region_rect.intersection(camera_rect)
 		if visible_region.size.x > 0.0 and visible_region.size.y > 0.0:
@@ -1526,12 +1544,12 @@ func _draw() -> void:
 			var foreground: Texture2D = region.get("foreground_texture") as Texture2D
 			if foreground != null:
 				var first_row: int = maxi(0, floori((camera_rect.position.y - region_origin.y) / TILE_PIXELS) - 1)
-				var last_row: int = mini(int(region.get("height", 0)) - 1, ceili((camera_rect.end.y - region_origin.y) / TILE_PIXELS) + 1)
+				var last_row: int = mini(int(region.get("render_height", region.get("height", 0))) - 1, ceili((camera_rect.end.y - region_origin.y) / TILE_PIXELS) + 1)
 				for row_index in range(first_row, last_row + 1):
 					var row_rect: Rect2 = Rect2(region_origin + Vector2(0.0, row_index * TILE_PIXELS), Vector2(region_size.x, TILE_PIXELS))
 					var visible_row: Rect2 = row_rect.intersection(camera_rect)
 					if visible_row.size.x > 0.0 and visible_row.size.y > 0.0:
-						drawables.append({"kind": "foreground", "map_id": region_id, "texture": foreground, "rect": visible_row, "sort_y": float(_region_origin(region_id).y + row_index + 1), "sort_order": 2})
+						drawables.append({"kind": "foreground", "map_id": region_id, "texture": foreground, "rect": visible_row, "sort_y": float(_region_render_origin(region_id).y + row_index + 1), "sort_order": 2})
 			for tile_value in region.get("animated_foreground_tiles", []):
 				if not tile_value is Dictionary:
 					continue
@@ -1543,7 +1561,7 @@ func _draw() -> void:
 				var animated_texture: Texture2D = content.animated_metatile_texture(region_id, animated_tile, animation_tick, true)
 				if animated_texture == null:
 					continue
-				drawables.append({"kind": "animated_tile", "texture": animated_texture, "world_position": tile_world_position, "sort_y": float(_region_origin(region_id).y + floori(float(int(animated_tile.get("y", 0))) / TILE_PIXELS) + 1), "sort_order": 3})
+				drawables.append({"kind": "animated_tile", "texture": animated_texture, "world_position": tile_world_position, "sort_y": float(_region_render_origin(region_id).y + floori(float(int(animated_tile.get("y", 0))) / TILE_PIXELS) + 1), "sort_order": 3})
 			for object_value in region.get("objects", []):
 				if not object_value is Dictionary:
 					continue
@@ -1596,7 +1614,7 @@ func _draw() -> void:
 			var foreground_rect: Rect2 = drawable.get("rect", Rect2())
 			var foreground_texture_value: Texture2D = drawable.get("texture") as Texture2D
 			var foreground_destination: Rect2 = Rect2(destination_position + (foreground_rect.position - camera_origin) * tile_scale, foreground_rect.size * tile_scale)
-			var foreground_origin: Vector2 = Vector2(_region_origin(str(drawable.get("map_id", "")))) * TILE_PIXELS
+			var foreground_origin: Vector2 = Vector2(_region_render_origin(str(drawable.get("map_id", "")))) * TILE_PIXELS
 			draw_texture_rect_region(foreground_texture_value, foreground_destination, Rect2(foreground_rect.position - foreground_origin, foreground_rect.size), Color.WHITE, false, true)
 			continue
 		if str(drawable.get("kind", "sprite")) == "animated_tile":

@@ -1,6 +1,10 @@
 extends SceneTree
 
 func _init() -> void:
+	var decoder: MonWorldRomAudio = MonWorldRomAudio.new()
+	if not _test_wave_decoder(decoder):
+		quit(1)
+		return
 	var path: String = OS.get_environment("MONWORLD_ROM")
 	if path.is_empty():
 		quit(0)
@@ -11,7 +15,6 @@ func _init() -> void:
 		quit(1)
 		return
 	var content: MonWorldContent = result.get("content") as MonWorldContent
-	var decoder: MonWorldRomAudio = MonWorldRomAudio.new()
 	var prepared: Dictionary = decoder.prepare_song(content, 300)
 	if prepared.is_empty():
 		push_error("ROM audio song 300 could not be prepared: %s" % decoder.last_error)
@@ -39,3 +42,19 @@ func _init() -> void:
 			quit(1)
 			return
 	quit(0)
+
+func _test_wave_decoder(decoder: MonWorldRomAudio) -> bool:
+	var data: PackedByteArray = PackedByteArray([1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 4, 0, 0, 0, 10, 1, 0x23])
+	for _index in range(31):
+		data.append(0)
+	var wave: Dictionary = decoder.call("_read_wave", data, 0)
+	var samples: PackedFloat32Array = wave.get("samples", PackedFloat32Array()) as PackedFloat32Array
+	if samples.size() != 4:
+		push_error("FireRed ADPCM regression fixture did not decode four samples")
+		return false
+	var expected: Array[float] = [10.0 / 128.0, 11.0 / 128.0, 15.0 / 128.0, 24.0 / 128.0]
+	for index in range(expected.size()):
+		if not is_equal_approx(samples[index], expected[index]):
+			push_error("FireRed ADPCM regression fixture decoded sample %d incorrectly" % index)
+			return false
+	return true

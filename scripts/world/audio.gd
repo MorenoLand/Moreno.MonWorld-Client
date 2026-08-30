@@ -31,6 +31,7 @@ var music_render_total_frames: int = 0
 var playback_chunks: Array = []
 var playback_source_complete: bool = false
 var playback_chunk_index: int = 0
+var playback_chunk_offset: int = 0
 var playback_pushed_frames: int = 0
 var music_generator: AudioStreamGenerator
 var music_playback: AudioStreamGeneratorPlayback
@@ -112,6 +113,7 @@ func _cancel_current_music() -> void:
 	playback_chunks = []
 	playback_source_complete = false
 	playback_chunk_index = 0
+	playback_chunk_offset = 0
 	playback_pushed_frames = 0
 	music_playback = null
 	music_generator = null
@@ -125,6 +127,7 @@ func _begin_render_state(key: String) -> void:
 	playback_chunks = []
 	playback_source_complete = false
 	playback_chunk_index = 0
+	playback_chunk_offset = 0
 	playback_pushed_frames = 0
 	music_render_mutex.lock()
 	rendered_chunks = []
@@ -334,14 +337,28 @@ func _pump_music_buffer() -> void:
 		if playback_chunk_index >= playback_chunks.size():
 			if playback_source_complete:
 				playback_chunk_index = 0
+				playback_chunk_offset = 0
 			else:
 				break
 		var chunk: PackedVector2Array = playback_chunks[playback_chunk_index] as PackedVector2Array
-		if chunk.is_empty() or available < chunk.size():
+		if chunk.is_empty():
+			playback_chunk_index += 1
+			playback_chunk_offset = 0
+			continue
+		var remaining: int = chunk.size() - playback_chunk_offset
+		if remaining <= 0:
+			playback_chunk_index += 1
+			playback_chunk_offset = 0
+			continue
+		var pushed: int = mini(available, remaining)
+		if pushed <= 0:
 			break
-		music_playback.push_buffer(chunk)
-		playback_chunk_index += 1
-		playback_pushed_frames += chunk.size()
+		music_playback.push_buffer(chunk.slice(playback_chunk_offset, playback_chunk_offset + pushed))
+		playback_chunk_offset += pushed
+		playback_pushed_frames += pushed
+		if playback_chunk_offset >= chunk.size():
+			playback_chunk_index += 1
+			playback_chunk_offset = 0
 		available = music_playback.get_frames_available()
 
 func _cache_music_chunks(key: String, chunks: Array) -> void:

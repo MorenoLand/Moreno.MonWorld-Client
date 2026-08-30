@@ -300,7 +300,7 @@ func _load_map_texture(map_id: String, expected_width: int = 0, expected_height:
 	map_has_animation = false
 	map_has_animation = not (result.get("animated_background_tiles", []) as Array).is_empty() or not (result.get("animated_foreground_tiles", []) as Array).is_empty()
 	_cache_story_objects(map_id, result.get("objects", []))
-	var root_region: Dictionary = {"map_id": map_id, "origin": Vector2i.ZERO, "width": int(result.get("width", 0)), "height": int(result.get("height", 0)), "background_texture": result.get("background_texture"), "foreground_texture": result.get("foreground_texture"), "objects": map_view.objects_for_mode(result.get("objects", [])), "warps": result.get("warps", []), "connections": result.get("connections", []), "animated_background_tiles": result.get("animated_background_tiles", []), "animated_foreground_tiles": result.get("animated_foreground_tiles", []), "music_id": int(result.get("music_id", 0)), "map_type": int(result.get("map_type", 0)), "ready": true}
+	var root_region: Dictionary = {"map_id": map_id, "origin": Vector2i.ZERO, "width": int(result.get("width", 0)), "height": int(result.get("height", 0)), "render_origin": Vector2i(result.get("render_origin", Vector2i.ZERO)), "render_width": int(result.get("render_width", result.get("width", 0))), "render_height": int(result.get("render_height", result.get("height", 0))), "background_texture": result.get("background_texture"), "foreground_texture": result.get("foreground_texture"), "objects": map_view.objects_for_mode(result.get("objects", [])), "warps": result.get("warps", []), "connections": result.get("connections", []), "animated_background_tiles": result.get("animated_background_tiles", []), "animated_foreground_tiles": result.get("animated_foreground_tiles", []), "music_id": int(result.get("music_id", 0)), "map_type": int(result.get("map_type", 0)), "ready": true}
 	var root_world: Dictionary = {"ok": true, "root_map_id": map_id, "regions": [root_region], "map_origins": {map_id: Vector2i.ZERO}}
 	map_view.set_world(root_world, map_id)
 	audio.play_map_music(GameState.content, map_id)
@@ -408,6 +408,9 @@ func _preload_connected_regions(world_value: Dictionary, root_map_id: String, ge
 			continue
 		region["background_texture"] = prepared.get("background_texture")
 		region["foreground_texture"] = prepared.get("foreground_texture")
+		region["render_origin"] = Vector2i(region.get("origin", Vector2i.ZERO)) + Vector2i(prepared.get("render_origin", Vector2i.ZERO))
+		region["render_width"] = int(prepared.get("render_width", region.get("width", 0)))
+		region["render_height"] = int(prepared.get("render_height", region.get("height", 0)))
 		_cache_story_objects(region_id, prepared.get("objects", []))
 		region["objects"] = map_view.objects_for_mode(prepared.get("objects", []))
 		region["warps"] = prepared.get("warps", [])

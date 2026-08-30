@@ -264,6 +264,12 @@ func _init() -> void:
 		push_error("indoor Building tileset changed across animation phases")
 		quit(1)
 		return
+	var profile_format: Dictionary = content.source_profile.get("format", {}) as Dictionary
+	var map_render_offset: int = int(profile_format.get("map_render_offset", 0))
+	if map_render_offset <= 0 or Vector2i(house_result.get("render_origin", Vector2i.ZERO)) != Vector2i(-map_render_offset, -map_render_offset) or int(house_result.get("render_width", 0)) != int(house_result.get("width", 0)) + map_render_offset * 2 + 1 or int(house_result.get("render_height", 0)) != int(house_result.get("height", 0)) + map_render_offset * 2:
+		push_error("standalone indoor map did not expose the source padded render geometry")
+		quit(1)
+		return
 	var mom_found: bool = false
 	for object_value in house_result.get("objects", []):
 		if object_value is Dictionary and int(object_value.get("graphics_id", -1)) == 88:

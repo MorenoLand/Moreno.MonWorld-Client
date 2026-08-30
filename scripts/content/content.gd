@@ -1220,7 +1220,7 @@ func render_map(map_id: String, animation_tick: int = 0) -> Dictionary:
 		foreground_texture_cache.clear()
 		foreground_texture_cache[cache_key] = foreground_texture
 	map_cache[map_id] = cached_map
-	return {"ok": true, "texture": texture, "image": image, "background_texture": background_texture, "foreground_texture": foreground_texture, "width": int(cached_map.get("width", 0)), "height": int(cached_map.get("height", 0)), "header_offset": int(cached_map.get("header_offset", -1)), "layout_offset": int(cached_map.get("layout_offset", -1)), "objects": cached_map.get("objects", []), "warps": cached_map.get("warps", []), "connections": cached_map.get("connections", []), "map_cells": cached_map.get("map_cells", PackedInt32Array()), "music_id": int(cached_map.get("music_id", 0)), "map_type": int(cached_map.get("map_type", 0)), "animation_phase": animation_phase}
+	return {"ok": true, "texture": texture, "image": image, "background_texture": background_texture, "foreground_texture": foreground_texture, "width": int(cached_map.get("width", 0)), "height": int(cached_map.get("height", 0)), "render_origin": cached_map.get("render_origin", Vector2i.ZERO), "render_width": int(cached_map.get("render_width", cached_map.get("width", 0))), "render_height": int(cached_map.get("render_height", cached_map.get("height", 0))), "header_offset": int(cached_map.get("header_offset", -1)), "layout_offset": int(cached_map.get("layout_offset", -1)), "objects": cached_map.get("objects", []), "warps": cached_map.get("warps", []), "connections": cached_map.get("connections", []), "map_cells": cached_map.get("map_cells", PackedInt32Array()), "music_id": int(cached_map.get("music_id", 0)), "map_type": int(cached_map.get("map_type", 0)), "animation_phase": animation_phase}
 
 func prepare_map(map_id: String, include_composite_texture: bool = true) -> Dictionary:
 	var cached_map: Dictionary = _get_or_build_map_cache(map_id)
@@ -1239,7 +1239,7 @@ func prepare_map(map_id: String, include_composite_texture: bool = true) -> Dict
 	if include_composite_texture and world_texture == null:
 		world_texture = background_texture
 		cached_map["world_texture"] = world_texture
-	return {"ok": true, "texture": world_texture if world_texture != null else background_texture, "background_texture": background_texture, "foreground_texture": foreground_texture, "world_texture": world_texture, "width": int(cached_map.get("width", 0)), "height": int(cached_map.get("height", 0)), "header_offset": int(cached_map.get("header_offset", -1)), "layout_offset": int(cached_map.get("layout_offset", -1)), "objects": cached_map.get("objects", []), "warps": cached_map.get("warps", []), "connections": cached_map.get("connections", []), "animated_background_tiles": cached_map.get("animated_background_tiles", []), "animated_foreground_tiles": cached_map.get("animated_foreground_tiles", []), "map_cells": cached_map.get("map_cells", PackedInt32Array()), "music_id": int(cached_map.get("music_id", 0)), "map_type": int(cached_map.get("map_type", 0)), "animation_phase": 0}
+	return {"ok": true, "texture": world_texture if world_texture != null else background_texture, "background_texture": background_texture, "foreground_texture": foreground_texture, "world_texture": world_texture, "width": int(cached_map.get("width", 0)), "height": int(cached_map.get("height", 0)), "render_origin": cached_map.get("render_origin", Vector2i.ZERO), "render_width": int(cached_map.get("render_width", cached_map.get("width", 0))), "render_height": int(cached_map.get("render_height", cached_map.get("height", 0))), "header_offset": int(cached_map.get("header_offset", -1)), "layout_offset": int(cached_map.get("layout_offset", -1)), "objects": cached_map.get("objects", []), "warps": cached_map.get("warps", []), "connections": cached_map.get("connections", []), "animated_background_tiles": cached_map.get("animated_background_tiles", []), "animated_foreground_tiles": cached_map.get("animated_foreground_tiles", []), "map_cells": cached_map.get("map_cells", PackedInt32Array()), "music_id": int(cached_map.get("music_id", 0)), "map_type": int(cached_map.get("map_type", 0)), "animation_phase": 0}
 
 func create_map_cache_worker() -> OpenMMOContent:
 	var worker: OpenMMOContent = OpenMMOContent.new()
@@ -1280,7 +1280,7 @@ func prepare_server_map(map_id: String, server_map: Dictionary, server_maps: Dic
 	if include_composite_texture and world_texture == null:
 		world_texture = background_texture
 		cached_map["world_texture"] = world_texture
-	return {"ok": true, "texture": world_texture if world_texture != null else background_texture, "background_texture": background_texture, "foreground_texture": foreground_texture, "world_texture": world_texture, "width": int(cached_map.get("width", 0)), "height": int(cached_map.get("height", 0)), "header_offset": -1, "layout_offset": -1, "objects": [], "warps": [], "connections": cached_map.get("connections", []), "animated_background_tiles": cached_map.get("animated_background_tiles", []), "animated_foreground_tiles": cached_map.get("animated_foreground_tiles", []), "map_cells": cached_map.get("map_cells", PackedInt32Array()), "music_id": int(cached_map.get("music_id", 0)), "map_type": int(cached_map.get("map_type", 0)), "animation_phase": 0}
+	return {"ok": true, "texture": world_texture if world_texture != null else background_texture, "background_texture": background_texture, "foreground_texture": foreground_texture, "world_texture": world_texture, "width": int(cached_map.get("width", 0)), "height": int(cached_map.get("height", 0)), "render_origin": cached_map.get("render_origin", Vector2i.ZERO), "render_width": int(cached_map.get("render_width", cached_map.get("width", 0))), "render_height": int(cached_map.get("render_height", cached_map.get("height", 0))), "header_offset": -1, "layout_offset": -1, "objects": [], "warps": [], "connections": cached_map.get("connections", []), "animated_background_tiles": cached_map.get("animated_background_tiles", []), "animated_foreground_tiles": cached_map.get("animated_foreground_tiles", []), "map_cells": cached_map.get("map_cells", PackedInt32Array()), "music_id": int(cached_map.get("music_id", 0)), "map_type": int(cached_map.get("map_type", 0)), "animation_phase": 0}
 
 func prepare_connected_world(root_map_id: String, max_maps: int = 96, preload_depth: int = 1, server_maps: Dictionary = {}, max_depth: int = -1) -> Dictionary:
 	if root_map_id.is_empty() or max_maps <= 0 or preload_depth < 0:
@@ -1312,7 +1312,7 @@ func prepare_connected_world(root_map_id: String, max_maps: int = 96, preload_de
 			prepared = prepare_server_map(map_id, server_map, server_maps, false) if _is_server_custom_map(server_map) else prepare_map(map_id, false)
 		if map_id == root_map_id and not bool(prepared.get("ok", false)):
 			return prepared
-		var region: Dictionary = {"map_id": map_id, "origin": origin, "width": width, "height": height, "background_texture": prepared.get("background_texture"), "foreground_texture": prepared.get("foreground_texture"), "objects": prepared.get("objects", []), "warps": prepared.get("warps", []), "connections": topology.get("connections", []), "animated_background_tiles": prepared.get("animated_background_tiles", []), "animated_foreground_tiles": prepared.get("animated_foreground_tiles", []), "music_id": int(topology.get("music_id", 0)), "map_type": int(topology.get("map_type", 0)), "depth": depth, "ready": bool(prepared.get("ok", false))}
+		var region: Dictionary = {"map_id": map_id, "origin": origin, "width": width, "height": height, "render_origin": origin + prepared.get("render_origin", Vector2i.ZERO), "render_width": int(prepared.get("render_width", width)), "render_height": int(prepared.get("render_height", height)), "background_texture": prepared.get("background_texture"), "foreground_texture": prepared.get("foreground_texture"), "objects": prepared.get("objects", []), "warps": prepared.get("warps", []), "connections": topology.get("connections", []), "animated_background_tiles": prepared.get("animated_background_tiles", []), "animated_foreground_tiles": prepared.get("animated_foreground_tiles", []), "music_id": int(topology.get("music_id", 0)), "map_type": int(topology.get("map_type", 0)), "depth": depth, "ready": bool(prepared.get("ok", false))}
 		regions.append(region)
 		placed[map_id] = origin
 		if max_depth >= 0 and depth >= max_depth:
@@ -1733,7 +1733,7 @@ func _build_server_map_cache(map_id: String, server_map: Dictionary, server_maps
 			var tileset: Dictionary = primary if metatile_id < primary_metatile_count else secondary
 			var metatile_index: int = metatile_id if metatile_id < primary_metatile_count else metatile_id - primary_metatile_count
 			_draw_map_metatile_layers(background_image, foreground_image, map_x * 16, map_y * 16, tileset, metatile_index, primary, secondary, animated_background_tiles, animated_foreground_tiles)
-	return {"ok": true, "base_image": background_image, "base_background_image": background_image, "base_foreground_image": foreground_image, "primary": primary, "secondary": secondary, "primary_tiles": primary.get("tiles", PackedByteArray()), "primary_animation_enabled": bool(primary.get("animation_enabled", false)), "animated_tiles": [], "animated_background_tiles": animated_background_tiles, "animated_foreground_tiles": animated_foreground_tiles, "map_cells": map_cells, "objects": [], "warps": [], "connections": _server_connections(server_map, server_maps), "textures": {}, "images": {}, "background_textures": {}, "foreground_textures": {}, "width": width, "height": height, "header_offset": -1, "layout_offset": -1, "border_offset": -1, "border_width": int(server_map.get("border_width", 0)), "border_height": int(server_map.get("border_height", 0)), "map_group": int(server_map.get("bank_id", -1)), "map_index": int(server_map.get("map_id", -1)), "music_id": 0, "map_type": int(server_map.get("map_type", 0))}
+	return {"ok": true, "base_image": background_image, "base_background_image": background_image, "base_foreground_image": foreground_image, "primary": primary, "secondary": secondary, "primary_tiles": primary.get("tiles", PackedByteArray()), "primary_animation_enabled": bool(primary.get("animation_enabled", false)), "animated_tiles": [], "animated_background_tiles": animated_background_tiles, "animated_foreground_tiles": animated_foreground_tiles, "map_cells": map_cells, "objects": [], "warps": [], "connections": _server_connections(server_map, server_maps), "textures": {}, "images": {}, "background_textures": {}, "foreground_textures": {}, "width": width, "height": height, "render_origin": Vector2i.ZERO, "render_width": width, "render_height": height, "header_offset": -1, "layout_offset": -1, "border_offset": -1, "border_width": int(server_map.get("border_width", 0)), "border_height": int(server_map.get("border_height", 0)), "map_group": int(server_map.get("bank_id", -1)), "map_index": int(server_map.get("map_id", -1)), "music_id": 0, "map_type": int(server_map.get("map_type", 0))}
 
 func _gzip_decompress(data: PackedByteArray, expected_bytes: int) -> PackedByteArray:
 	if data.is_empty() or expected_bytes <= 0:
@@ -1937,31 +1937,7 @@ func _build_map_cache(map_id: String, map_value: Dictionary, include_composite: 
 	secondary["is_secondary"] = true
 	primary["animation_enabled"] = _tileset_animation_enabled(primary)
 	secondary["animation_enabled"] = false
-	var image: Image
-	if include_composite:
-		image = Image.create(width * 16, height * 16, false, Image.FORMAT_RGBA8)
-		image.fill(Color.BLACK)
-	var background_image: Image = Image.create(width * 16, height * 16, false, Image.FORMAT_RGBA8)
-	background_image.fill(Color.BLACK)
-	var foreground_image: Image = Image.create(width * 16, height * 16, false, Image.FORMAT_RGBA8)
-	foreground_image.fill(Color(0.0, 0.0, 0.0, 0.0))
-	var animated_tiles: Array = []
-	var animated_background_tiles: Array = []
-	var animated_foreground_tiles: Array = []
-	for map_y in range(height):
-		for map_x in range(width):
-			var map_word: int = map_cells[map_y * width + map_x]
-			var metatile_id: int = map_word & metatile_id_mask
-			var tileset: Dictionary = primary
-			var metatile_index: int = metatile_id
-			if metatile_id >= primary_metatile_count:
-				tileset = secondary
-				metatile_index = metatile_id - primary_metatile_count
-			if include_composite:
-				_draw_metatile(image, map_x * 16, map_y * 16, tileset, metatile_index, primary, secondary, animated_tiles)
-			_draw_map_metatile_layers(background_image, foreground_image, map_x * 16, map_y * 16, tileset, metatile_index, primary, secondary, animated_background_tiles, animated_foreground_tiles)
-	var objects: Array = _read_map_objects(header_offset, map_id)
-	objects.append_array(_read_map_background_events(header_offset, map_id))
+	var connections: Array = _read_map_connections(header_offset)
 	var border_offset: int = int(descriptor.get("border_offset", -1))
 	var border_width: int = int(descriptor.get("border_width", 0))
 	var border_height: int = int(descriptor.get("border_height", 0))
@@ -1970,12 +1946,58 @@ func _build_map_cache(map_id: String, map_value: Dictionary, include_composite: 
 	if border_width > 0 and border_height > 0 and border_offset >= 0 and _valid_range(border_offset, border_bytes):
 		for border_index in range(border_width * border_height):
 			border_tiles.append(_read_u16(border_offset + border_index * 2))
-	return {"ok": true, "base_image": image, "base_background_image": background_image, "base_foreground_image": foreground_image, "primary": primary, "secondary": secondary, "primary_tiles": primary.get("tiles", PackedByteArray()), "primary_animation_enabled": bool(primary.get("animation_enabled", false)), "animated_tiles": animated_tiles, "animated_background_tiles": animated_background_tiles, "animated_foreground_tiles": animated_foreground_tiles, "map_cells": map_cells, "objects": objects, "warps": _read_map_warps(header_offset), "connections": _read_map_connections(header_offset), "textures": {}, "images": {}, "background_textures": {}, "foreground_textures": {}, "width": width, "height": height, "header_offset": header_offset, "layout_offset": layout_offset, "border_offset": border_offset, "border_width": border_width, "border_height": border_height, "border_tiles": border_tiles, "map_group": int(map_value.get("map_group", -1)), "map_index": int(map_value.get("map_index", -1)), "music_id": int(map_value.get("music_id", 0))}
+	var render_border: bool = connections.is_empty() and not border_tiles.is_empty()
+	var map_render_offset: int = _format_int("map_render_offset", 7) if render_border else 0
+	var render_origin: Vector2i = Vector2i(-map_render_offset, -map_render_offset)
+	var render_width: int = width + map_render_offset * 2 + (1 if render_border else 0)
+	var render_height: int = height + map_render_offset * 2
+	var image: Image
+	if include_composite:
+		image = Image.create(render_width * 16, render_height * 16, false, Image.FORMAT_RGBA8)
+		image.fill(Color.BLACK)
+	var background_image: Image = Image.create(render_width * 16, render_height * 16, false, Image.FORMAT_RGBA8)
+	background_image.fill(Color.BLACK)
+	var foreground_image: Image = Image.create(render_width * 16, render_height * 16, false, Image.FORMAT_RGBA8)
+	foreground_image.fill(Color(0.0, 0.0, 0.0, 0.0))
+	var animated_tiles: Array = []
+	var animated_background_tiles: Array = []
+	var animated_foreground_tiles: Array = []
+	for render_y in range(render_height):
+		for render_x in range(render_width):
+			var map_x: int = render_x + render_origin.x
+			var map_y: int = render_y + render_origin.y
+			var map_word: int = _render_map_word(map_cells, width, height, map_x, map_y, border_tiles, border_width, border_height)
+			var metatile_id: int = map_word & metatile_id_mask
+			if metatile_id == undefined_metatile:
+				continue
+			var tileset: Dictionary = primary
+			var metatile_index: int = metatile_id
+			if metatile_id >= primary_metatile_count:
+				tileset = secondary
+				metatile_index = metatile_id - primary_metatile_count
+			if include_composite:
+				_draw_metatile(image, render_x * 16, render_y * 16, tileset, metatile_index, primary, secondary, animated_tiles)
+			_draw_map_metatile_layers(background_image, foreground_image, render_x * 16, render_y * 16, tileset, metatile_index, primary, secondary, animated_background_tiles, animated_foreground_tiles)
+	var objects: Array = _read_map_objects(header_offset, map_id)
+	objects.append_array(_read_map_background_events(header_offset, map_id))
+	return {"ok": true, "base_image": image, "base_background_image": background_image, "base_foreground_image": foreground_image, "primary": primary, "secondary": secondary, "primary_tiles": primary.get("tiles", PackedByteArray()), "primary_animation_enabled": bool(primary.get("animation_enabled", false)), "animated_tiles": animated_tiles, "animated_background_tiles": animated_background_tiles, "animated_foreground_tiles": animated_foreground_tiles, "map_cells": map_cells, "objects": objects, "warps": _read_map_warps(header_offset), "connections": connections, "textures": {}, "images": {}, "background_textures": {}, "foreground_textures": {}, "width": width, "height": height, "render_origin": render_origin, "render_width": render_width, "render_height": render_height, "header_offset": header_offset, "layout_offset": layout_offset, "border_offset": border_offset, "border_width": border_width, "border_height": border_height, "border_tiles": border_tiles, "map_group": int(map_value.get("map_group", -1)), "map_index": int(map_value.get("map_index", -1)), "music_id": int(map_value.get("music_id", 0))}
+
+func _render_map_word(map_cells: PackedInt32Array, width: int, height: int, map_x: int, map_y: int, border_tiles: PackedInt32Array, border_width: int, border_height: int) -> int:
+	if map_x >= 0 and map_y >= 0 and map_x < width and map_y < height:
+		return int(map_cells[map_y * width + map_x])
+	if border_width <= 0 or border_height <= 0 or border_tiles.size() < border_width * border_height:
+		return _format_int("map_grid_undefined", MAPGRID_UNDEFINED)
+	var border_x: int = posmod(map_x + border_width * 8, border_width)
+	var border_y: int = posmod(map_y + border_height * 8, border_height)
+	return int(border_tiles[border_y * border_width + border_x])
 
 func _build_map_composite_cache(cached_map: Dictionary) -> Dictionary:
 	var width: int = int(cached_map.get("width", 0))
 	var height: int = int(cached_map.get("height", 0))
-	var image: Image = Image.create(width * 16, height * 16, false, Image.FORMAT_RGBA8)
+	var render_origin: Vector2i = cached_map.get("render_origin", Vector2i.ZERO)
+	var render_width: int = int(cached_map.get("render_width", width))
+	var render_height: int = int(cached_map.get("render_height", height))
+	var image: Image = Image.create(render_width * 16, render_height * 16, false, Image.FORMAT_RGBA8)
 	image.fill(Color.BLACK)
 	var map_cells: PackedInt32Array = cached_map.get("map_cells", PackedInt32Array())
 	var primary: Dictionary = cached_map.get("primary", {})
@@ -1983,18 +2005,24 @@ func _build_map_composite_cache(cached_map: Dictionary) -> Dictionary:
 	var animated_tiles: Array = []
 	var metatile_id_mask: int = _format_int("map_grid_metatile_id_mask", MAPGRID_METATILE_ID_MASK)
 	var primary_metatile_count: int = _format_int("primary_metatile_count", PRIMARY_METATILE_COUNT)
-	for map_y in range(height):
-		for map_x in range(width):
-			var cell_index: int = map_y * width + map_x
-			if cell_index < 0 or cell_index >= map_cells.size():
+	var border_tiles: PackedInt32Array = cached_map.get("border_tiles", PackedInt32Array())
+	var border_width: int = int(cached_map.get("border_width", 0))
+	var border_height: int = int(cached_map.get("border_height", 0))
+	var undefined_metatile: int = _format_int("map_grid_undefined", MAPGRID_UNDEFINED)
+	for render_y in range(render_height):
+		for render_x in range(render_width):
+			var map_x: int = render_x + render_origin.x
+			var map_y: int = render_y + render_origin.y
+			var map_word: int = _render_map_word(map_cells, width, height, map_x, map_y, border_tiles, border_width, border_height)
+			var metatile_id: int = map_word & metatile_id_mask
+			if metatile_id == undefined_metatile:
 				continue
-			var metatile_id: int = int(map_cells[cell_index]) & metatile_id_mask
 			var tileset: Dictionary = primary
 			var metatile_index: int = metatile_id
 			if metatile_id >= primary_metatile_count:
 				tileset = secondary
 				metatile_index = metatile_id - primary_metatile_count
-			_draw_metatile(image, map_x * 16, map_y * 16, tileset, metatile_index, primary, secondary, animated_tiles)
+			_draw_metatile(image, render_x * 16, render_y * 16, tileset, metatile_index, primary, secondary, animated_tiles)
 	cached_map["base_image"] = image
 	cached_map["animated_tiles"] = animated_tiles
 	return cached_map

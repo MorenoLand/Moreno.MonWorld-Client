@@ -33,9 +33,11 @@ const COMMAND_EOT: int = 0xCE
 const COMMAND_TIE: int = 0xCF
 const TONE_TYPE_SPLIT: int = 0x40
 const TONE_TYPE_RHYTHM: int = 0x80
-const WAVE_LOOP_FLAG: int = 0x40000000
+const WAVE_LOOP_FLAG: int = 0xC0
+const WAVE_HEADER_SIZE: int = 16
 const CLOCK_TABLE: Array[int] = [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x1C, 0x1E, 0x20, 0x24, 0x28, 0x2A, 0x2C, 0x30, 0x34, 0x36, 0x38, 0x3C, 0x40, 0x42, 0x44, 0x48, 0x4C, 0x4E, 0x50, 0x54, 0x58, 0x5A, 0x5C, 0x60]
 const DELTA_TABLE: Array[int] = [0, 1, 4, 9, 16, 25, 36, 49, -64, -49, -36, -25, -16, -9, -4, -1]
+const MIDI_FREQ_TABLE: Array[int] = [2147483648, 2275179671, 2410468894, 2553802834, 2705659852, 2866546760, 3037000500, 3217589947, 3408917802, 3611622603, 3826380858, 4053909305]
 var song_table_cache: Dictionary = {}
 var song_cache: Dictionary = {}
 var stream_cache: Dictionary = {}
@@ -294,7 +296,7 @@ func _parse_track(data: PackedByteArray, track_offset: int, tone_offset: int, in
 			if raw < 0x80:
 				note_key = raw
 				cursor += 1
-			if cursor < data.size() and int(data[cursor]) < 0x80:
+			elif cursor < data.size() and int(data[cursor]) < 0x80:
 				note_key = int(data[cursor])
 				cursor += 1
 			if cursor < data.size() and int(data[cursor]) < 0x80:
@@ -306,7 +308,10 @@ func _parse_track(data: PackedByteArray, track_offset: int, tone_offset: int, in
 			key = note_key
 			if gate_ticks > 0:
 				var event_tone: Dictionary = dynamic_tone.duplicate(true)
-				events.append({"start_tick": now_ticks, "duration_ticks": gate_ticks, "start_extra_seconds": now_extra_seconds, "key": note_key + key_shift, "velocity": velocity, "volume": volume, "pan": pan, "bend": bend, "bend_range": bend_range, "tune": tune, "tone": event_tone})
+				var pitch_units: int = (tune + bend * bend_range) * 4
+				var pitch_key_offset: int = floori(float(pitch_units) / 256.0)
+				var fine_adjust: int = posmod(pitch_units, 256)
+				events.append({"start_tick": now_ticks, "duration_ticks": gate_ticks, "start_extra_seconds": now_extra_seconds, "key": note_key + key_shift + pitch_key_offset, "fine_adjust": fine_adjust, "velocity": velocity, "volume": volume, "pan": pan, "bend": bend, "bend_range": bend_range, "tune": tune, "tone": event_tone})
 			continue
 		match status:
 			COMMAND_FINE:
@@ -417,6 +422,8 @@ func _parse_track(data: PackedByteArray, track_offset: int, tone_offset: int, in
 				dynamic_tone = xcmd_result.get("tone", dynamic_tone)
 				if float(xcmd_result.get("wait_seconds", 0.0)) > 0.0:
 					now_extra_seconds += float(xcmd_result.get("wait_seconds", 0.0))
+				if bool(xcmd_result.get("stop", false)):
+					break
 			COMMAND_EOT:
 				if cursor < data.size() and int(data[cursor]) < 0x80:
 					key = int(data[cursor])
@@ -464,10 +471,12 @@ func _parse_xcmd(data: PackedByteArray, cursor: int, tone: Dictionary) -> Dictio
 				11:
 					updated["pan_sweep"] = int(data[cursor])
 			cursor += 1
+		3:
+			return {"ok": true, "cursor": cursor, "tone": updated, "wait_seconds": 0.0, "stop": true}
 		12:
 			if not _valid_range(data, cursor, 2):
 				return {"ok": false}
-			wait_seconds = float(_read_u16(data, cursor)) / 60.0
+			wait_seconds = float(_read_u16(data, cursor)) / M4A_VBLANK_RATE
 			cursor += 2
 		13:
 			if not _valid_range(data, cursor, 4):
@@ -612,11 +621,9 @@ func _render_event(mix: PackedFloat32Array, frame_count: int, data: PackedByteAr
 	if tone.is_empty():
 		return
 	var type: int = int(tone.get("type", -1))
-	var base_key: int = int(tone.get("base_key", 60))
 	var note_key: int = int(event.get("key", 60))
-	var bend_value: float = float(int(event.get("bend", 0))) / 64.0 * float(int(event.get("bend_range", 2)))
-	var tune_value: float = float(int(event.get("tune", 0))) / 64.0
-	var pitch_key: float = float(note_key) + bend_value + tune_value
+	var fine_adjust: int = clampi(int(event.get("fine_adjust", 0)), 0, 255)
+	var pitch_key: float = float(note_key) + float(fine_adjust) / 256.0
 	var volume_gain: float = clampf(float(int(event.get("velocity", 127))) / 127.0, 0.0, 1.0) * clampf(float(int(event.get("volume", 127))) / 127.0, 0.0, 1.0) * 0.28
 	var pan_value: float = clampf(float(int(event.get("pan", 0)) + int(tone.get("pan", 0))) / 64.0, -1.0, 1.0)
 	var left_gain: float = cos((pan_value + 1.0) * PI * 0.25) * volume_gain
@@ -628,11 +635,13 @@ func _render_event(mix: PackedFloat32Array, frame_count: int, data: PackedByteAr
 		wave = _read_wave(data, int(tone.get("wav", -1)))
 		if wave.is_empty():
 			return
-	var frequency: float = 440.0 * pow(2.0, (pitch_key - 69.0) / 12.0)
-	var wave_rate: float = float(wave.get("sample_rate", 0.0))
-	if wave_rate > 0.0:
-		frequency = wave_rate * pow(2.0, (pitch_key - float(base_key)) / 12.0)
-	var phase_step: float = frequency / float(SAMPLE_RATE)
+	var phase_step: float = 440.0 * pow(2.0, (pitch_key - 69.0) / 12.0) / float(SAMPLE_RATE)
+	if not wave.is_empty():
+		if (type & 0x0F) == 8:
+			phase_step = 1.0
+		else:
+			var frequency_fixed: int = _midi_key_to_freq(wave, note_key, fine_adjust)
+			phase_step = float(frequency_fixed) * float(SAMPLE_RATE) / 8388608.0
 	phase = float(mix_start - start_frame) * phase_step
 	for frame in range(mix_start, mix_end):
 		var local_frame: int = frame - start_frame
@@ -653,15 +662,21 @@ func _voice_sample(data: PackedByteArray, tone: Dictionary, type: int, phase: fl
 		var samples: PackedFloat32Array = wave.get("samples", PackedFloat32Array()) as PackedFloat32Array
 		if samples.is_empty():
 			return 0.0
-		var sample_index: int = int(floor(phase))
+		var sample_index: int = floori(phase)
 		var loop_start: int = int(wave.get("loop_start", 0))
 		var loop_end: int = int(wave.get("loop_end", samples.size()))
-		if sample_index >= samples.size():
-			if bool(wave.get("loop", false)) and loop_end > loop_start:
+		var looping: bool = bool(wave.get("loop", false)) and loop_end > loop_start
+		if sample_index >= loop_end:
+			if looping:
 				sample_index = loop_start + posmod(sample_index - loop_start, loop_end - loop_start)
 			else:
 				return 0.0
-		return float(samples[sample_index])
+		if sample_index < 0 or sample_index >= samples.size():
+			return 0.0
+		var next_index: int = sample_index + 1
+		if next_index >= loop_end:
+			next_index = loop_start if looping else mini(next_index, samples.size() - 1)
+		return lerpf(float(samples[sample_index]), float(samples[next_index]), clampf(phase - floorf(phase), 0.0, 1.0))
 	if base_type == 1 or base_type == 2:
 		var duty_table: Array[float] = [0.125, 0.25, 0.5, 0.75]
 		var duty: float = duty_table[clampi(int(tone.get("duty", 0)), 0, 3)]
@@ -683,40 +698,57 @@ func _voice_sample(data: PackedByteArray, tone: Dictionary, type: int, phase: fl
 	return 0.0
 
 func _read_wave(data: PackedByteArray, offset: int) -> Dictionary:
-	if offset < 0 or not _valid_range(data, offset, 16):
+	if offset < 0 or not _valid_range(data, offset, WAVE_HEADER_SIZE):
 		return {}
 	var cached: Variant = wave_cache.get(str(offset))
 	if cached is Dictionary:
 		return cached as Dictionary
-	var flags: int = _read_u32(data, offset)
-	var frequency: float = float(_read_u32(data, offset + 4)) / 1024.0
+	var wave_type: int = _read_u16(data, offset)
+	var status: int = _read_u16(data, offset + 2)
+	var frequency_fixed: int = _read_u32(data, offset + 4)
 	var loop_start: int = _read_u32(data, offset + 8)
 	var sample_count: int = _read_u32(data, offset + 12)
-	var format: int = flags & 0xFF
-	if sample_count <= 0 or sample_count > 2000000 or (format != 0 and format != 1):
+	if sample_count <= 0 or sample_count > 2000000 or frequency_fixed <= 0:
 		return {}
-	var payload_size: int = sample_count if format == 0 else (sample_count + 1) / 2
+	var block_count: int = (sample_count + 63) >> 6
+	var payload_size: int = sample_count if wave_type == 0 else block_count * 33
 	if not _valid_range(data, offset + 16, payload_size):
 		return {}
 	var samples: PackedFloat32Array = PackedFloat32Array()
 	samples.resize(sample_count)
-	if format == 0:
+	if wave_type == 0:
 		for sample_index in range(sample_count):
-			var value: int = int(data[offset + 16 + sample_index])
-			if value >= 128:
-				value -= 256
-			samples[sample_index] = float(value) / 128.0
+			samples[sample_index] = float(_signed_byte(int(data[offset + WAVE_HEADER_SIZE + sample_index]))) / 128.0
 	else:
-		var current: int = 0
-		for sample_index in range(sample_count):
-			var packed: int = int(data[offset + 16 + (sample_index >> 1)])
-			var delta_index: int = packed & 0x0F if (sample_index & 1) == 0 else (packed >> 4) & 0x0F
-			current = clampi(current + DELTA_TABLE[delta_index], -128, 127)
-			samples[sample_index] = float(current) / 128.0
-	var loop_end: int = mini(sample_count, maxi(loop_start, sample_count))
-	var result: Dictionary = {"samples": samples, "sample_rate": maxf(frequency, 1.0), "loop_start": clampi(loop_start, 0, sample_count), "loop_end": loop_end, "loop": (flags & WAVE_LOOP_FLAG) != 0}
+		for block_index in range(block_count):
+			var block_sample: int = block_index << 6
+			var block_offset: int = offset + WAVE_HEADER_SIZE + block_index * 33
+			var current: int = _signed_byte(int(data[block_offset]))
+			samples[block_sample] = float(current) / 128.0
+			for sample_in_block in range(1, mini(64, sample_count - block_sample)):
+				var payload_index: int = sample_in_block - 1
+				var byte_index: int = 0 if payload_index == 0 else 1 + ((payload_index - 1) >> 1)
+				var packed: int = int(data[block_offset + 1 + byte_index])
+				var delta_index: int = packed & 0x0F if payload_index == 0 or ((payload_index - 1) & 1) == 1 else (packed >> 4) & 0x0F
+				current = clampi(current + DELTA_TABLE[delta_index], -128, 127)
+				samples[block_sample + sample_in_block] = float(current) / 128.0
+	var loop_end: int = sample_count
+	var result: Dictionary = {"samples": samples, "frequency_fixed": frequency_fixed, "sample_rate": float(frequency_fixed), "loop_start": clampi(loop_start, 0, sample_count), "loop_end": loop_end, "loop": (status & WAVE_LOOP_FLAG) != 0}
 	wave_cache[str(offset)] = result
 	return result
+
+func _midi_key_to_freq(wave: Dictionary, key: int, fine_adjust: int) -> int:
+	var clamped_key: int = clampi(key, 0, 178)
+	var adjusted_fine: int = clampi(fine_adjust, 0, 255)
+	if key > 178:
+		adjusted_fine = 255
+	var scale: int = ((14 - int(clamped_key / 12)) << 4) | (clamped_key % 12)
+	var next_key: int = mini(clamped_key + 1, 179)
+	var next_scale: int = ((14 - int(next_key / 12)) << 4) | (next_key % 12)
+	var value_one: int = MIDI_FREQ_TABLE[scale & 0x0F] >> (scale >> 4)
+	var value_two: int = MIDI_FREQ_TABLE[next_scale & 0x0F] >> (next_scale >> 4)
+	var interpolated: int = value_one + ((value_two - value_one) * adjusted_fine >> 8)
+	return int((int(wave.get("frequency_fixed", 0)) * interpolated) >> 32)
 
 func _envelope(progress: float, tone: Dictionary) -> float:
 	var attack: float = float(int(tone.get("attack", 0)))
