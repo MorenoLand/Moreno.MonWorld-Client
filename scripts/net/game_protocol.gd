@@ -12,6 +12,8 @@ const CHAT_SEND: int = 0x08
 const ENTITY_LEAVE: int = 0x08
 const CHAT_MESSAGE: int = 0x09
 const LOCAL_CHARACTER_DELTA: int = 0x0C
+const POKEMON_STORAGE: int = 0x13
+const POKEMON_CONTAINER_PARTY: int = 1
 const ENTITY_MOVE_SEQUENCE: int = 0x0D
 const DIALOG_STATE: int = 0x0E
 const SERVER_NOTICE: int = 0x74
@@ -311,6 +313,21 @@ static func decode_local_character_delta(payload: PackedByteArray) -> Dictionary
 	var result: Dictionary = {"mask": mask, "updates": updates, "ok": not reader.failed and reader.remaining() == 0}
 	if not bool(result.get("ok", false)):
 		result["error"] = "OpenMMO local character delta packet is malformed"
+	return result
+
+static func decode_pokemon_storage(payload: PackedByteArray) -> Dictionary:
+	var reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(payload)
+	var container: int = reader.read_u8()
+	var flags: int = reader.read_u8()
+	var deleted: bool = flags & 0x2 != 0
+	var pokemon: Array = []
+	if not deleted:
+		var count: int = reader.read_u8()
+		for _index in count:
+			pokemon.append(_read_pokemon(reader))
+	var result: Dictionary = {"container": container, "has_change": flags & 0x1 != 0, "delete": deleted, "pokemon": pokemon, "ok": not reader.failed and reader.remaining() == 0}
+	if not bool(result.get("ok", false)):
+		result["error"] = "OpenMMO Pokemon storage packet is malformed"
 	return result
 
 static func decode_battle_side_party(payload: PackedByteArray) -> Dictionary:

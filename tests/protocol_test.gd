@@ -123,6 +123,10 @@ func _test_game_codec() -> bool:
 	if int(character.id) != 42 or str(character.name) != "Hero" or int(character.money) != 123 or int(character.bank_id) != 3 or int(character.map_id) != 4 or int(character.x) != 5 or int(character.y) != 6:
 		push_error("OpenMMO character fields are misaligned")
 		return false
+	var decoded_party: Dictionary = OpenMMOGameProtocol.decode_pokemon_storage(PackedByteArray([1, 1, 0]))
+	if not bool(decoded_party.get("ok", false)) or int(decoded_party.get("container", -1)) != 1 or not bool(decoded_party.get("has_change", false)) or bool(decoded_party.get("delete", true)) or not (decoded_party.get("pokemon", []) as Array).is_empty():
+		push_error("OpenMMO Pokemon party storage packet did not decode")
+		return false
 	var normal_chat: PackedByteArray = OpenMMOGameProtocol.encode_chat_message("hello")
 	var normal_chat_reader: OpenMMOCodec.Reader = OpenMMOCodec.Reader.new(normal_chat)
 	if normal_chat_reader.read_u8() != 0 or normal_chat_reader.read_s64_le() != 0 or normal_chat_reader.read_utf16_le_null() != "" or normal_chat_reader.read_u8() != 0 or normal_chat_reader.read_u8() != 255 or normal_chat_reader.read_utf16_le_null() != "hello" or normal_chat_reader.failed or normal_chat_reader.remaining() != 0:
@@ -226,12 +230,29 @@ func _test_battle_hp_event() -> bool:
 		push_error("OpenMMO battle HP event did not decode")
 		return false
 	var previous_state: Dictionary = GameState.battle_state.duplicate(true)
-	GameState.battle_state = {"player_party": [{"slot": 0, "entity_id": 10, "current_hp": 20}], "opponent_party": [{"slot": 0, "entity_id": 20, "current_hp": 20}]}
+	var previous_character: Dictionary = GameState.current_character.duplicate(true)
+	GameState.current_character = {"party": [{"id": 10, "container_slot": 0, "hp": 20}]}
+	GameState.battle_state = {"player_party": [{"slot": 0, "entity_id": 10, "current_hp": 20, "max_hp": 20}], "opponent_party": [{"slot": 0, "entity_id": 20, "current_hp": 20, "max_hp": 20}]}
 	GameState.call("_apply_battle_move_event", decoded)
 	var opponent: Dictionary = GameState.battle_state.get("opponent_party", [])[0]
 	if int(opponent.get("current_hp", -1)) != 14:
 		GameState.battle_state = previous_state
+		GameState.current_character = previous_character
 		push_error("OpenMMO battle HP event did not update battle state")
+		return false
+	GameState.call("_apply_battle_entity_delta", {"entity_id": 10, "updates": {"current_hp": 15}})
+	var synced_party_value: Variant = GameState.current_character.get("party", [])
+	if not synced_party_value is Array or (synced_party_value as Array).is_empty() or int((synced_party_value as Array)[0].get("current_hp", -1)) != 15 or int((synced_party_value as Array)[0].get("max_hp", -1)) != 20:
+		GameState.battle_state = previous_state
+		GameState.current_character = previous_character
+		push_error("OpenMMO battle HP did not update the persistent party state")
+		return false
+	GameState.call("_apply_pokemon_storage", {"container": 1, "delete": false, "pokemon": [{"id": 10, "container_slot": 0, "dex_id": 4, "level": 5, "hp": 20}]})
+	var healed_party_value: Variant = GameState.current_character.get("party", [])
+	if not healed_party_value is Array or (healed_party_value as Array).is_empty() or int((healed_party_value as Array)[0].get("current_hp", -1)) != 20 or int((healed_party_value as Array)[0].get("max_hp", -1)) != 20:
+		GameState.battle_state = previous_state
+		GameState.current_character = previous_character
+		push_error("OpenMMO party storage update did not update healed HP")
 		return false
 	var pp_payload: PackedByteArray = PackedByteArray()
 	OpenMMOCodec.append_s64_le(pp_payload, 10)
@@ -242,6 +263,7 @@ func _test_battle_hp_event() -> bool:
 	GameState.call("_apply_battle_move_pp", pp_event)
 	var player: Dictionary = GameState.battle_state.get("player_party", [])[0]
 	GameState.battle_state = previous_state
+	GameState.current_character = previous_character
 	if not bool(pp_event.get("ok", false)) or int(pp_event.get("move_slot", -1)) != 1 or int(pp_event.get("pp", -1)) != 24 or int(player.get("move_pp", [])[1]) != 24:
 		push_error("OpenMMO move PP event did not decode and update battle state")
 		return false

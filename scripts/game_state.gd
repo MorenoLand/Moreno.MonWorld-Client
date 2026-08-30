@@ -356,6 +356,12 @@ func _on_game_packet(opcode: int, payload: PackedByteArray) -> void:
 			_apply_character_updates(response.updates)
 		else:
 			connection_error.emit(str(response.get("error", "OpenMMO local character delta packet is malformed")))
+	elif opcode == GAME_PROTOCOL_SCRIPT.POKEMON_STORAGE:
+		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_pokemon_storage(payload)
+		if response.ok:
+			_apply_pokemon_storage(response)
+		else:
+			connection_error.emit(str(response.get("error", "OpenMMO Pokemon storage packet is malformed")))
 	elif opcode == GAME_PROTOCOL_SCRIPT.SHOP_CATALOG:
 		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_shop_catalog(payload)
 		if not response.ok:
@@ -401,6 +407,7 @@ func _on_game_packet(opcode: int, payload: PackedByteArray) -> void:
 		battle_state["can_act"] = false
 		battle_state["force_switch"] = false
 		battle_in_progress = true
+		_sync_current_party_from_battle()
 		battle_event_received.emit({"type": "field_state", "state": battle_state})
 	elif opcode == GAME_PROTOCOL_SCRIPT.BATTLE_BULK_STATE:
 		var response: Dictionary = GAME_PROTOCOL_SCRIPT.decode_battle_bulk_state(payload)
@@ -415,6 +422,7 @@ func _on_game_packet(opcode: int, payload: PackedByteArray) -> void:
 		battle_state["can_act"] = false
 		battle_state["battle_complete"] = true
 		battle_in_progress = false
+		_sync_current_party_from_battle()
 		game_session.send_packet(GAME_PROTOCOL_SCRIPT.MAP_LOADED_ACK, GAME_PROTOCOL_SCRIPT.encode_map_loaded_ack())
 		battle_event_received.emit({"type": "battle_end", "state": battle_state.duplicate(true)})
 	elif opcode == GAME_PROTOCOL_SCRIPT.BATTLE_QUEUED_EVENT:
@@ -624,6 +632,44 @@ func _apply_character_updates(updates: Dictionary) -> void:
 	_update_character_list_entry()
 	character_state_changed.emit(current_character.duplicate(true))
 
+func _apply_pokemon_storage(packet: Dictionary) -> void:
+	if int(packet.get("container", -1)) != GAME_PROTOCOL_SCRIPT.POKEMON_CONTAINER_PARTY:
+		return
+	if bool(packet.get("delete", false)):
+		current_character["party"] = []
+		_update_character_list_entry()
+		character_state_changed.emit(current_character.duplicate(true))
+		return
+	var incoming_value: Variant = packet.get("pokemon", [])
+	if not incoming_value is Array:
+		return
+	var previous_value: Variant = current_character.get("party", [])
+	var previous_party: Array = previous_value as Array if previous_value is Array else []
+	var battle_value: Variant = battle_state.get("player_party", [])
+	var battle_party: Array = battle_value as Array if battle_value is Array else []
+	var party: Array = []
+	for entry_value in incoming_value as Array:
+		if not entry_value is Dictionary:
+			continue
+		var pokemon: Dictionary = (entry_value as Dictionary).duplicate(true)
+		var current_hp: int = int(pokemon.get("hp", pokemon.get("current_hp", 0)))
+		pokemon["current_hp"] = current_hp
+		var previous_index: int = _party_member_index(previous_party, pokemon)
+		if previous_index >= 0:
+			var previous: Dictionary = previous_party[previous_index]
+			if int(previous.get("max_hp", 0)) > 0:
+				pokemon["max_hp"] = int(previous.get("max_hp", 0))
+		var battle_index: int = _party_member_index(battle_party, pokemon)
+		if battle_index >= 0:
+			var battle_mon: Dictionary = battle_party[battle_index]
+			if int(battle_mon.get("max_hp", 0)) > 0:
+				pokemon["max_hp"] = int(battle_mon.get("max_hp", 0))
+		pokemon["faint_flag"] = 1 if current_hp <= 0 else 0
+		party.append(pokemon)
+	current_character["party"] = party
+	_update_character_list_entry()
+	character_state_changed.emit(current_character.duplicate(true))
+
 func _apply_bag_snapshot(packet: Dictionary) -> void:
 	if int(packet.get("side", -1)) != 1:
 		return
@@ -685,6 +731,72 @@ func _update_character_list_entry() -> void:
 			characters[index] = current_character.duplicate(true)
 			return
 
+func _party_member_index(party: Array, target: Dictionary) -> int:
+	var target_id: int = int(target.get("id", target.get("entity_id", 0)))
+	if target_id > 0:
+		for index in party.size():
+			var value: Variant = party[index]
+			if value is Dictionary and int((value as Dictionary).get("id", (value as Dictionary).get("entity_id", 0))) == target_id:
+				return index
+	var target_slot: int = int(target.get("container_slot", -1))
+	if target_slot < 0:
+		target_slot = int(target.get("party_index", -1))
+	if target_slot < 0:
+		target_slot = int(target.get("slot", -1))
+	if target_slot < 0:
+		return -1
+	for index in party.size():
+		var value: Variant = party[index]
+		if not value is Dictionary:
+			continue
+		var member: Dictionary = value
+		var member_slot: int = int(member.get("container_slot", -1))
+		if member_slot < 0:
+			member_slot = int(member.get("party_index", -1))
+		if member_slot < 0:
+			member_slot = int(member.get("slot", -1))
+		if member_slot == target_slot:
+			return index
+	return target_slot if target_slot < party.size() else -1
+
+func _sync_current_party_from_battle() -> void:
+	var battle_value: Variant = battle_state.get("player_party", [])
+	var current_value: Variant = current_character.get("party", [])
+	if not battle_value is Array or not current_value is Array:
+		return
+	var battle_party: Array = battle_value
+	var party: Array = (current_value as Array).duplicate(true)
+	var changed: bool = false
+	for battle_member_value in battle_party:
+		if not battle_member_value is Dictionary:
+			continue
+		var battle_mon: Dictionary = battle_member_value
+		var index: int = _party_member_index(party, battle_mon)
+		if index < 0:
+			continue
+		var member: Dictionary = party[index]
+		var current_hp: int = int(battle_mon.get("current_hp", battle_mon.get("hp", 0)))
+		if int(member.get("current_hp", member.get("hp", -1))) != current_hp:
+			member["current_hp"] = current_hp
+			changed = true
+		if int(member.get("hp", -1)) != current_hp:
+			member["hp"] = current_hp
+			changed = true
+		var max_hp: int = int(battle_mon.get("max_hp", 0))
+		if max_hp > 0 and int(member.get("max_hp", 0)) != max_hp:
+			member["max_hp"] = max_hp
+			changed = true
+		var faint_flag: int = 1 if current_hp <= 0 else 0
+		if int(member.get("faint_flag", -1)) != faint_flag:
+			member["faint_flag"] = faint_flag
+			changed = true
+		party[index] = member
+	if not changed:
+		return
+	current_character["party"] = party
+	_update_character_list_entry()
+	character_state_changed.emit(current_character.duplicate(true))
+
 func _apply_battle_move_event(event: Dictionary) -> void:
 	for target_value in event.get("targets", []):
 		if not target_value is Dictionary:
@@ -724,6 +836,7 @@ func _apply_battle_switch_event(event: Dictionary) -> void:
 	else:
 		battle_state["opponent_active_slot"] = slot
 	battle_state["force_switch"] = false
+	_sync_current_party_from_battle()
 
 func _apply_battle_entity_delta(event: Dictionary) -> void:
 	_apply_battle_entity_updates(int(event.get("entity_id", 0)), event.get("updates", {}) if event.get("updates", {}) is Dictionary else {})
@@ -757,6 +870,7 @@ func _apply_battle_move_pp(event: Dictionary) -> void:
 				mon["moves"] = moves
 			party[index] = mon
 			battle_state[party_key] = party
+			_sync_current_party_from_battle()
 			return
 
 func _apply_battle_entity_updates(entity_id: int, updates: Dictionary) -> void:
@@ -788,6 +902,7 @@ func _apply_battle_entity_updates(entity_id: int, updates: Dictionary) -> void:
 			party[index] = mon
 			battle_state[party_key] = party
 			break
+	_sync_current_party_from_battle()
 
 func _on_login_failed(message: String) -> void:
 	if login_flow != "idle":
