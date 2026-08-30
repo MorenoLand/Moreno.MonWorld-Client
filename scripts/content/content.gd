@@ -1082,15 +1082,14 @@ func prepare_map(map_id: String, include_composite_texture: bool = true) -> Dict
 	var background_texture: Texture2D = cached_map.get("world_background_texture") as Texture2D
 	var foreground_texture: Texture2D = cached_map.get("world_foreground_texture") as Texture2D
 	if background_texture == null or foreground_texture == null:
-		var background_image: Image = (cached_map.get("base_background_image") as Image).duplicate()
-		var foreground_image: Image = (cached_map.get("base_foreground_image") as Image).duplicate()
+		var background_image: Image = cached_map.get("base_background_image") as Image
+		var foreground_image: Image = cached_map.get("base_foreground_image") as Image
 		background_texture = ImageTexture.create_from_image(background_image)
 		foreground_texture = ImageTexture.create_from_image(foreground_image)
-		cached_map["world_texture"] = world_texture
 		cached_map["world_background_texture"] = background_texture
 		cached_map["world_foreground_texture"] = foreground_texture
 	if include_composite_texture and world_texture == null:
-		world_texture = ImageTexture.create_from_image((cached_map.get("base_background_image") as Image).duplicate())
+		world_texture = background_texture
 		cached_map["world_texture"] = world_texture
 	return {"ok": true, "texture": world_texture if world_texture != null else background_texture, "background_texture": background_texture, "foreground_texture": foreground_texture, "world_texture": world_texture, "width": int(cached_map.get("width", 0)), "height": int(cached_map.get("height", 0)), "header_offset": int(cached_map.get("header_offset", -1)), "layout_offset": int(cached_map.get("layout_offset", -1)), "objects": cached_map.get("objects", []), "warps": cached_map.get("warps", []), "connections": cached_map.get("connections", []), "animated_background_tiles": cached_map.get("animated_background_tiles", []), "animated_foreground_tiles": cached_map.get("animated_foreground_tiles", []), "map_cells": cached_map.get("map_cells", PackedInt32Array()), "music_id": int(cached_map.get("music_id", 0)), "map_type": int(cached_map.get("map_type", 0)), "animation_phase": 0}
 
@@ -1126,12 +1125,12 @@ func prepare_server_map(map_id: String, server_map: Dictionary, server_maps: Dic
 	var background_texture: Texture2D = cached_map.get("world_background_texture") as Texture2D
 	var foreground_texture: Texture2D = cached_map.get("world_foreground_texture") as Texture2D
 	if background_texture == null or foreground_texture == null:
-		background_texture = ImageTexture.create_from_image((cached_map.get("base_background_image") as Image).duplicate())
-		foreground_texture = ImageTexture.create_from_image((cached_map.get("base_foreground_image") as Image).duplicate())
+		background_texture = ImageTexture.create_from_image(cached_map.get("base_background_image") as Image)
+		foreground_texture = ImageTexture.create_from_image(cached_map.get("base_foreground_image") as Image)
 		cached_map["world_background_texture"] = background_texture
 		cached_map["world_foreground_texture"] = foreground_texture
 	if include_composite_texture and world_texture == null:
-		world_texture = ImageTexture.create_from_image((cached_map.get("base_background_image") as Image).duplicate())
+		world_texture = background_texture
 		cached_map["world_texture"] = world_texture
 	return {"ok": true, "texture": world_texture if world_texture != null else background_texture, "background_texture": background_texture, "foreground_texture": foreground_texture, "world_texture": world_texture, "width": int(cached_map.get("width", 0)), "height": int(cached_map.get("height", 0)), "header_offset": -1, "layout_offset": -1, "objects": [], "warps": [], "connections": cached_map.get("connections", []), "animated_background_tiles": cached_map.get("animated_background_tiles", []), "animated_foreground_tiles": cached_map.get("animated_foreground_tiles", []), "map_cells": cached_map.get("map_cells", PackedInt32Array()), "music_id": int(cached_map.get("music_id", 0)), "map_type": int(cached_map.get("map_type", 0)), "animation_phase": 0}
 

@@ -43,6 +43,9 @@ var connected_world_generation: int = 0
 var removed_npc_entities: Dictionary = {}
 var npc_entity_maps: Dictionary = {}
 var map_prepare_jobs: Dictionary = {}
+var map_preload_queue: Array[String] = []
+var map_preload_queued: Dictionary = {}
+var map_preload_active: bool = false
 
 func _ready() -> void:
 	set_process_input(true)
@@ -330,14 +333,39 @@ func _ensure_rom_map_prepared(map_id: String) -> Dictionary:
 	return job.get("result", {}) as Dictionary
 
 func _queue_warp_map_preloads(warps: Variant) -> void:
-	if not warps is Array:
+	if not warps is Array or GameState.content == null:
 		return
 	for warp_value in warps as Array:
 		if not warp_value is Dictionary:
 			continue
 		var target_map_id: String = str((warp_value as Dictionary).get("map_id", ""))
-		if not target_map_id.is_empty():
-			_start_rom_map_prepare(target_map_id)
+		if target_map_id.is_empty() or map_preload_queued.has(target_map_id) or GameState.content.has_prepared_map(target_map_id):
+			continue
+		map_preload_queue.append(target_map_id)
+		map_preload_queued[target_map_id] = true
+	if not map_preload_active and not map_preload_queue.is_empty():
+		call_deferred("_drain_map_preload_queue")
+
+func _drain_map_preload_queue() -> void:
+	if map_preload_active:
+		return
+	map_preload_active = true
+	while not map_preload_queue.is_empty():
+		var target_map_id: String = map_preload_queue.pop_front()
+		await get_tree().process_frame
+		if GameState.content == null:
+			map_preload_queued.erase(target_map_id)
+			continue
+		var server_map: Dictionary = GameState.content._server_map_for_local_map(target_map_id, GameState.server_maps)
+		if GameState.content._is_server_custom_map(server_map):
+			GameState.content.prepare_server_map(target_map_id, server_map, GameState.server_maps, false)
+		else:
+			var cached_map: Dictionary = await _ensure_rom_map_prepared(target_map_id)
+			if bool(cached_map.get("ok", false)):
+				await get_tree().process_frame
+				GameState.content.prepare_map(target_map_id, false)
+		map_preload_queued.erase(target_map_id)
+	map_preload_active = false
 
 func _expand_connected_world(root_map_id: String, generation: int) -> void:
 	await get_tree().process_frame
