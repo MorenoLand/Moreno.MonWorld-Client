@@ -1,6 +1,7 @@
 class_name OpenMMOContent
 extends RefCounted
 
+const ROM_PROFILE_SCRIPT: GDScript = preload("res://scripts/content/rom_profile.gd")
 const ANIMATION_PHASE_COUNT: int = 40
 
 const SCHEMA_VERSION: int = 1
@@ -101,7 +102,7 @@ static func from_rom_bytes(data: PackedByteArray) -> Dictionary:
 	var header: Dictionary = _read_gba_header(data)
 	if header.is_empty():
 		return {"ok": false, "error": "ROM is too small to contain a valid GBA header"}
-	var source_profile: Dictionary = OpenMMORomProfile.from_header(header)
+	var source_profile: Dictionary = ROM_PROFILE_SCRIPT.from_header(header)
 	if source_profile.is_empty():
 		return {"ok": false, "error": "unsupported GBA game code %s" % str(header.get("game_code", ""))}
 	if bool(source_profile.get("supports_map_rendering", false)) and not _has_map_layout(data, source_profile):
