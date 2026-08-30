@@ -3,6 +3,7 @@ extends RefCounted
 
 const SAMPLE_RATE: int = 13379
 const M4A_VBLANK_RATE: float = 59.7275
+const M4A_DIV_FREQ: float = 627.0
 const MAX_RENDER_SECONDS: float = 60.0
 const MAX_TRACK_COMMANDS: int = 12000
 const MAX_TRACK_EVENTS: int = 1600
@@ -641,7 +642,7 @@ func _render_event(mix: PackedFloat32Array, frame_count: int, data: PackedByteAr
 			phase_step = 1.0
 		else:
 			var frequency_fixed: int = _midi_key_to_freq(wave, note_key, fine_adjust)
-			phase_step = float(frequency_fixed) * float(SAMPLE_RATE) / 8388608.0
+			phase_step = float(frequency_fixed) * M4A_DIV_FREQ / 8388608.0
 	phase = float(mix_start - start_frame) * phase_step
 	for frame in range(mix_start, mix_end):
 		var local_frame: int = frame - start_frame
