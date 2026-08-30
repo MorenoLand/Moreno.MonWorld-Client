@@ -11,6 +11,13 @@ func _run() -> void:
 	GameState.battle_state = initial.duplicate(true)
 	var battle: Control = BATTLE_SCRIPT.new()
 	get_tree().root.add_child(battle)
+	var log_view: RichTextLabel = battle.get("log_view") as RichTextLabel
+	if log_view == null or not log_view.scroll_active:
+		_fail(battle, previous_state, "battle log was not configured for manual scrolling")
+		return
+	if str(battle.call("_waiting_text")) != "Waiting for FOEMON...":
+		_fail(battle, previous_state, "battle waiting prompt did not name the opponent")
+		return
 	if not bool(battle.call("_is_attacker_motion_move", 39, {"name": "TAILWHIP"})):
 		_fail(battle, previous_state, "Tail Whip was not classified as attacker-only motion")
 		return

@@ -33,5 +33,22 @@ func _init() -> void:
 		push_error("explicit scripted NPC re-add was discarded")
 		quit(1)
 		return
+	world.set("removed_npc_entities", {"pallet-oaks-lab": {"7004": true}})
+	world.set("npc_entity_maps", {"7004": "pallet-oaks-lab"})
+	world.call("_on_story_state_resynced", {})
+	if not (world.get("removed_npc_entities") as Dictionary).is_empty() or not (world.get("npc_entity_maps") as Dictionary).is_empty():
+		push_error("authoritative story resync did not invalidate stale entity removals")
+		quit(1)
+		return
+	world.call("_on_entity_update", {"remove_entity_id": 7004})
+	if not (world.get("removed_npc_entities") as Dictionary).is_empty():
+		push_error("late pre-reset entity removal repopulated the stale-removal cache")
+		quit(1)
+		return
+	world.call("_on_entity_update", {"player": npc, "spawn": true, "map_load_spawn": true})
+	if not (world.get("entities") as Dictionary).has("7004"):
+		push_error("NPC did not respawn after authoritative story reset")
+		quit(1)
+		return
 	world.free()
 	quit(0)

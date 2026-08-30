@@ -9,7 +9,9 @@
 ## Multiplayer
 
 - Add presence, reconnect, interest management, moderation UX, and production observability.
-- Add server-driven battle sessions with 1v1 first and side/slot-based team expansion afterward.
+- Continue battle client parity for move effects, status, bag and Pokémon selection, whiteout, and result flow.
+- Complete follower and scripted-scene presentation parity, including ROM-driven sprites and movement timing.
+- Remove first-load and map-transition stalls through staged, non-blocking map and asset preparation.
 
 ## Content tooling
 

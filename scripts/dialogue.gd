@@ -25,6 +25,8 @@ var screen_anchor: Vector2 = Vector2(-1.0, -1.0)
 var actor_anchored: bool = false
 var layout_in_progress: bool = false
 var choice_active: bool = false
+var pokemon_preview: TextureRect
+var pokemon_preview_species_id: int = 0
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -62,6 +64,21 @@ func _ready() -> void:
 	arrow_row.add_child(arrow_label)
 	visible = false
 	set_process(false)
+	var preview_parent: Node = get_parent()
+	if preview_parent != null:
+		pokemon_preview = TextureRect.new()
+		pokemon_preview.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		pokemon_preview.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		pokemon_preview.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		pokemon_preview.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		pokemon_preview.z_index = z_index + 1
+		pokemon_preview.visible = false
+		preview_parent.add_child(pokemon_preview)
+	resized.connect(_position_pokemon_preview)
+
+func _exit_tree() -> void:
+	if is_instance_valid(pokemon_preview):
+		pokemon_preview.queue_free()
 
 func _panel_height() -> float:
 	if not choice_active:
@@ -99,11 +116,47 @@ func _layout_panel() -> void:
 		offset_top = -panel_height - 88.0
 		offset_bottom = -88.0
 	layout_in_progress = false
+	_position_pokemon_preview()
+
+func set_pokemon_preview(species_id: int) -> void:
+	pokemon_preview_species_id = species_id
+	if pokemon_preview == null:
+		return
+	pokemon_preview.texture = null
+	if species_id > 0 and GameState.content != null:
+		var result: Dictionary = GameState.content.battle_pokemon_sprite(species_id, false)
+		if bool(result.get("ok", false)):
+			pokemon_preview.texture = result.get("texture") as Texture2D
+	pokemon_preview.visible = open_state and pokemon_preview.texture != null
+	_position_pokemon_preview()
+
+func clear_pokemon_preview() -> void:
+	pokemon_preview_species_id = 0
+	if pokemon_preview != null:
+		pokemon_preview.texture = null
+		pokemon_preview.visible = false
+
+func _position_pokemon_preview() -> void:
+	if pokemon_preview == null or not open_state or pokemon_preview.texture == null:
+		if pokemon_preview != null:
+			pokemon_preview.visible = false
+		return
+	var preview_size: Vector2 = Vector2(128.0, 128.0)
+	var viewport_size: Vector2 = get_viewport_rect().size
+	var panel_rect: Rect2 = get_global_rect()
+	var left: float = panel_rect.position.x + (panel_rect.size.x - preview_size.x) * 0.5
+	var top: float = panel_rect.position.y - preview_size.y - 6.0
+	left = clampf(left, 8.0, maxf(viewport_size.x - preview_size.x - 8.0, 8.0))
+	top = clampf(top, 8.0, maxf(viewport_size.y - preview_size.y - 8.0, 8.0))
+	pokemon_preview.size = preview_size
+	pokemon_preview.global_position = Vector2(left, top)
+	pokemon_preview.visible = true
 
 func show_text(value: String, suppress_action: bool = false) -> void:
 	show_pages([value], suppress_action)
 
 func show_pages(values: Array, suppress_action: bool = false, anchor: Vector2 = Vector2(-1.0, -1.0)) -> void:
+	clear_pokemon_preview()
 	_clear_choices()
 	pages = []
 	for value in values:
@@ -179,6 +232,7 @@ func close_dialogue() -> void:
 	visible = false
 	set_process(false)
 	_clear_choices()
+	clear_pokemon_preview()
 	closed.emit()
 
 func _process(delta: float) -> void:

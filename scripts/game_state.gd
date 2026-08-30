@@ -17,6 +17,7 @@ signal connection_error(message: String)
 signal login_completed(result: Dictionary)
 signal game_connection_completed(result: Dictionary)
 signal story_state_changed(state: Dictionary)
+signal story_state_resynced(state: Dictionary)
 
 const SESSION_SCRIPT = preload("res://scripts/net/session.gd")
 const LOGIN_PROTOCOL_SCRIPT = preload("res://scripts/net/login_protocol.gd")
@@ -735,7 +736,9 @@ func _apply_local_player_state(state: Dictionary) -> void:
 	current_character["story_flags"] = story_flags.duplicate(true)
 	current_character["story_variables"] = story_variables.duplicate(true)
 	_update_character_list_entry()
-	story_state_changed.emit(_story_state_snapshot())
+	var story_snapshot: Dictionary = _story_state_snapshot()
+	story_state_changed.emit(story_snapshot)
+	story_state_resynced.emit(story_snapshot)
 	character_state_changed.emit(current_character.duplicate(true))
 
 func _apply_character_updates(updates: Dictionary) -> void:

@@ -47,6 +47,7 @@ var map_prepare_jobs: Dictionary = {}
 var map_preload_queue: Array[String] = []
 var map_preload_queued: Dictionary = {}
 var map_preload_active: bool = false
+var ignore_stale_entity_removals: bool = false
 
 func _ready() -> void:
 	set_process_input(true)
@@ -63,6 +64,7 @@ func _ready() -> void:
 	GameState.battle_event_received.connect(_on_battle_event)
 	GameState.character_state_changed.connect(_on_character_state_changed)
 	GameState.story_state_changed.connect(_on_story_state_changed)
+	GameState.story_state_resynced.connect(_on_story_state_resynced)
 	GameState.shop_catalog_received.connect(_on_shop_catalog)
 	_build_ui()
 	if not GameState.pending_map_load.is_empty():
@@ -272,6 +274,7 @@ func _on_map_load(value: Dictionary) -> void:
 	GameState.call_deferred("complete_map_load", str(value.get("key", "")))
 	transition_map_ready = true
 	_try_reveal_screen_transition()
+	ignore_stale_entity_removals = false
 
 func _load_map_texture(map_id: String, expected_width: int = 0, expected_height: int = 0) -> bool:
 	if GameState.content == null or map_id.is_empty():
@@ -431,7 +434,7 @@ func _on_entity_update(value: Dictionary) -> void:
 				if stored_value is Dictionary and int((stored_value as Dictionary).get("entity_id", (stored_value as Dictionary).get("character_id", 0))) == removed_entity_id:
 					removed_map_id = str((stored_value as Dictionary).get("map_id", ""))
 					break
-		if not removed_map_id.is_empty():
+		if not removed_map_id.is_empty() and not ignore_stale_entity_removals:
 			var removed_for_map: Dictionary = removed_npc_entities.get(removed_map_id, {}).duplicate()
 			removed_for_map[removed_key] = true
 			removed_npc_entities[removed_map_id] = removed_for_map
@@ -608,6 +611,12 @@ func _on_character_state_changed(value: Dictionary) -> void:
 func _on_story_state_changed(_value: Dictionary) -> void:
 	_sync_map_entities()
 
+func _on_story_state_resynced(_value: Dictionary) -> void:
+	removed_npc_entities.clear()
+	npc_entity_maps.clear()
+	ignore_stale_entity_removals = true
+	_sync_map_entities()
+
 func _on_shop_catalog(catalog: Dictionary) -> void:
 	if dialogue_overlay != null and dialogue_overlay.is_open():
 		dialogue_overlay.close_dialogue()
@@ -751,6 +760,7 @@ func _on_dialog_action_received(action: Dictionary) -> void:
 		pages = dialogue.get("pages", []) if not dialogue.is_empty() else []
 	if pages.is_empty():
 		pages = ["Dialogue text 0x%08X is unavailable in the selected ROM." % text_id]
+	var preview_species: int = _dialogue_preview_species(action, pages)
 	pages = _resolve_dialogue_pages(pages)
 	var actor: Dictionary = {}
 	var entity_id: int = int(action.get("entity_id", -1))
@@ -768,7 +778,28 @@ func _on_dialog_action_received(action: Dictionary) -> void:
 		dialogue_overlay.show_pages(pages, false, anchor)
 	else:
 		dialogue_overlay.show_choice(pages, choices, false, anchor)
+	dialogue_overlay.set_pokemon_preview(preview_species)
 	audio.play_effect("dialogue")
+
+func _dialogue_preview_species(action: Dictionary, pages: Array) -> int:
+	var args_value: Variant = action.get("message_args", [])
+	if args_value is Array:
+		for arg_value in args_value as Array:
+			if not arg_value is Dictionary:
+				continue
+			var arg: Dictionary = arg_value
+			if str(arg.get("tag", "")) == "pokemon_species":
+				return int(arg.get("species_id", 0))
+	if int(action.get("action_type", -1)) != 0x05:
+		return 0
+	for species_id in [1, 4, 7]:
+		var species_name: String = _pokemon_choice_name(species_id).to_upper()
+		if species_name.is_empty():
+			continue
+		for page_value in pages:
+			if str(page_value).to_upper().contains(species_name):
+				return species_id
+	return 0
 
 func _server_dialogue_choices(action_type: int, detail_value: Variant) -> Array:
 	if action_type == 0x05:

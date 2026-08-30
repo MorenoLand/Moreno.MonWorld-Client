@@ -34,8 +34,11 @@ var release_glow_texture: Texture2D
 var state: Dictionary = {}
 var selection_mode: String = ""
 var input_locked: bool = true
+var log_scroll_following: bool = true
+var log_scroll_adjusting: bool = false
 
 func _ready() -> void:
+	set_process_unhandled_input(true)
 	if not GameState.battle_event_received.is_connected(_on_battle_event):
 		GameState.battle_event_received.connect(_on_battle_event)
 	_build_ui()
@@ -132,10 +135,11 @@ func _build_ui() -> void:
 	log_view = RichTextLabel.new()
 	log_view.bbcode_enabled = false
 	log_view.fit_content = false
-	log_view.scroll_active = false
+	log_view.scroll_active = true
 	log_view.custom_minimum_size = Vector2(0.0, 72.0)
 	log_view.add_theme_font_size_override("normal_font_size", 13)
 	log_panel.add_child(log_view)
+	log_view.get_v_scroll_bar().value_changed.connect(_on_log_scroll_changed)
 	var action_panel := PanelContainer.new()
 	action_panel.anchor_left = 0.025
 	action_panel.anchor_top = 0.74
@@ -277,6 +281,34 @@ func _return_to_world() -> void:
 		return
 	exit_requested.emit()
 
+func _unhandled_input(event: InputEvent) -> void:
+	if not event is InputEventKey:
+		return
+	var key_event: InputEventKey = event as InputEventKey
+	if not key_event.pressed or key_event.echo or key_event.keycode not in [KEY_ESCAPE, KEY_B, KEY_BACKSPACE]:
+		return
+	get_viewport().set_input_as_handled()
+	if not selection_mode.is_empty() and not bool(state.get("force_switch", false)):
+		_cancel_selection()
+	elif bool(state.get("battle_complete", false)):
+		_return_to_world()
+
+func _waiting_for_name() -> String:
+	var explicit_name: String = str(state.get("opponent_name", state.get("trainer_name", ""))).strip_edges()
+	if not explicit_name.is_empty():
+		return explicit_name
+	if bool(state.get("trainer", false)):
+		return "the opposing trainer"
+	var party_value: Variant = state.get("opponent_party", [])
+	var party: Array = party_value as Array if party_value is Array else []
+	var opponent: Dictionary = _active_mon(party, int(state.get("opponent_active_slot", -1)))
+	if not opponent.is_empty():
+		return _battle_mon_name(opponent, true)
+	return "the opponent"
+
+func _waiting_text() -> String:
+	return "Waiting for %s..." % _waiting_for_name()
+
 func _render_state() -> void:
 	if state.is_empty():
 		state_label.text = "Waiting for server battle state..."
@@ -289,7 +321,7 @@ func _render_state() -> void:
 	var opponent_name: String = _battle_mon_name(opponent, true)
 	var player_name: String = _battle_mon_name(player, false)
 	var phase: String = "Complete" if bool(state.get("battle_complete", false)) else "Active"
-	var prompt: String = "Choose an action" if bool(state.get("can_act", false)) and not input_locked else "Waiting for server"
+	var prompt: String = "Choose an action" if bool(state.get("can_act", false)) and not input_locked else _waiting_text()
 	state_label.text = "%s  |  %s vs %s  |  %s" % [phase, opponent_name, player_name, prompt]
 	_update_mon_card(opponent_name_label, opponent_level_label, opponent_hp_bar, opponent_hp_label, opponent, "opponent")
 	_update_mon_card(player_name_label, player_level_label, player_hp_bar, player_hp_label, player, "player")
@@ -426,7 +458,7 @@ func _render_actions() -> void:
 		return
 	if input_locked or not bool(state.get("can_act", false)):
 		var waiting := Label.new()
-		waiting.text = "Waiting for the server..."
+		waiting.text = _waiting_text()
 		action_box.add_child(waiting)
 		return
 	if bool(state.get("force_switch", false)):
@@ -580,7 +612,25 @@ func _send_battle_action(action: int, value: int, label: String) -> void:
 
 func _append_log(message: String) -> void:
 	if log_view != null:
+		var bar: VScrollBar = log_view.get_v_scroll_bar()
+		if bar.value >= bar.max_value - 2.0:
+			log_scroll_following = true
 		log_view.append_text(message + "\n")
+		call_deferred("_scroll_log_to_bottom")
+
+func _on_log_scroll_changed(value: float) -> void:
+	if log_scroll_adjusting or log_view == null:
+		return
+	var bar: VScrollBar = log_view.get_v_scroll_bar()
+	log_scroll_following = value >= bar.max_value - 2.0
+
+func _scroll_log_to_bottom() -> void:
+	if log_view == null or not log_scroll_following:
+		return
+	var bar: VScrollBar = log_view.get_v_scroll_bar()
+	log_scroll_adjusting = true
+	bar.value = bar.max_value
+	log_scroll_adjusting = false
 
 func _trigger_flash(color: Color = Color(1.0, 1.0, 1.0, 0.82)) -> void:
 	if flash_overlay == null:
