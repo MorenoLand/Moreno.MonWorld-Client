@@ -8,6 +8,10 @@
 
 ## Multiplayer
 
+### Current client progress
+
+- Battle keyboard selection, scrolling logs, named item metadata, and post-trainer dialogue handoff are implemented.
+
 - Add presence, reconnect, interest management, moderation UX, and production observability.
 - Continue battle client parity for move effects, status, bag and Pokémon selection, whiteout, and result flow.
 - Complete follower and scripted-scene presentation parity, including ROM-driven sprites and movement timing.
