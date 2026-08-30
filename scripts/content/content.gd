@@ -14,6 +14,9 @@ const ITEM_NAME_LENGTH: int = 14
 const ITEM_RECORD_ID_OFFSET: int = 14
 const ITEM_TABLE_MIN_RECORDS: int = 300
 const ITEM_TABLE_MAX_RECORDS: int = 512
+const GLOBAL_ITEM_CACHE_NAME: String = "items-global"
+const GLOBAL_ITEM_CACHE_SCHEMA_VERSION: int = 1
+const GLOBAL_ITEM_DATA_ENVIRONMENTS: Array = ["OPENMMOGO_ITEM_DATA"]
 const SPECIES_NAME_LENGTH: int = 11
 const SPECIES_TABLE_MAX_RECORDS: int = 512
 const GBA_TITLE_OFFSET: int = 0xA0
@@ -79,6 +82,8 @@ var battle_item_table_cache: Dictionary = {}
 var battle_item_table_scanned: bool = false
 var battle_item_catalog: Dictionary = {}
 var battle_item_catalog_loaded: bool = false
+var battle_global_item_catalog: Dictionary = {}
+var battle_global_item_catalog_loaded: bool = false
 var battle_move_info_cache: Dictionary = {}
 var battle_animation_sheet_cache: Dictionary = {}
 var battle_animation_plan_cache: Dictionary = {}
@@ -469,7 +474,7 @@ func battle_item_info(item_id: int) -> Dictionary:
 	var internal_id: int = item_id - 5000 if item_id >= 5000 else item_id
 	var info: Dictionary = {"item_id": item_id, "internal_id": internal_id, "name": "", "price": 0, "pocket": 0, "category": "items"}
 	var catalog: Dictionary = _battle_item_catalog()
-	var cached_info: Variant = catalog.get(str(internal_id), catalog.get(str(item_id), null))
+	var cached_info: Variant = catalog.get(cache_key, catalog.get(str(internal_id), null))
 	if cached_info is Dictionary and not str((cached_info as Dictionary).get("name", "")).strip_edges().is_empty() and str((cached_info as Dictionary).get("name", "")).strip_edges().to_lower() != "item":
 		info = (cached_info as Dictionary).duplicate(true)
 		info["item_id"] = item_id
@@ -487,35 +492,128 @@ func battle_item_info(item_id: int) -> Dictionary:
 			battle_item_info_cache[cache_key] = info
 	return info
 
+func _battle_global_item_catalog() -> Dictionary:
+	if battle_global_item_catalog_loaded:
+		return battle_global_item_catalog
+	var cached: Dictionary = OpenMMOStorage.read_strings_cache(string_catalog_id(), GLOBAL_ITEM_CACHE_NAME)
+	var cached_items: Variant = cached.get("items", null)
+	var data_dir: String = _global_item_data_directory()
+	var source_signature: String = _global_item_data_signature(data_dir) if not data_dir.is_empty() else ""
+	if int(cached.get("schema_version", 0)) == GLOBAL_ITEM_CACHE_SCHEMA_VERSION and cached_items is Dictionary and (source_signature.is_empty() or str(cached.get("source_signature", "")) == source_signature):
+		battle_global_item_catalog = cached_items as Dictionary
+		battle_global_item_catalog_loaded = true
+		return battle_global_item_catalog
+	if data_dir.is_empty():
+		battle_global_item_catalog = cached_items as Dictionary if cached_items is Dictionary else {}
+		battle_global_item_catalog_loaded = true
+		return battle_global_item_catalog
+	var names_value: Variant = JSON.parse_string(FileAccess.get_file_as_string(data_dir.path_join("item_names.json")))
+	var items_value: Variant = JSON.parse_string(FileAccess.get_file_as_string(data_dir.path_join("items.json")))
+	if not names_value is Array:
+		battle_global_item_catalog_loaded = true
+		return {}
+	var prices: Dictionary = {}
+	if items_value is Array:
+		for item_value in items_value:
+			if item_value is Dictionary:
+				var item: Dictionary = item_value
+				var index: int = int(item.get("index", -1))
+				if index >= 0:
+					prices[str(index)] = int(item.get("price", 0))
+	var catalog: Dictionary = {}
+	for index in (names_value as Array).size():
+		var name: String = _global_item_name(str((names_value as Array)[index]))
+		if _global_item_name_is_placeholder(name):
+			continue
+		var item_id: int = 5000 + index
+		catalog[str(item_id)] = {"item_id": item_id, "internal_id": index, "name": name, "price": int(prices.get(str(index), 0)), "pocket": 0, "category": "items"}
+	battle_global_item_catalog = catalog
+	battle_global_item_catalog_loaded = true
+	OpenMMOStorage.write_strings_cache(string_catalog_id(), GLOBAL_ITEM_CACHE_NAME, {"schema_version": GLOBAL_ITEM_CACHE_SCHEMA_VERSION, "content_id": content_id(), "catalog_id": string_catalog_id(), "source_signature": source_signature, "items": catalog})
+	return battle_global_item_catalog
+
+func _global_item_data_directory() -> String:
+	for environment_name in GLOBAL_ITEM_DATA_ENVIRONMENTS:
+		var configured_path: String = OS.get_environment(str(environment_name)).strip_edges()
+		if configured_path.is_empty():
+			continue
+		var data_dir: String = configured_path.get_base_dir() if configured_path.to_lower().ends_with("item_names.json") else configured_path
+		if FileAccess.file_exists(data_dir.path_join("item_names.json")) and FileAccess.file_exists(data_dir.path_join("items.json")):
+			return data_dir
+	return ""
+
+func _global_item_data_signature(data_dir: String) -> String:
+	if data_dir.is_empty():
+		return ""
+	var names_sha1: String = _file_sha1(data_dir.path_join("item_names.json"))
+	var items_sha1: String = _file_sha1(data_dir.path_join("items.json"))
+	return "%s:%s" % [names_sha1, items_sha1] if not names_sha1.is_empty() and not items_sha1.is_empty() else ""
+
+func _file_sha1(path: String) -> String:
+	var file: FileAccess = FileAccess.open(path, FileAccess.READ)
+	if file == null:
+		return ""
+	var context: HashingContext = HashingContext.new()
+	var result: String = ""
+	if context.start(HashingContext.HASH_SHA1) == OK:
+		context.update(file.get_buffer(int(file.get_length())))
+		result = context.finish().hex_encode()
+	file.close()
+	return result
+
+func _global_item_name(value: String) -> String:
+	var name: String = value.strip_edges()
+	if name.find("Ã") < 0 and name.find("Â") < 0:
+		return name.to_upper()
+	var bytes: PackedByteArray = PackedByteArray()
+	for index in name.length():
+		var codepoint: int = name.unicode_at(index)
+		if codepoint > 255:
+			return name.to_upper()
+		bytes.append(codepoint)
+	var decoded: String = bytes.get_string_from_utf8().strip_edges()
+	return decoded.to_upper() if not decoded.is_empty() else name.to_upper()
+
+func _global_item_name_is_placeholder(name: String) -> bool:
+	return name.is_empty() or name in ["NONE", "?????", "???", "-", "?"]
+
 func _battle_item_catalog() -> Dictionary:
 	if battle_item_catalog_loaded:
 		return battle_item_catalog
+	var catalog: Dictionary = _battle_global_item_catalog().duplicate(true)
+	var local_catalog: Dictionary = {}
 	if rom_data.is_empty():
-		return {}
+		battle_item_catalog = catalog
+		battle_item_catalog_loaded = true
+		return battle_item_catalog
 	if not rom_sha1.is_empty():
 		var cached: Dictionary = OpenMMOStorage.read_strings_cache(string_catalog_id(), "items-%s" % rom_sha1)
 		var cached_items: Variant = cached.get("items", null)
 		if str(cached.get("rom_sha1", "")) == rom_sha1 and int(cached.get("schema_version", 0)) == 1 and cached_items is Dictionary:
-			battle_item_catalog = cached_items as Dictionary
+			local_catalog = cached_items as Dictionary
+			for key in local_catalog:
+				catalog[key] = local_catalog[key]
+			battle_item_catalog = catalog
 			battle_item_catalog_loaded = true
 			return battle_item_catalog
 	var table: Dictionary = _battle_item_table()
 	var table_offset: int = int(table.get("offset", -1))
 	var item_count: int = int(table.get("count", 0))
 	if table_offset < 0 or item_count <= 0:
+		battle_item_catalog = catalog
 		battle_item_catalog_loaded = true
-		return {}
-	var catalog: Dictionary = {}
+		return battle_item_catalog
 	for internal_id in range(item_count):
 		if not _item_table_record_matches_index(table_offset, internal_id):
 			continue
 		var info: Dictionary = _battle_item_info_from_record(table_offset, internal_id)
 		if not str(info.get("name", "")).strip_edges().is_empty():
+			local_catalog[str(internal_id)] = info
 			catalog[str(internal_id)] = info
 	battle_item_catalog = catalog
 	battle_item_catalog_loaded = true
 	if not rom_sha1.is_empty():
-		OpenMMOStorage.write_strings_cache(string_catalog_id(), "items-%s" % rom_sha1, {"schema_version": 1, "content_id": content_id(), "catalog_id": string_catalog_id(), "rom_sha1": rom_sha1, "record_size": ITEM_RECORD_SIZE, "items": catalog})
+		OpenMMOStorage.write_strings_cache(string_catalog_id(), "items-%s" % rom_sha1, {"schema_version": 1, "content_id": content_id(), "catalog_id": string_catalog_id(), "rom_sha1": rom_sha1, "record_size": ITEM_RECORD_SIZE, "items": local_catalog})
 	return battle_item_catalog
 
 func _battle_item_table() -> Dictionary:

@@ -4,7 +4,7 @@ func _init() -> void:
 	call_deferred("_run")
 
 func _run() -> void:
-	var dialogue: MonWorldDialogue = MonWorldDialogue.new()
+	var dialogue: OpenMMODialogue = OpenMMODialogue.new()
 	root.add_child(dialogue)
 	await process_frame
 	dialogue.show_pages(["First page", "Second page"])
@@ -12,7 +12,7 @@ func _run() -> void:
 		_fail("dialogue did not start in typing state")
 		return
 	dialogue.show_pages(["Anchored page"], false, Vector2(320.0, 240.0))
-	if not is_equal_approx(dialogue.size.x, MonWorldDialogue.PANEL_WIDTH) or dialogue.layout_in_progress:
+	if not is_equal_approx(dialogue.size.x, OpenMMODialogue.PANEL_WIDTH) or dialogue.layout_in_progress:
 		_fail("actor-anchored dialogue layout recursed or changed its own viewport width")
 		return
 	dialogue.show_pages(["First page", "Second page"])

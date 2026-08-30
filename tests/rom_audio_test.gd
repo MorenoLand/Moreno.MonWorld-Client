@@ -5,16 +5,16 @@ func _init() -> void:
 	if not _test_wave_decoder(decoder):
 		quit(1)
 		return
-	var path: String = OS.get_environment("MONWORLD_ROM")
+	var path: String = OS.get_environment("OPENMMOGO_ROM")
 	if path.is_empty():
 		quit(0)
 		return
-	var result: Dictionary = MonWorldContent.from_rom_path(path)
+	var result: Dictionary = OpenMMOContent.from_rom_path(path)
 	if not bool(result.get("ok", false)):
 		push_error(str(result.get("error", "content load failed")))
 		quit(1)
 		return
-	var content: MonWorldContent = result.get("content") as MonWorldContent
+	var content: OpenMMOContent = result.get("content") as OpenMMOContent
 	var prepared: Dictionary = decoder.prepare_song(content, 300)
 	if prepared.is_empty():
 		push_error("ROM audio song 300 could not be prepared: %s" % decoder.last_error)

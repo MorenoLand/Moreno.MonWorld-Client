@@ -44,17 +44,22 @@ func _init() -> void:
 		item_content.rom_data[treecko_offset + position] = treecko_name[position]
 	item_content.battle_tables_scanned = true
 	item_content.battle_table_cache = {"item_table": item_table_offset, "species_name_table": species_table_offset}
-	var potion_info: Dictionary = item_content.battle_item_info(5001)
-	var parcel_info: Dictionary = item_content.battle_item_info(5349)
-	var last_info: Dictionary = item_content.battle_item_info(5374)
+	var potion_info: Dictionary = item_content.battle_item_info(1)
+	var parcel_info: Dictionary = item_content.battle_item_info(349)
+	var last_info: Dictionary = item_content.battle_item_info(374)
 	var parcel_entry: Dictionary = {"entity_id": (5004 << 16) | 0x5000, "front_sprite_id": 5349, "back_sprite_id": 1}
 	var charmander: String = item_content.battle_pokemon_name(4)
 	var treecko: String = item_content.battle_pokemon_name(252)
-	if item_content.battle_item_id(parcel_entry) != 5349 or str(potion_info.get("name", "")) != "POTION" or str(parcel_info.get("name", "")) != "OAK'S PARCEL" or str(parcel_info.get("category", "")) != "key_item" or str(last_info.get("name", "")) != "A" or charmander != "CHARMANDER" or treecko != "TREECKO":
+	var global_content: OpenMMOContent = OpenMMOContent.new()
+	global_content.battle_item_catalog = {"5021": {"item_id": 5021, "internal_id": 21, "name": "AWAKENING", "price": 250, "pocket": 1, "category": "items"}, "5459": {"item_id": 5459, "internal_id": 459, "name": "PARCEL", "price": 0, "pocket": 0, "category": "items"}}
+	global_content.battle_item_catalog_loaded = true
+	var global_awaken: Dictionary = global_content.battle_item_info(5021)
+	var global_parcel: Dictionary = global_content.battle_item_info(5459)
+	if item_content.battle_item_id(parcel_entry) != 5349 or str(potion_info.get("name", "")) != "POTION" or str(parcel_info.get("name", "")) != "OAK'S PARCEL" or str(parcel_info.get("category", "")) != "key_item" or str(last_info.get("name", "")) != "A" or str(global_awaken.get("name", "")) != "AWAKENING" or str(global_parcel.get("name", "")) != "PARCEL" or charmander != "CHARMANDER" or treecko != "TREECKO":
 		push_error("ROM item table catalog did not resolve every item through the dynamic reader")
 		quit(1)
 		return
-	var path: String = OS.get_environment("MONWORLD_ROM")
+	var path: String = OS.get_environment("OPENMMOGO_ROM")
 	var args: PackedStringArray = OS.get_cmdline_user_args()
 	var index: int = 0
 	while index < args.size():
@@ -137,8 +142,8 @@ func _init() -> void:
 			push_error("additional map render failed for %s: %s" % [extra_map_id, str(extra_result.get("error", "unknown error"))])
 			quit(1)
 			return
-	var preview_phase: int = clampi(int(OS.get_environment("MONWORLD_PREVIEW_PHASE")), 0, 39)
-	var preview_map: String = OS.get_environment("MONWORLD_PREVIEW_MAP")
+	var preview_phase: int = clampi(int(OS.get_environment("OPENMMOGO_PREVIEW_PHASE")), 0, 39)
+	var preview_map: String = OS.get_environment("OPENMMOGO_PREVIEW_MAP")
 	for expected_map in [{"id": "pallet-town", "width": 384, "height": 320}, {"id": "route-1", "width": 384, "height": 640}, {"id": "viridian-city", "width": 768, "height": 640}]:
 		var map_id: String = str(expected_map.get("id", ""))
 		var render_result: Dictionary = content.render_map(map_id, preview_phase)
@@ -161,7 +166,7 @@ func _init() -> void:
 			push_error("map render produced no palette variation for %s" % map_id)
 			quit(1)
 			return
-		var preview_path: String = OS.get_environment("MONWORLD_PREVIEW_PNG")
+		var preview_path: String = OS.get_environment("OPENMMOGO_PREVIEW_PNG")
 		var should_save_preview: bool = map_id == "pallet-town" if preview_map.is_empty() else map_id == preview_map
 		if not preview_path.is_empty() and should_save_preview:
 			image.save_png(preview_path)

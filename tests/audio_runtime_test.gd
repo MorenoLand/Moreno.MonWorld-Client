@@ -1,6 +1,6 @@
 extends Node
 
-var audio: MonWorldAudio
+var audio: OpenMMOAudio
 var elapsed: float = 0.0
 var started_at: int = 0
 var max_frame_msec: float = 0.0
@@ -9,17 +9,17 @@ var playback_elapsed: float = 0.0
 var playback_max_frame_msec: float = 0.0
 
 func _ready() -> void:
-	var path: String = OS.get_environment("MONWORLD_ROM")
+	var path: String = OS.get_environment("OPENMMOGO_ROM")
 	if path.is_empty():
 		get_tree().quit(0)
 		return
-	var result: Dictionary = MonWorldContent.from_rom_path(path)
+	var result: Dictionary = OpenMMOContent.from_rom_path(path)
 	if not bool(result.get("ok", false)):
 		push_error(str(result.get("error", "content load failed")))
 		get_tree().quit(1)
 		return
-	var content: MonWorldContent = result.get("content") as MonWorldContent
-	audio = MonWorldAudio.new()
+	var content: OpenMMOContent = result.get("content") as OpenMMOContent
+	audio = OpenMMOAudio.new()
 	add_child(audio)
 	started_at = Time.get_ticks_msec()
 	audio.play_map_music(content, "pallet-town")
@@ -41,7 +41,7 @@ func _process(delta: float) -> void:
 		var rendered_frames: int = audio.music_rendered_frames
 		var total_frames: int = audio.music_render_total_frames
 		audio.music_render_mutex.unlock()
-		var maximum_buffered_frames: int = int((playback_elapsed + MonWorldAudio.MUSIC_BUFFER_LENGTH + 2.0) * MonWorldAudio.MUSIC_SAMPLE_RATE)
+		var maximum_buffered_frames: int = int((playback_elapsed + OpenMMOAudio.MUSIC_BUFFER_LENGTH + 2.0) * OpenMMOAudio.MUSIC_SAMPLE_RATE)
 		var bounded_render: bool = total_frames > 0 and rendered_frames <= maximum_buffered_frames
 		print("ROM map music sustained for 6 seconds; skips=%d; playback_max_frame=%.2f ms; rendered=%d/%d" % [skips, playback_max_frame_msec, rendered_frames, total_frames])
 		audio.stop_music()

@@ -3,7 +3,7 @@ extends SceneTree
 const CONTENT_SCRIPT: GDScript = preload("res://scripts/content/content.gd")
 
 func _init() -> void:
-	var rom_path: String = OS.get_environment("MONWORLD_ROM")
+	var rom_path: String = OS.get_environment("OPENMMOGO_ROM")
 	if rom_path.is_empty():
 		quit(0)
 		return

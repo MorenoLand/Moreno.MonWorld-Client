@@ -11,7 +11,7 @@ func _run() -> void:
 	var password: String = OS.get_environment("OPENMMOGO_PASSWORD")
 	var rom_path: String = OS.get_environment("OPENMMOGO_ROM")
 	if OS.get_environment("OPENMMOGO_USE_SAVED_CREDENTIALS") == "1" and (username.is_empty() or password.is_empty()):
-		var saved: Dictionary = MonWorldAuthStore.load_saved()
+		var saved: Dictionary = OpenMMOAuthStore.load_saved()
 		username = str(saved.get("username", ""))
 		password = str(saved.get("password", ""))
 	if endpoint.is_empty():
@@ -20,12 +20,12 @@ func _run() -> void:
 		push_error("Set OPENMMOGO_ROOT_PUBLIC_KEY, OPENMMOGO_USERNAME, OPENMMOGO_PASSWORD, and OPENMMOGO_ROM")
 		get_tree().quit(2)
 		return
-	var local_result: Dictionary = MonWorldContent.from_rom_path(rom_path)
+	var local_result: Dictionary = OpenMMOContent.from_rom_path(rom_path)
 	if not bool(local_result.get("ok", false)):
 		push_error("Local ROM rejected: %s" % str(local_result.get("error", "unknown error")))
 		get_tree().quit(2)
 		return
-	var local_content: MonWorldContent = local_result.get("content")
+	var local_content: OpenMMOContent = local_result.get("content")
 	print("Local ROM accepted as %s" % local_content.content_id())
 	var configure_result: Dictionary = GameState.configure_server(endpoint, public_key_path)
 	if not bool(configure_result.get("ok", false)):

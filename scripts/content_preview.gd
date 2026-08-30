@@ -23,7 +23,7 @@ var preparing_play: bool = false
 
 func _ready() -> void:
 	if content == null:
-		var rom_path: String = OS.get_environment("MONWORLD_ROM")
+		var rom_path: String = OS.get_environment("OPENMMOGO_ROM")
 		if not rom_path.is_empty():
 			var local_result: Dictionary = OpenMMOContent.from_rom_path(rom_path)
 			if bool(local_result.get("ok", false)):

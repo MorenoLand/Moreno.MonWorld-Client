@@ -233,7 +233,7 @@ func _clear_saved_rom() -> void:
 func _choose_web() -> void:
 	_web_callback = JavaScriptBridge.create_callback(_on_web_file)
 	var window := JavaScriptBridge.get_interface("window")
-	window.monworld_content_callback = _web_callback
+	window.openmmogo_content_callback = _web_callback
 	JavaScriptBridge.eval("""
 (function() {
   const input = document.createElement('input');
@@ -248,9 +248,9 @@ func _choose_web() -> void:
       let binary = '';
       const chunk = 0x8000;
       for (let i = 0; i < bytes.length; i += chunk) binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
-      window.monworld_content_callback(file.name, btoa(binary));
+      window.openmmogo_content_callback(file.name, btoa(binary));
     };
-    reader.onerror = function() { window.monworld_content_callback('', ''); };
+    reader.onerror = function() { window.openmmogo_content_callback('', ''); };
     reader.readAsArrayBuffer(file);
   };
   input.click();
